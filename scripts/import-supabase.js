@@ -42,7 +42,10 @@ function checkinFlag(symptoms) {
 }
 
 const doctorId = db.prepare("SELECT id FROM users ORDER BY id LIMIT 1").get()?.id;
-if (!doctorId) { console.error("No doctor account in DB — start the server once first."); process.exit(1); }
+if (!doctorId) {
+  console.error("No doctor account in DB — start the server once first.");
+  if (require.main === module) process.exit(1);
+}
 
 const newPins = [];
 
@@ -175,11 +178,14 @@ async function importConsultBuddy() {
 }
 
 (async () => {
-  await importGlp1();
-  await importConsultBuddy();
+  if (!doctorId) return;
+  // Each source is isolated: a Supabase outage or auth failure logs and moves on,
+  // never crashing the caller (the server runs this at boot when IMPORT_SUPABASE=1).
+  try { await importGlp1(); } catch (e) { console.error("glp1 import failed:", e.message); }
+  try { await importConsultBuddy(); } catch (e) { console.error("Consult-Buddy import failed:", e.message); }
   if (newPins.length) {
     console.log("\n════ NEW PORTAL PINs (shown once — share via WhatsApp) ════");
     for (const p of newPins) console.log(`  ${p.name.padEnd(24)} +${p.mobile.padEnd(15)} PIN: ${p.pin}`);
   }
   console.log("\nImport complete.");
-})();
+})().catch((e) => console.error("Import error:", e.message));
