@@ -88,6 +88,13 @@ function parsePlan(row) {
   };
 }
 
+// Patient-facing plan: strip the doctor's private clinical fields.
+function parsePlanPublic(row) {
+  const p = parsePlan(row);
+  if (!p) return null;
+  return { ...p, clinical_note: undefined, clinical_suggestion: undefined };
+}
+
 function checkinFlag(symptoms) {
   const alerts = [];
   for (const s of presets.SYMPTOMS) {
@@ -142,6 +149,8 @@ route("GET", "/api/presets", (req, res) => {
     phasesWeekly: presets.PK_PHASES_WEEKLY,
     phasesDaily: presets.PK_PHASES_DAILY,
     activityLevels: presets.ACTIVITY_LEVELS,
+    intakeSections: presets.INTAKE_SECTIONS,
+    intakeQuestions: presets.INTAKE_QUESTIONS,
   });
 });
 
@@ -221,11 +230,12 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
   if (dup) return json(res, 409, { error: "A patient with this mobile number already exists.", patientId: dup.id });
   const pin = generatePin();
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(doc.id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
       body.heightCm || null, body.weightKg || null, body.activityLevel || "Sedentary",
-      body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "");
+      body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
+      JSON.stringify(body.intake || {}));
   json(res, 200, { id: Number(r.lastInsertRowid), pin });
 });
 
@@ -239,7 +249,8 @@ route("GET", "/api/patients/:id", (req, res, p) => {
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   const messages = db.prepare("SELECT * FROM messages WHERE patient_id = ? ORDER BY created_at ASC").all(p.id);
   db.prepare("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND sender = 'patient' AND read_at IS NULL").run(p.id);
-  json(res, 200, { patient: { ...patient, pin_hash: undefined }, plans, doses, checkins, messages });
+  const intake = JSON.parse(patient.intake_json || "{}");
+  json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake }, plans, doses, checkins, messages });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
@@ -254,6 +265,7 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }
   }
   if (body.mobile !== undefined) { sets.push("mobile = ?"); vals.push(normMobile(body.mobile)); }
+  if (body.intake !== undefined) { sets.push("intake_json = ?"); vals.push(JSON.stringify(body.intake)); }
   if (!sets.length) return json(res, 400, { error: "Nothing to update." });
   vals.push(p.id);
   db.prepare(`UPDATE patients SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
@@ -280,13 +292,15 @@ route("POST", "/api/plans", async (req, res, _p, body) => {
   const followupDays = body.followupDays ?? 28;
   const r = db.prepare(`INSERT INTO plans
     (patient_id, doctor_id, category, title, medication, dose, route, frequency, half_life_hours,
-     phases_json, instructions, warnings, diet_json, followup_days, next_followup, blood_test, clinical_note)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?)`)
+     phases_json, instructions, warnings, diet_json, followup_days, next_followup, blood_test, clinical_note,
+     clinical_suggestion, supplements)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?,?,?)`)
     .run(body.patientId, doc.id, body.category || "custom", body.title, body.medication,
       body.dose || "", body.route || "injection", body.frequency || "weekly", body.halfLifeHours || null,
       JSON.stringify(body.phases || []), body.instructions || "", body.warnings || "",
       JSON.stringify(body.diet || {}), followupDays, `+${followupDays} days`,
-      body.bloodTest || "none", body.clinicalNote || "");
+      body.bloodTest || "none", body.clinicalNote || "",
+      body.clinicalSuggestion || "", body.supplements || "");
   json(res, 200, { id: Number(r.lastInsertRowid) });
 });
 
@@ -341,7 +355,7 @@ route("POST", "/api/portal/logout", (req, res) => { clearSession(req, res, "pati
 route("GET", "/api/portal/me", (req, res) => {
   const patient = getPatient(req);
   if (!patient) return json(res, 401, { error: "Not signed in." });
-  const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(patient.id).map(parsePlan);
+  const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(patient.id).map(parsePlanPublic);
   const doctor = db.prepare("SELECT name FROM users WHERE id = ?").get(patient.doctor_id);
   json(res, 200, {
     patient: { ...patient, pin_hash: undefined },

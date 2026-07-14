@@ -369,6 +369,15 @@ async function viewPatient(id) {
             <div class="card-title">${icon("clipboard", 19)} Latest check-ins</div>
             ${checkins.slice(0, 6).map((c) => checkinCard(c)).join("") || `<div class="empty">${icon("clipboard", 30)}<p>No check-ins yet.</p></div>`}
           </div>
+          ${intakeSummaryCard(p)}
+          ${activePlan && activePlan.clinical_suggestion ? `
+          <div class="card card-pad">
+            <div class="card-title" style="justify-content:space-between">
+              <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
+              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy</button>
+            </div>
+            <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(activePlan.clinical_suggestion)}</pre>
+          </div>` : ""}
           <div class="card card-pad">
             <div class="card-title">${icon("info", 19)} Clinical notes</div>
             <div style="font-size:13.5px;display:flex;flex-direction:column;gap:8px">
@@ -376,10 +385,13 @@ async function viewPatient(id) {
               <div><b>Medications:</b> ${esc(p.medications || "None recorded")}</div>
               <div><b>Allergies:</b> ${esc(p.allergies || "None recorded")}</div>
               ${p.notes ? `<div><b>Notes:</b> ${esc(p.notes)}</div>` : ""}
+              ${activePlan && activePlan.clinical_note ? `<div><b>Consultation note:</b> ${esc(activePlan.clinical_note)}</div>` : ""}
             </div>
           </div>
         </div>
       </div>`;
+      const recCopy = box.querySelector("#rec-copy");
+      if (recCopy) recCopy.addEventListener("click", async () => { await navigator.clipboard.writeText(activePlan.clinical_suggestion); toast("Clinical record copied"); });
       box.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", async () => {
         if (!confirm("Stop this program? The patient will see it as stopped.")) return;
         await api("PATCH", `/api/plans/${b.dataset.stop}`, { status: "stopped" });
@@ -458,6 +470,26 @@ async function viewPatient(id) {
     }
   }
   paintTab();
+}
+
+// Intake summary card for the patient detail — mirrors Consult-Buddy's intake read-out.
+function intakeSummaryCard(p) {
+  const intake = p.intake || {};
+  const goals = Array.isArray(intake.health_goals) ? intake.health_goals : [];
+  const conditions = Array.isArray(intake.health_conditions) ? intake.health_conditions : [];
+  const rows = [];
+  if (goals.length) rows.push(`<div><b>Health goals:</b> ${goals.map((g) => `<span class="badge badge-cyan">${esc(g)}</span>`).join(" ")}</div>`);
+  if (conditions.length) rows.push(`<div><b>Conditions:</b> ${conditions.map((c) => `<span class="badge badge-amber">${esc(c)}</span>`).join(" ")}</div>`);
+  if (intake.cancer_history && intake.cancer_history !== "No") rows.push(`<div><b>Cancer/tumor history:</b> ${esc(intake.cancer_history)}</div>`);
+  if (intake.previous_glp1 === "Yes") rows.push(`<div><b>Previous GLP-1 use:</b> Yes${intake.previous_glp1__notes ? " — " + esc(intake.previous_glp1__notes) : ""}</div>`);
+  if (intake.is_pregnant === "Yes") rows.push(`<div><b>Pregnant:</b> Yes</div>`);
+  if (intake.is_breastfeeding === "Yes") rows.push(`<div><b>Breastfeeding:</b> Yes</div>`);
+  if (intake.additional_notes) rows.push(`<div><b>Patient notes:</b> ${esc(intake.additional_notes)}</div>`);
+  if (!rows.length) return "";
+  return `<div class="card card-pad">
+    <div class="card-title">${icon("clipboard", 19)} Intake &amp; assessment</div>
+    <div style="font-size:13.5px;display:flex;flex-direction:column;gap:10px">${rows.join("")}</div>
+  </div>`;
 }
 
 function checkinCard(c) {
@@ -539,7 +571,7 @@ function editDoseModal(pl, done) {
 }
 
 // ── consultation wizard ──────────────────────────────────────────
-const WIZ_STEPS = ["Patient", "Program", "Clinical", "Review & publish"];
+const WIZ_STEPS = ["Intake", "Program", "Clinical", "Review & publish"];
 
 async function viewConsult() {
   if (!S.patients.length) { try { S.patients = await api("GET", "/api/patients"); } catch {} }
@@ -547,13 +579,13 @@ async function viewConsult() {
   S.wizard = {
     step: 0,
     existingId: preselect ? Number(preselect) : null,
-    patient: { name: "", mobile: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "" },
+    patient: { name: "", mobile: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     category: "glp1",
     template: null,
     protocol: null,
     medication: "", dose: "", route: "injection", frequency: "weekly", halfLifeHours: null,
     phases: [],
-    instructions: "", warnings: "", bloodTest: "none", followupDays: 28, clinicalNote: "",
+    instructions: "", warnings: "", bloodTest: "none", followupDays: 28, clinicalNote: "", supplements: "",
     diet: {},
   };
   if (preselect) {
@@ -561,6 +593,27 @@ async function viewConsult() {
     if (p) Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "" });
   }
   paintWizard();
+}
+
+// live metrics for the current wizard patient
+function wizMetrics() {
+  return computeMetrics(S.wizard.patient, S.presets.activityLevels);
+}
+
+// Patient Summary panel HTML (BMI/BMR/TDEE/target/protein) — mirrors
+// Consult-Buddy's consultation side panel.
+function patientSummaryHTML(showRx) {
+  const w = S.wizard, m = wizMetrics();
+  const cell = (lbl, val) => `<div class="metric"><b>${val}</b>${lbl}</div>`;
+  const rows = [];
+  if (m.bmi) rows.push(cell(`BMI · ${esc(m.bmiCat)}`, m.bmi));
+  if (m.bmr) rows.push(cell("BMR", m.bmr + " kcal"));
+  if (m.tdee) rows.push(cell("TDEE", m.tdee + " kcal"));
+  if (m.target) rows.push(cell("Weight-loss target", m.target + " kcal"));
+  if (m.proteinMin) rows.push(cell("Protein / day", `${m.proteinMin}–${m.proteinMax} g`));
+  if (showRx && w.medication) rows.push(cell("Rx", esc(w.medication) + (w.dose ? " " + esc(w.dose) : "")));
+  if (!rows.length) return "";
+  return `<div class="metric-strip">${rows.join("")}</div>`;
 }
 
 function wizHead() {
@@ -573,17 +626,95 @@ function wizHead() {
 
 function paintWizard() {
   const w = S.wizard;
-  if (w.step === 0) return wizStepPatient();
+  if (w.step === 0) return wizStepIntake();
   if (w.step === 1) return wizStepProgram();
   if (w.step === 2) return wizStepClinical();
   return wizStepReview();
 }
 
-function wizStepPatient() {
+// ── intake question rendering (ported from Consult-Buddy intake) ─────────
+function intakeVisible(q) {
+  if (!q.conditionalOn) return true;
   const w = S.wizard;
+  const src = q.conditionalOn.questionId === "gender"
+    ? w.patient.gender
+    : w.patient.intake[q.conditionalOn.questionId];
+  if (!src) return false;
+  if (Array.isArray(src)) return src.some((a) => a.includes(q.conditionalOn.value));
+  return String(src).includes(q.conditionalOn.value);
+}
+
+function renderIntakeQuestion(q) {
+  const ans = S.wizard.patient.intake;
+  const val = ans[q.id];
+  if (q.type === "select") {
+    return `<div class="field"><label>${esc(q.question)}</label>
+      <select class="input" data-iq="${q.id}" data-structural="1">
+        <option value="">—</option>
+        ${q.options.map((o) => `<option ${val === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+      </select>
+      ${q.hasNotes && val && val !== "No" ? `<textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Notes (optional)" style="margin-top:6px">${esc(ans[q.id + "__notes"] || "")}</textarea>` : ""}
+    </div>`;
+  }
+  if (q.type === "multiselect") {
+    const gateOn = q.hasGate ? ans[q.id + "__gate"] === true : true;
+    const selected = Array.isArray(val) ? val : [];
+    return `<div class="field"><label>${esc(q.question)}</label>
+      ${q.hasGate ? `<div style="display:flex;gap:8px;margin-bottom:8px">
+        <button type="button" class="chip ${gateOn ? "on" : ""}" data-gate="${q.id}" data-v="yes">Yes</button>
+        <button type="button" class="chip ${ans[q.id + "__gate"] === false ? "on" : ""}" data-gate="${q.id}" data-v="no">No</button>
+      </div>` : ""}
+      ${gateOn ? `<div style="display:flex;flex-wrap:wrap;gap:7px">
+        ${q.options.map((o) => `<button type="button" class="chip ${selected.includes(o) ? "on" : ""}" data-iqmulti="${q.id}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}
+        ${q.hasOther ? `<button type="button" class="chip ${selected.includes("Other") ? "on" : ""}" data-iqmulti="${q.id}" data-v="Other">Other</button>` : ""}
+      </div>
+      ${q.hasOther && selected.includes("Other") ? `<input class="input" data-iqother="${q.id}" placeholder="Other — please specify" value="${esc(ans[q.id + "__other"] || "")}" style="margin-top:6px">` : ""}
+      ${q.hasNotes ? `<textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Notes (optional)" style="margin-top:6px">${esc(ans[q.id + "__notes"] || "")}</textarea>` : ""}` : ""}
+    </div>`;
+  }
+  // text
+  return `<div class="field"><label>${esc(q.question)}</label>
+    <textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Optional">${esc(val || "")}</textarea></div>`;
+}
+
+// Wire intake question events within a scope. `rerender` re-renders the step.
+function wireIntake(scope, rerender) {
+  const ans = S.wizard.patient.intake;
+  scope.querySelectorAll("[data-iq]").forEach((el) => el.addEventListener("change", () => {
+    ans[el.dataset.iq] = el.value;
+    if (el.dataset.structural) rerender(); // selects can gate conditional questions
+  }));
+  scope.querySelectorAll("[data-gate]").forEach((b) => b.addEventListener("click", () => {
+    ans[b.dataset.gate + "__gate"] = b.dataset.v === "yes";
+    rerender();
+  }));
+  scope.querySelectorAll("[data-iqmulti]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.iqmulti, v = b.dataset.v;
+    const arr = Array.isArray(ans[id]) ? ans[id] : [];
+    ans[id] = arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
+    rerender();
+  }));
+  scope.querySelectorAll("[data-iqother]").forEach((el) => el.addEventListener("input", () => { ans[el.dataset.iqother + "__other"] = el.value; }));
+  scope.querySelectorAll("[data-iqnotes]").forEach((el) => el.addEventListener("input", () => {
+    const id = el.dataset.iqnotes;
+    const q = S.presets.intakeQuestions.find((x) => x.id === id);
+    ans[q && q.type === "text" ? id : id + "__notes"] = el.value;
+  }));
+}
+
+function wizStepIntake() {
+  const w = S.wizard;
+  const demoIds = { name: "wp-name", mobile: "wp-mobile", title: "wp-title", age: "wp-age", gender: "wp-gender", activityLevel: "wp-activity", heightCm: "wp-height", weightKg: "wp-weight" };
+
+  // Group intake questions by section (visible only)
+  const sections = S.presets.intakeSections.map((sec) => ({
+    sec,
+    qs: S.presets.intakeQuestions.filter((q) => q.section === sec && intakeVisible(q)),
+  })).filter((s) => s.qs.length);
+
   view().innerHTML = `${wizHead()}
-  <div class="card card-pad" style="max-width:760px">
-    <div class="card-title">${icon("user", 19)} Who is this consultation for?</div>
+  <div class="card card-pad" style="max-width:820px">
+    <div class="card-title">${icon("user", 19)} Intake &amp; assessment</div>
     <div class="field">
       <label for="wz-existing">Existing patient</label>
       <select class="input" id="wz-existing">
@@ -592,7 +723,8 @@ function wizStepPatient() {
       </select>
       <span class="hint">Pick an existing patient for a follow-up, or leave as new.</span>
     </div>
-    <hr class="divider">
+
+    <div class="intake-sec-title">${icon("user", 15)} Demographics &amp; baseline</div>
     <div class="form-grid">
       <div class="field"><label for="wp-name">Full name <span class="req">*</span></label><input class="input" id="wp-name" value="${esc(w.patient.name)}" autocomplete="off"></div>
       <div class="field"><label for="wp-mobile">Mobile (with country code) <span class="req">*</span></label><input class="input" id="wp-mobile" type="tel" inputmode="tel" placeholder="9715xxxxxxxx" value="${esc(w.patient.mobile)}"></div>
@@ -603,39 +735,45 @@ function wizStepPatient() {
       <div class="field"><label for="wp-height">Height (cm)</label><input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}"></div>
       <div class="field"><label for="wp-weight">Weight (kg)</label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
     </div>
-    <div class="metric-strip" id="wz-metrics"></div>
+    <div id="wz-metrics">${patientSummaryHTML(false)}</div>
+
+    ${sections.map((s) => `
+      <div class="intake-sec-title">${icon(s.sec.includes("Objective") ? "activity" : s.sec.includes("Health Status") ? "shield" : "heart", 15)} ${esc(s.sec)}</div>
+      ${s.qs.map(renderIntakeQuestion).join("")}
+    `).join("")}
+
     <p class="err-text" id="wz-err" hidden role="alert"></p>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
       <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
     </div>
   </div>`;
 
-  const upd = () => {
-    ["name", "mobile", "title", "age", "gender", "activityLevel", "heightCm", "weightKg"].forEach((k) => {
-      const idmap = { name: "wp-name", mobile: "wp-mobile", title: "wp-title", age: "wp-age", gender: "wp-gender", activityLevel: "wp-activity", heightCm: "wp-height", weightKg: "wp-weight" };
-      S.wizard.patient[k] = document.getElementById(idmap[k]).value;
-    });
-    const bmi = calcBMIClient(+S.wizard.patient.heightCm, +S.wizard.patient.weightKg);
-    const box = document.getElementById("wz-metrics");
-    if (bmi) {
-      const cat = bmiCategoryClient(bmi);
-      box.innerHTML = `<div class="metric"><b>${bmi}</b>BMI</div><div class="metric"><b>${cat}</b>Category</div>`;
-    } else box.innerHTML = "";
+  const commitDemo = () => {
+    Object.entries(demoIds).forEach(([k, id]) => { S.wizard.patient[k] = document.getElementById(id).value; });
   };
-  view().querySelectorAll("input, select").forEach((el) => el.addEventListener("input", upd));
-  upd();
+  const liveMetrics = () => {
+    commitDemo();
+    document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
+  };
+  // typing fields update live metrics, no re-render
+  ["wp-name", "wp-mobile", "wp-title", "wp-age", "wp-height", "wp-weight"].forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
+  // gender / activity are structural (affect conditional questions + metrics) → re-render
+  ["wp-gender", "wp-activity"].forEach((id) => document.getElementById(id).addEventListener("change", () => { commitDemo(); wizStepIntake(); }));
+
+  wireIntake(view(), () => { commitDemo(); wizStepIntake(); });
 
   document.getElementById("wz-existing").addEventListener("change", (e) => {
+    commitDemo();
     S.wizard.existingId = e.target.value ? Number(e.target.value) : null;
     if (S.wizard.existingId) {
       const p = S.patients.find((x) => x.id === S.wizard.existingId);
       Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "" });
     }
-    wizStepPatient();
+    wizStepIntake();
   });
 
   document.getElementById("wz-next").addEventListener("click", () => {
-    upd();
+    commitDemo();
     const err = document.getElementById("wz-err");
     if (!S.wizard.patient.name.trim() || !S.wizard.patient.mobile.trim()) {
       err.textContent = "Name and mobile number are required — the mobile number is the patient's portal ID.";
@@ -780,6 +918,7 @@ function wizStepProgram() {
     if (!w.medication) { err.textContent = "Choose a program (or enter a custom medication) before continuing."; err.hidden = false; return; }
     w.step = 2;
     // pre-fill clinical defaults
+    prefillFromIntake();
     if (!w.instructions) w.instructions = defaultInstructions();
     if (!w.warnings) w.warnings = defaultWarnings();
     if (!Object.keys(w.diet).length) w.diet = defaultDiet();
@@ -877,19 +1016,30 @@ function defaultWarnings() {
 function defaultDiet() {
   const w = S.wizard;
   if (w.category !== "glp1") return {};
-  const kg = +w.patient.weightKg;
-  const bmr = (() => {
-    const h = +w.patient.heightCm, a = +w.patient.age;
-    if (!kg || !h || !a) return null;
-    const base = 10 * kg + 6.25 * h - 5 * a;
-    return Math.round(w.patient.gender === "Female" ? base - 161 : base + 5);
-  })();
-  const mult = (S.presets.activityLevels[w.patient.activityLevel] || { multiplier: 1.2 }).multiplier;
+  const m = wizMetrics();
   const diet = {};
-  if (kg) { diet.proteinMin = Math.round(kg * 1.2); diet.proteinMax = Math.round(kg * 1.5); }
-  if (bmr) diet.calories = Math.round(bmr * mult - 500);
+  if (m.proteinMin) { diet.proteinMin = m.proteinMin; diet.proteinMax = m.proteinMax; }
+  if (m.target) diet.calories = m.target;
   diet.water = "2–3 L daily";
   return diet;
+}
+
+// Compose a free-text summary of a multiselect intake answer (options + other + notes).
+function intakeText(id) {
+  const a = S.wizard.patient.intake;
+  const parts = [];
+  if (Array.isArray(a[id])) parts.push(...a[id].filter((x) => x !== "Other"));
+  if (a[id + "__other"]) parts.push(a[id + "__other"]);
+  if (a[id + "__notes"]) parts.push(a[id + "__notes"]);
+  return parts.join(", ");
+}
+
+// Prefill the clinical free-text fields from intake answers (once), so the
+// generated record and guide stay coherent with the intake.
+function prefillFromIntake() {
+  const w = S.wizard;
+  if (!w.patient.chronicIllnesses) w.patient.chronicIllnesses = intakeText("health_conditions");
+  if (!w.patient.allergies) w.patient.allergies = intakeText("allergies");
 }
 
 function wizStepClinical() {
@@ -919,14 +1069,39 @@ function wizStepClinical() {
           <input class="input" id="cl-prot-max" type="number" value="${esc(w.diet.proteinMax ?? "")}" aria-label="Protein maximum">
         </div>
       </div>` : ""}
+      <div class="field full"><label for="cl-supp">Supplements (optional — shown in the guide)</label><input class="input" id="cl-supp" value="${esc(w.supplements)}" placeholder="e.g. Vitamin D3 2000 IU daily, Omega-3 1 g"></div>
       <div class="field full"><label for="cl-note">Private clinical note (EMR — not shown to patient)</label><textarea class="input" id="cl-note" rows="3" placeholder="Consultation summary for your records…">${esc(w.clinicalNote)}</textarea></div>
     </div>
-    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:8px">
+
+    <div class="card" style="background:var(--bg);margin-top:6px">
+      <div class="card-title" style="padding:16px 16px 0;justify-content:space-between">
+        <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record &amp; suggestion (EMR)</span>
+        <button class="btn btn-secondary btn-sm" id="cl-copy" type="button">${icon("copy", 15)} Copy record</button>
+      </div>
+      <pre id="cl-emr" style="margin:12px 16px 16px;padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);font-family:ui-monospace,Menlo,monospace;font-size:12.5px;white-space:pre-wrap;line-height:1.5"></pre>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px">
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
       <button class="btn btn-primary" id="wz-next">Preview guide ${icon("chevR", 17)}</button>
     </div>
   </div>`;
 
+  const refreshEmr = () => {
+    collect();
+    document.getElementById("cl-emr").textContent = buildClinicalSuggestion(
+      { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
+      { category: w.category, medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency, blood_test: w.bloodTest, clinicalNote: w.clinicalNote },
+      wizMetrics()
+    ) || "Add a medication and patient details to generate the clinical record.";
+  };
+  view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
+  refreshEmr();
+
+  document.getElementById("cl-copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(document.getElementById("cl-emr").textContent);
+    toast("Clinical record copied");
+  });
   document.getElementById("wz-back").addEventListener("click", () => { collect(); w.step = 1; paintWizard(); });
   document.getElementById("wz-next").addEventListener("click", () => { collect(); w.step = 3; paintWizard(); });
 
@@ -938,6 +1113,7 @@ function wizStepClinical() {
     w.patient.allergies = document.getElementById("cl-allergy").value;
     w.bloodTest = document.getElementById("cl-blood").value;
     w.followupDays = Number(document.getElementById("cl-fu").value) || 28;
+    w.supplements = document.getElementById("cl-supp").value;
     w.clinicalNote = document.getElementById("cl-note").value;
     if (w.category === "glp1") {
       w.diet.calories = Number(document.getElementById("cl-cal").value) || undefined;
@@ -954,10 +1130,16 @@ function wizStepReview() {
     title: `${w.medication} — ${w.category === "glp1" ? "Weight Loss Program" : w.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
     medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency,
     phases: w.phases.filter((p) => p.label || p.dose), instructions: w.instructions, warnings: w.warnings,
-    diet: w.diet, blood_test: w.bloodTest,
+    diet: w.diet, blood_test: w.bloodTest, supplements: w.supplements,
     created_at: new Date().toISOString().slice(0, 10),
     next_followup: new Date(Date.now() + w.followupDays * 864e5).toISOString().slice(0, 10),
   };
+  const clinicalSuggestion = buildClinicalSuggestion(
+    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
+    { category: w.category, medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency, blood_test: w.bloodTest, clinicalNote: w.clinicalNote },
+    wizMetrics()
+  );
+  w.clinicalSuggestion = clinicalSuggestion;
   view().innerHTML = `${wizHead()}
   <div class="two-col" style="grid-template-columns:1fr 340px">
     <div>
@@ -976,9 +1158,20 @@ function wizStepReview() {
         <button class="btn btn-accent btn-block" id="wz-publish"><span class="spin"></span><span class="btn-label">${icon("check", 18)} Publish guide</span></button>
         <button class="btn btn-ghost btn-block" id="wz-back" style="margin-top:8px">${icon("chevL", 16)} Back to edit</button>
       </div>
-      ${w.clinicalNote ? `<div class="card card-pad"><div class="card-title">${icon("shield", 18)} Private note (EMR)</div><p style="font-size:13px;color:var(--muted);white-space:pre-wrap">${esc(w.clinicalNote)}</p></div>` : ""}
+      <div class="card card-pad">
+        <div class="card-title">${icon("scale", 18)} Patient summary</div>
+        ${patientSummaryHTML(true) || `<p class="hint">Add height, weight and age in the intake to compute metrics.</p>`}
+      </div>
+      ${clinicalSuggestion ? `<div class="card card-pad">
+        <div class="card-title" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record (EMR)</span>
+          <button class="btn btn-secondary btn-sm" id="rv-copy" type="button">${icon("copy", 15)} Copy</button>
+        </div>
+        <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(clinicalSuggestion)}</pre>
+      </div>` : ""}
     </div>
   </div>`;
+  if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
 
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 2; paintWizard(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
@@ -994,13 +1187,16 @@ function wizStepReview() {
           age: Number(w.patient.age) || null, gender: w.patient.gender,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           activityLevel: w.patient.activityLevel, chronicIllnesses: w.patient.chronicIllnesses,
-          medications: w.patient.medications, allergies: w.patient.allergies,
+          medications: w.patient.medications, allergies: w.patient.allergies, intake: w.patient.intake,
         });
         patientId = created.id;
         newPin = created.pin;
       } else {
         await api("PATCH", `/api/patients/${patientId}`, {
-          chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
+          chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
+          allergies: w.patient.allergies, intake: w.patient.intake,
+          heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
+          age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,
         });
       }
       await api("POST", "/api/plans", {
@@ -1008,6 +1204,7 @@ function wizStepReview() {
         dose: w.dose, route: w.route, frequency: w.frequency, halfLifeHours: w.halfLifeHours,
         phases: fakePlan.phases, instructions: w.instructions, warnings: w.warnings,
         diet: w.diet, followupDays: w.followupDays, bloodTest: w.bloodTest, clinicalNote: w.clinicalNote,
+        clinicalSuggestion: w.clinicalSuggestion, supplements: w.supplements,
       });
       toast("Guide published");
       publishedModal(patientId, w, newPin);

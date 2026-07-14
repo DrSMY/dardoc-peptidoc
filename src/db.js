@@ -122,6 +122,15 @@ CREATE INDEX IF NOT EXISTS idx_checkins_patient ON checkins(patient_id);
 CREATE INDEX IF NOT EXISTS idx_msgs_patient ON messages(patient_id);
 `);
 
+// Idempotent column additions for DBs created before these fields existed
+// (production disk already holds a schema — ADD COLUMN is a no-op if present).
+function addColumn(table, col, def) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
+}
+addColumn("patients", "intake_json", "TEXT DEFAULT '{}'");        // structured intake answers
+addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
+addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
+
 // ── password / pin hashing (scrypt) ─────────────────────────────
 function hashSecret(secret) {
   const salt = crypto.randomBytes(16).toString("hex");

@@ -191,3 +191,57 @@ function waLink(mobile, text) {
   const m = String(mobile || "").replace(/[^\d]/g, "");
   return `https://wa.me/${m}?text=${encodeURIComponent(text)}`;
 }
+
+// ── clinical metrics (matches Consult-Buddy's WeightLossIntake maths) ─────
+// p: { heightCm, weightKg, age, gender, activityLevel }
+function computeMetrics(p, activityLevels) {
+  const h = +p.heightCm, w = +p.weightKg, a = +p.age;
+  const bmi = calcBMIClient(h, w);
+  const bmiCat = bmiCategoryClient(bmi);
+  let bmr = null;
+  if (w && h && a) {
+    const base = 10 * w + 6.25 * h - 5 * a;
+    bmr = Math.round(p.gender === "Female" ? base - 161 : base + 5);
+  }
+  const mult = (activityLevels && activityLevels[p.activityLevel]) ? activityLevels[p.activityLevel].multiplier : 1.2;
+  const tdee = bmr ? Math.round(bmr * mult) : null;
+  const target = tdee ? Math.max(1200, tdee - 500) : null;   // 500 kcal deficit, floored at 1200
+  const proteinMin = w ? Math.round(w * 1.2) : null;
+  const proteinMax = w ? Math.round(w * 1.5) : null;
+  return { bmi, bmiCat, bmr, tdee, target, proteinMin, proteinMax };
+}
+
+// ── auto-generated clinical record / EMR text (ported from Consult-Buddy
+//    generateClinicalSuggestion). p: patient {name,title,gender,mobile,
+//    chronicIllnesses,intake}, plan {medication,dose,route,frequency,
+//    blood_test,clinicalNote}, m: computeMetrics() result.
+function buildClinicalSuggestion(p, plan, m) {
+  if (!plan || !plan.medication || !p.name) return "";
+  const med = plan.medication + (plan.dose ? ` ${plan.dose}` : "");
+  const salutation = p.title || (p.gender === "Male" ? "Mr" : p.gender === "Female" ? "Ms" : "");
+  const pronoun = p.gender === "Male" ? "He" : p.gender === "Female" ? "She" : "The patient";
+  const lc = pronoun.toLowerCase();
+  const intake = p.intake || {};
+  const cond = p.chronicIllnesses || (Array.isArray(intake.health_conditions) ? intake.health_conditions.join(", ") : "");
+  const conditions = cond ? `, with ${cond}` : ", with no known chronic illnesses";
+  const goals = Array.isArray(intake.health_goals) ? intake.health_goals.join(", ") : "";
+  const who = `${salutation ? salutation + " " : ""}${p.name} (${p.mobile || "No phone"})`;
+  const notes = plan.clinicalNote || plan.clinical_note || "";
+
+  if (plan.category === "glp1") {
+    const prev = intake.previous_glp1 === "Yes";
+    const history = prev ? "with previous history of use of GLP1 meds" : "with no previous history of use of GLP1 meds";
+    const proteinTxt = m && m.proteinMin ? `${lc} is advised to take ${m.proteinMin} g to ${m.proteinMax} g of protein daily, ` : "";
+    const targetTxt = m && m.target ? `with a Weight Loss Target of ${m.target} kcal/day. ` : "";
+    const blood = plan.blood_test === "required"
+      ? "\n- Weight Loss Blood Test REQUIRED: https://www.dardoc.com/dubai/lab-test/weight-loss-blood-test"
+      : plan.blood_test === "recommended"
+      ? "\n- Weight Loss Blood Test RECOMMENDED: https://www.dardoc.com/dubai/lab-test/weight-loss-blood-test" : "";
+    return `${who}\nprescribed ${med}\n${pronoun} is ${m && m.bmi ? m.bmiCat : ""} ${history}${conditions}, ${lc} has no contraindications to GLP-1, ${proteinTxt}${targetTxt}${notes}${blood}`.replace(/ +/g, " ").trim();
+  }
+  // peptide / custom
+  const goalTxt = goals ? ` for ${goals}` : "";
+  const routeFreq = [plan.route, plan.frequency].filter(Boolean).join(", ");
+  const blood = plan.blood_test && plan.blood_test !== "none" ? `\n- Blood work ${plan.blood_test}.` : "";
+  return `${who}\nprescribed ${med}${routeFreq ? " (" + routeFreq + ")" : ""}\n${pronoun} presents${goalTxt}${conditions}.${notes ? "\n" + notes : ""}${blood}`.replace(/ +/g, " ").trim();
+}

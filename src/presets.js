@@ -155,6 +155,56 @@ function calcBMR(weightKg, heightCm, age, gender) {
   return Math.round(gender === "Female" ? base - 161 : base + 5);
 }
 
+// ── Structured intake (ported from Consult-Buddy intakeQuestions.ts) ──────
+// Drives the first step of the consultation exactly like Consult-Buddy:
+// Demographics → Health Status → Primary Health Objectives → Objective-Specific.
+const INTAKE_SECTIONS = [
+  "Health Status & Medical Background",
+  "Primary Health Objectives",
+  "Objective-Specific Questions",
+];
+
+const INTAKE_QUESTIONS = [
+  // Health Status & Medical Background
+  { id: "health_conditions", section: "Health Status & Medical Background", question: "Do you have any known health conditions?", type: "multiselect", hasGate: true, gateLabel: "Any known health conditions?", hasOther: true, hasNotes: true, options: ["High blood pressure", "High cholesterol", "Prediabetes or diabetes", "Thyroid disorder", "Hormonal imbalance (e.g., low testosterone, PCOS)", "Autoimmune or inflammatory condition", "Chronic joint, muscle, or back pain", "Sleep disorder (insomnia, sleep apnea, etc.)", "Mental health condition (stress, anxiety, depression)"] },
+  { id: "allergies", section: "Health Status & Medical Background", question: "Do you have any known allergies or sensitivities?", type: "multiselect", hasGate: true, gateLabel: "Any known allergies or sensitivities?", hasOther: true, hasNotes: true, options: ["Medications", "Vitamins or supplements", "Food allergies", "Environmental allergies"] },
+  { id: "cancer_history", section: "Health Status & Medical Background", question: "Have you or a close family member ever been diagnosed with cancer or any tumor/growth?", type: "select", options: ["No", "Yes - myself", "Yes - a family member", "Yes - both myself and a family member"], hasNotes: true },
+  { id: "is_pregnant", section: "Health Status & Medical Background", question: "Are you currently pregnant?", type: "select", options: ["No", "Yes"], conditionalOn: { questionId: "gender", value: "Female" } },
+  { id: "is_breastfeeding", section: "Health Status & Medical Background", question: "Are you currently breastfeeding?", type: "select", options: ["No", "Yes"], conditionalOn: { questionId: "gender", value: "Female" } },
+  { id: "previous_glp1", section: "Health Status & Medical Background", question: "Previous history of GLP-1 medication use?", type: "select", options: ["No", "Yes"], hasNotes: true },
+
+  // Primary Health Objectives
+  { id: "health_goals", section: "Primary Health Objectives", question: "What are the main health goals? (Select all that apply)", type: "multiselect", hasOther: true, hasNotes: true, options: ["Healthy aging & longevity", "Build muscle & recover better", "Heal injuries & reduce pain", "Improve metabolism & reduce belly fat", "Improve sleep & reset body clock", "Cognitive function & mood enhancement", "Sexual health", "Immune function & inflammation", "Gut health", "Skin & hair"] },
+
+  // Objective-Specific — Longevity
+  { id: "energy_levels", section: "Objective-Specific Questions", question: "Overall energy levels?", type: "select", options: ["Very good", "Good", "Moderate", "Low"], conditionalOn: { questionId: "health_goals", value: "Healthy aging & longevity" } },
+  { id: "recovery_decline", section: "Objective-Specific Questions", question: "Has recovery, resilience, or stamina declined?", type: "select", options: ["No", "Slightly", "Moderately", "Significantly"], conditionalOn: { questionId: "health_goals", value: "Healthy aging & longevity" } },
+  { id: "inflammation", section: "Objective-Specific Questions", question: "Persistent inflammation, aches, or stiffness?", type: "select", options: ["No", "Occasionally", "Often", "Constantly"], conditionalOn: { questionId: "health_goals", value: "Healthy aging & longevity" } },
+  // Build muscle
+  { id: "activity_level_muscle", section: "Objective-Specific Questions", question: "Training activity level", type: "select", options: ["Sedentary", "Light activity", "Regular training (3-4x/week)", "Intense training (5+ times/week)"], conditionalOn: { questionId: "health_goals", value: "Build muscle & recover better" } },
+  { id: "muscle_plateau", section: "Objective-Specific Questions", question: "Have muscle gains or strength plateaued?", type: "select", options: ["No", "Slightly", "Yes", "Declining"], conditionalOn: { questionId: "health_goals", value: "Build muscle & recover better" } },
+  { id: "workout_recovery", section: "Objective-Specific Questions", question: "Recovery after workouts?", type: "select", options: ["Very well", "Acceptable", "Poorly", "Need several days"], conditionalOn: { questionId: "health_goals", value: "Build muscle & recover better" } },
+  // Heal injuries
+  { id: "current_injury", section: "Objective-Specific Questions", question: "Current injury or chronic pain?", type: "select", options: ["No", "Mild", "Moderate", "Severe"], conditionalOn: { questionId: "health_goals", value: "Heal injuries & reduce pain" } },
+  { id: "injury_type", section: "Objective-Specific Questions", question: "What best describes the issue?", type: "select", options: ["Muscle strain", "Tendon/ligament", "Joint pain", "Post-surgery", "Multiple areas"], conditionalOn: { questionId: "health_goals", value: "Heal injuries & reduce pain" } },
+  { id: "injury_duration", section: "Objective-Specific Questions", question: "How long has the issue been present?", type: "select", options: ["<1 month", "1-3 months", "3-6 months", ">6 months"], conditionalOn: { questionId: "health_goals", value: "Heal injuries & reduce pain" } },
+  // Metabolism
+  { id: "fat_storage", section: "Objective-Specific Questions", question: "Where does fat tend to store the most?", type: "select", options: ["Evenly", "Hips/thighs", "Abdomen/belly", "Mostly visceral/belly"], conditionalOn: { questionId: "health_goals", value: "Improve metabolism & reduce belly fat" } },
+  { id: "fat_loss_struggle", section: "Objective-Specific Questions", question: "Struggled to lose fat despite diet or exercise?", type: "select", options: ["No", "Occasionally", "Yes", "Long-term struggle"], conditionalOn: { questionId: "health_goals", value: "Improve metabolism & reduce belly fat" } },
+  { id: "insulin_resistance", section: "Objective-Specific Questions", question: "Ever told you have insulin resistance, prediabetes, or metabolic syndrome?", type: "select", options: ["No", "Borderline", "Yes"], conditionalOn: { questionId: "health_goals", value: "Improve metabolism & reduce belly fat" } },
+  // Sleep
+  { id: "sleep_quality", section: "Objective-Specific Questions", question: "Sleep quality?", type: "select", options: ["Very good", "Good", "Poor", "Very poor"], conditionalOn: { questionId: "health_goals", value: "Improve sleep & reset body clock" } },
+  { id: "sleep_issue", section: "Objective-Specific Questions", question: "Struggle more with falling asleep or staying asleep?", type: "select", options: ["Falling asleep", "Staying asleep", "Both", "Neither"], conditionalOn: { questionId: "health_goals", value: "Improve sleep & reset body clock" } },
+  { id: "sleep_hours", section: "Objective-Specific Questions", question: "Average hours of sleep?", type: "select", options: ["<5", "5-6", "6-7", "7-8", ">8"], conditionalOn: { questionId: "health_goals", value: "Improve sleep & reset body clock" } },
+  { id: "additional_notes", section: "Objective-Specific Questions", question: "Any additional notes or concerns for the doctor?", type: "text" },
+];
+
+// Weight-loss daily calorie target: TDEE minus a 500 kcal deficit, floored at 1200.
+function weightLossCalories(tdee) {
+  if (!tdee) return null;
+  return Math.max(1200, Math.round(tdee) - 500);
+}
+
 module.exports = {
   GLP1_MEDICATIONS,
   PK_PHASES_WEEKLY,
@@ -162,7 +212,10 @@ module.exports = {
   SYMPTOMS,
   PEPTIDE_PROTOCOLS,
   ACTIVITY_LEVELS,
+  INTAKE_SECTIONS,
+  INTAKE_QUESTIONS,
   calcBMI,
   bmiCategory,
   calcBMR,
+  weightLossCalories,
 };

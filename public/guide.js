@@ -91,6 +91,12 @@ function buildGuide(plan, patient, doctorName) {
       </div>
     </section>` : ""}
 
+    ${plan.supplements ? `
+    <section class="g-sec">
+      <h3>${icon("pill", 18)} Supplements</h3>
+      <div class="g-prose">${esc(plan.supplements).replace(/\n/g, "<br>")}</div>
+    </section>` : ""}
+
     ${plan.warnings ? `
     <section class="g-sec">
       <h3>${icon("alert", 18)} When to contact your doctor</h3>
