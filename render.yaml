@@ -15,3 +15,9 @@ services:
         value: /data
       - key: IMPORT_SUPABASE
         value: "1"
+      - key: ADMIN_EMAIL
+        value: drsamimoha2018@gmail.com
+      # Prompted once at blueprint creation — sets the doctor login for the
+      # public deploy instead of shipping the default password. Min 8 chars.
+      - key: ADMIN_PASSWORD
+        sync: false

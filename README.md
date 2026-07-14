@@ -29,9 +29,19 @@ First run seeds a doctor account — email `drsamimoha2018@gmail.com`, password 
 
 ## Deploy (Render)
 
-- Build command: *(none)* · Start command: `node server.js`
-- Add a persistent disk and set `DATA_DIR` to its mount path (e.g. `/data`) so the SQLite database survives deploys.
-- Set `ADMIN_EMAIL` / `ADMIN_PASSWORD` before the first boot.
+A [`render.yaml`](render.yaml) blueprint is included — one-click deploy:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/DrSMY/dardoc-peptidoc)
+
+1. Click the button (or **New → Blueprint** in the Render dashboard and pick this repo).
+2. Render reads `render.yaml`: a **Starter** web service + **1 GB persistent disk** mounted at `/data`, with `DATA_DIR=/data` so the SQLite database survives deploys.
+3. When prompted, set **`ADMIN_PASSWORD`** (your doctor login; min 8 chars). `ADMIN_EMAIL` defaults to `drsamimoha2018@gmail.com`.
+4. First boot seeds the admin + program templates and, because `IMPORT_SUPABASE=1`, imports the legacy GLP-1 patients — new portal PINs print to the deploy **Logs** (share via WhatsApp). The import is idempotent and safe on every deploy.
+
+To also import Consult-Buddy consultations (behind Supabase auth), run once locally:
+`CB_EMAIL=you@example.com CB_PASSWORD=… node scripts/import-supabase.js`
+
+Manual setup instead of the blueprint: build command *(none)*, start command `node server.js`, add a persistent disk, and set `DATA_DIR` to its mount path.
 
 ## Stack
 
