@@ -44,6 +44,12 @@ function serveFile(res, filePath) {
   });
 }
 
+// One-shot legacy data import on boot (idempotent — skips existing patients).
+// Set IMPORT_SUPABASE=1 in the environment to enable; new PINs print to logs.
+if (process.env.IMPORT_SUPABASE === "1") {
+  try { require("./scripts/import-supabase"); } catch (e) { console.error("Legacy import failed:", e.message); }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = decodeURIComponent(url.pathname);
