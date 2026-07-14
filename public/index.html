@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DarDoc · PeptiDoc — Consult, Guide & Follow-up</title>
+<meta name="description" content="One platform for the full treatment journey: doctor consultation, personalised patient guides, and follow-up tracking.">
+<link rel="stylesheet" href="/theme.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231E4C4E'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'>P</text></svg>">
+<style>
+  .land { min-height: 100dvh; display: flex; flex-direction: column; }
+  .land-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(16px, 5vw, 48px); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark { width: 44px; height: 44px; border-radius: 13px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; }
+  .brand-name { font-family: var(--font-head); font-weight: 800; font-size: 18px; line-height: 1.1; }
+  .brand-tag { font-size: 12px; color: var(--muted); }
+  .hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px clamp(16px, 5vw, 48px) 56px; }
+  .hero-badge { margin-bottom: 18px; }
+  .hero h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; max-width: 720px; letter-spacing: -.02em; }
+  .hero h1 em { font-style: normal; color: var(--primary); }
+  .hero p { margin: 16px auto 36px; max-width: 560px; color: var(--muted); font-size: clamp(15px, 2vw, 17.5px); }
+  .paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 18px; width: min(680px, 100%); }
+  .path {
+    display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 4px;
+    padding: 26px; border-radius: var(--r-lg); border: 1.5px solid var(--border);
+    background: var(--surface); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--text);
+    transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease);
+  }
+  .path:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--brand); }
+  .path-ico { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+  .path h2 { font-size: 20px; }
+  .path p { font-size: 14px; color: var(--muted); margin: 4px 0 16px; }
+  .path-cta { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; color: var(--brand); }
+  .feats { display: flex; gap: clamp(16px, 4vw, 40px); flex-wrap: wrap; justify-content: center; margin-top: 52px; }
+  .feat { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+  .feat svg { color: var(--accent); }
+  .land-foot { text-align: center; padding: 20px; font-size: 12.5px; color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="land">
+  <nav class="land-nav">
+    <div class="brand">
+      <div class="brand-mark" id="brand-ico"></div>
+      <div>
+        <div class="brand-name">DarDoc · PeptiDoc</div>
+        <div class="brand-tag">Consult → Guide → Follow-up</div>
+      </div>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="/doctor">Doctor sign in</a>
+  </nav>
+
+  <main class="hero">
+    <span class="badge badge-cyan hero-badge">One platform, the whole treatment journey</span>
+    <h1>From consultation to <em>personalised guide</em> to daily follow-up.</h1>
+    <p>Doctors run the consultation and publish a personal treatment guide. Patients follow it, log doses and side effects — and the doctor sees it all, live.</p>
+
+    <div class="paths">
+      <a class="path" href="/doctor">
+        <div class="path-ico" style="background:var(--brand-soft);color:var(--brand)" id="ico-doc"></div>
+        <h2>I'm a doctor</h2>
+        <p>Run consultations, build any medication program — GLP-1, peptides or fully custom — and monitor every patient.</p>
+        <span class="path-cta">Open the dashboard <span id="chev1"></span></span>
+      </a>
+      <a class="path" href="/portal">
+        <div class="path-ico" style="background:var(--primary-soft);color:var(--primary)" id="ico-pat"></div>
+        <h2>I'm a patient</h2>
+        <p>View your personal treatment guide, log your doses and check-ins, and stay connected with your doctor.</p>
+        <span class="path-cta">Open my portal <span id="chev2"></span></span>
+      </a>
+    </div>
+
+    <div class="feats">
+      <div class="feat"><span id="f1"></span> Personalised treatment guides</div>
+      <div class="feat"><span id="f2"></span> Side-effect alerts for your doctor</div>
+      <div class="feat"><span id="f3"></span> Progress &amp; weight tracking</div>
+      <div class="feat"><span id="f4"></span> Secure PIN access</div>
+    </div>
+  </main>
+
+  <footer class="land-foot">© <span id="yr"></span> DarDoc · PeptiDoc — Clinical decision support &amp; patient follow-up. Not a substitute for emergency care.</footer>
+</div>
+<script src="/shared.js"></script>
+<script>
+  document.getElementById("brand-ico").innerHTML = icon("stethoscope", 24);
+  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 26);
+  document.getElementById("ico-pat").innerHTML = icon("heart", 26);
+  document.getElementById("chev1").innerHTML = icon("chevR", 16);
+  document.getElementById("chev2").innerHTML = icon("chevR", 16);
+  document.getElementById("f1").innerHTML = icon("file", 17);
+  document.getElementById("f2").innerHTML = icon("bell", 17);
+  document.getElementById("f3").innerHTML = icon("trend", 17);
+  document.getElementById("f4").innerHTML = icon("shield", 17);
+  document.getElementById("yr").textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "dardoc-peptidoc",
+  "version": "1.0.0",
+  "description": "DarDoc · PeptiDoc — unified doctor consultation + patient follow-up platform. Zero-dependency Node.js + SQLite.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
