@@ -151,6 +151,7 @@ route("GET", "/api/presets", (req, res) => {
     activityLevels: presets.ACTIVITY_LEVELS,
     intakeSections: presets.INTAKE_SECTIONS,
     intakeQuestions: presets.INTAKE_QUESTIONS,
+    weightLossGoals: presets.WEIGHT_LOSS_GOALS,
   });
 });
 
@@ -230,12 +231,12 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
   if (dup) return json(res, 409, { error: "A patient with this mobile number already exists.", patientId: dup.id });
   const pin = generatePin();
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(doc.id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
       body.heightCm || null, body.weightKg || null, body.activityLevel || "Sedentary",
       body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
-      JSON.stringify(body.intake || {}));
+      JSON.stringify(body.intake || {}), body.email || "");
   json(res, 200, { id: Number(r.lastInsertRowid), pin });
 });
 
@@ -259,7 +260,7 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
   if (!patient) return json(res, 404, { error: "Patient not found." });
   const fields = { name: "name", title: "title", age: "age", gender: "gender", heightCm: "height_cm",
     weightKg: "start_weight_kg", activityLevel: "activity_level", chronicIllnesses: "chronic_illnesses",
-    medications: "medications", allergies: "allergies", notes: "notes", archived: "archived" };
+    medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email" };
   const sets = [], vals = [];
   for (const [k, col] of Object.entries(fields)) {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }

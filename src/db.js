@@ -128,6 +128,7 @@ function addColumn(table, col, def) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
 }
 addColumn("patients", "intake_json", "TEXT DEFAULT '{}'");        // structured intake answers
+addColumn("patients", "email", "TEXT DEFAULT ''");                // optional — identity alongside/instead of mobile
 addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
 addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
 

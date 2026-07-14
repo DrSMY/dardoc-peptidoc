@@ -579,7 +579,7 @@ async function viewConsult() {
   S.wizard = {
     step: 0,
     existingId: preselect ? Number(preselect) : null,
-    patient: { name: "", mobile: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
+    patient: { name: "", mobile: "", email: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     category: "glp1",
     template: null,
     protocol: null,
@@ -590,7 +590,7 @@ async function viewConsult() {
   };
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
-    if (p) Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "" });
+    if (p) Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, email: p.email || "", title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "", intake: p.intake_json ? JSON.parse(p.intake_json) : {} });
   }
   paintWizard();
 }
@@ -633,6 +633,7 @@ function paintWizard() {
 }
 
 // ── intake question rendering (ported from Consult-Buddy intake) ─────────
+// `conditionalOn.value` may be a string or an array of strings (OR match).
 function intakeVisible(q) {
   if (!q.conditionalOn) return true;
   const w = S.wizard;
@@ -640,31 +641,35 @@ function intakeVisible(q) {
     ? w.patient.gender
     : w.patient.intake[q.conditionalOn.questionId];
   if (!src) return false;
-  if (Array.isArray(src)) return src.some((a) => a.includes(q.conditionalOn.value));
-  return String(src).includes(q.conditionalOn.value);
+  const targets = Array.isArray(q.conditionalOn.value) ? q.conditionalOn.value : [q.conditionalOn.value];
+  if (Array.isArray(src)) return src.some((a) => targets.some((t) => a.includes(t)));
+  return targets.some((t) => String(src).includes(t));
 }
+
+function reqMark(q) { return q.required ? ' <span class="req">*</span>' : ""; }
 
 function renderIntakeQuestion(q) {
   const ans = S.wizard.patient.intake;
   const val = ans[q.id];
   if (q.type === "select") {
-    return `<div class="field"><label>${esc(q.question)}</label>
-      <select class="input" data-iq="${q.id}" data-structural="1">
-        <option value="">—</option>
-        ${q.options.map((o) => `<option ${val === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
-      </select>
-      ${q.hasNotes && val && val !== "No" ? `<textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Notes (optional)" style="margin-top:6px">${esc(ans[q.id + "__notes"] || "")}</textarea>` : ""}
+    // `patientField` questions (e.g. activity level) bind straight to the
+    // patient record instead of the free-form intake bag.
+    const bind = q.patientField ? "patient" : "intake";
+    const curVal = q.patientField ? S.wizard.patient[q.patientField] : val;
+    return `<div class="field"><label>${esc(q.question)}${reqMark(q)}</label>
+      <div class="chip-row">${q.options.map((o) => `<button type="button" class="chip ${curVal === o ? "on" : ""}" data-iqchip="${q.id}" data-field="${q.patientField || q.id}" data-bind="${bind}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
+      ${q.hasNotes && curVal && curVal !== "No" ? `<textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Notes (optional)" style="margin-top:6px">${esc(ans[q.id + "__notes"] || "")}</textarea>` : ""}
     </div>`;
   }
   if (q.type === "multiselect") {
     const gateOn = q.hasGate ? ans[q.id + "__gate"] === true : true;
     const selected = Array.isArray(val) ? val : [];
-    return `<div class="field"><label>${esc(q.question)}</label>
-      ${q.hasGate ? `<div style="display:flex;gap:8px;margin-bottom:8px">
+    return `<div class="field"><label>${esc(q.question)}${reqMark(q)}</label>
+      ${q.hasGate ? `<div class="chip-row" style="margin-bottom:8px">
         <button type="button" class="chip ${gateOn ? "on" : ""}" data-gate="${q.id}" data-v="yes">Yes</button>
         <button type="button" class="chip ${ans[q.id + "__gate"] === false ? "on" : ""}" data-gate="${q.id}" data-v="no">No</button>
       </div>` : ""}
-      ${gateOn ? `<div style="display:flex;flex-wrap:wrap;gap:7px">
+      ${gateOn ? `<div class="chip-row">
         ${q.options.map((o) => `<button type="button" class="chip ${selected.includes(o) ? "on" : ""}" data-iqmulti="${q.id}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}
         ${q.hasOther ? `<button type="button" class="chip ${selected.includes("Other") ? "on" : ""}" data-iqmulti="${q.id}" data-v="Other">Other</button>` : ""}
       </div>
@@ -679,10 +684,13 @@ function renderIntakeQuestion(q) {
 
 // Wire intake question events within a scope. `rerender` re-renders the step.
 function wireIntake(scope, rerender) {
-  const ans = S.wizard.patient.intake;
-  scope.querySelectorAll("[data-iq]").forEach((el) => el.addEventListener("change", () => {
-    ans[el.dataset.iq] = el.value;
-    if (el.dataset.structural) rerender(); // selects can gate conditional questions
+  const w = S.wizard;
+  const ans = w.patient.intake;
+  scope.querySelectorAll("[data-iqchip]").forEach((b) => b.addEventListener("click", () => {
+    const key = b.dataset.field || b.dataset.iqchip, v = b.dataset.v;
+    if (b.dataset.bind === "patient") w.patient[key] = (w.patient[key] === v ? "" : v);
+    else ans[key] = (ans[key] === v ? "" : v);
+    rerender();
   }));
   scope.querySelectorAll("[data-gate]").forEach((b) => b.addEventListener("click", () => {
     ans[b.dataset.gate + "__gate"] = b.dataset.v === "yes";
@@ -702,15 +710,115 @@ function wireIntake(scope, rerender) {
   }));
 }
 
+// Validate the mandatory intake fields. Returns an array of missing-field
+// labels (empty = valid). Mobile-OR-email is enough to continue the intake,
+// but a mobile number is still required before publish (portal login = mobile+PIN).
+function validateIntake() {
+  const w = S.wizard, p = w.patient, missing = [];
+  if (!p.name.trim()) missing.push("full name");
+  if (!p.mobile.trim() && !p.email.trim()) missing.push("mobile number or email");
+  if (!p.age) missing.push("age");
+  if (!p.gender) missing.push("gender");
+  if (!p.heightCm) missing.push("height");
+  if (!p.weightKg) missing.push("weight");
+  for (const q of S.presets.intakeQuestions) {
+    if (!q.required || !intakeVisible(q)) continue;
+    if (q.type === "multiselect") {
+      if (p.intake[q.id + "__gate"] === undefined) missing.push(q.question.toLowerCase());
+    } else if (!p.intake[q.id]) {
+      missing.push(q.question.toLowerCase());
+    }
+  }
+  return missing;
+}
+
+// ── Quick fill — deterministic (no AI call) parser for a pasted free-text
+// blurb like "Ahmed Ali, 0501234567, 35y Male, 180cm, 95kg, diabetic,
+// allergic to penicillin". Runs entirely client-side; the doctor confirms
+// everything before continuing.
+function parseIntakeText(text) {
+  const t = String(text || "").trim();
+  const out = {};
+  if (!t) return out;
+
+  const emailMatch = t.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  if (emailMatch) out.email = emailMatch[0];
+
+  const mobileMatch = t.match(/(\+?\d[\d\s-]{6,17}\d)/);
+  if (mobileMatch) {
+    const digits = mobileMatch[0].replace(/\D/g, "");
+    if (digits.length >= 7 && digits.length <= 15) out.mobile = digits;
+  }
+
+  const ageMatch = t.match(/\b(\d{1,3})\s*(?:y\.?o\.?|yrs?|years?|y)\b/i);
+  if (ageMatch) out.age = ageMatch[1];
+
+  // Check "female" before "male" — "male" is a substring of "female".
+  if (/\bfemale\b/i.test(t)) out.gender = "Female";
+  else if (/\bmale\b/i.test(t)) out.gender = "Male";
+
+  const hMatch = t.match(/\b(\d{2,3})\s*cm\b/i);
+  if (hMatch) out.heightCm = hMatch[1];
+
+  const wMatch = t.match(/\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i);
+  if (wMatch) out.weightKg = wMatch[1];
+
+  // First comma-separated segment that looks like a name: has letters, no
+  // digits, isn't just the gender word, and isn't the email segment.
+  const segs = t.split(",").map((s) => s.trim());
+  for (const s of segs) {
+    if (s && /[a-zA-Z]/.test(s) && !/\d/.test(s) && !/^(male|female)$/i.test(s) && !s.includes("@")) { out.name = s; break; }
+  }
+
+  const condKeywords = [
+    [/diabet/i, "Diabetes"], [/hypertens|high blood pressure/i, "Hypertension"],
+    [/thyroid/i, "Thyroid disorder"], [/asthma/i, "Asthma"], [/cholesterol/i, "High cholesterol"],
+  ];
+  const foundConditions = condKeywords.filter(([re]) => re.test(t)).map(([, label]) => label);
+  if (foundConditions.length) out.conditionsNote = foundConditions.join(", ");
+
+  const allergyMatch = t.match(/allerg(?:y|ic)\s*(?:to|:)?\s*([a-zA-Z ,]+)?/i);
+  if (allergyMatch) out.allergyNote = (allergyMatch[1] || "").trim().replace(/,\s*$/, "") || "mentioned — confirm details";
+
+  return out;
+}
+
+// Applies a parsed quick-fill result onto the wizard patient/intake state.
+// Returns a list of human-readable labels for what changed (for a toast).
+function applyQuickFill(text) {
+  const w = S.wizard, r = parseIntakeText(text), changed = [];
+  if (r.name) { w.patient.name = r.name; changed.push("name"); }
+  if (r.mobile) { w.patient.mobile = r.mobile; changed.push("mobile"); }
+  if (r.email) { w.patient.email = r.email; changed.push("email"); }
+  if (r.age) { w.patient.age = r.age; changed.push("age"); }
+  if (r.gender) { w.patient.gender = r.gender; changed.push("gender"); }
+  if (r.heightCm) { w.patient.heightCm = r.heightCm; changed.push("height"); }
+  if (r.weightKg) { w.patient.weightKg = r.weightKg; changed.push("weight"); }
+  if (r.conditionsNote) {
+    w.patient.intake.health_conditions__gate = true;
+    w.patient.intake.health_conditions__notes = [w.patient.intake.health_conditions__notes, `Detected: ${r.conditionsNote}`].filter(Boolean).join(" · ");
+    changed.push("chronic illnesses (please confirm)");
+  }
+  if (r.allergyNote) {
+    w.patient.intake.allergies__gate = true;
+    w.patient.intake.allergies__notes = [w.patient.intake.allergies__notes, `Detected: ${r.allergyNote}`].filter(Boolean).join(" · ");
+    changed.push("allergies (please confirm)");
+  }
+  return changed;
+}
+
 function wizStepIntake() {
   const w = S.wizard;
-  const demoIds = { name: "wp-name", mobile: "wp-mobile", title: "wp-title", age: "wp-age", gender: "wp-gender", activityLevel: "wp-activity", heightCm: "wp-height", weightKg: "wp-weight" };
+  const genderChips = ["Male", "Female", "Other"];
+  const titleChips = ["Mr", "Ms", "Mrs", "Dr"];
 
   // Group intake questions by section (visible only)
   const sections = S.presets.intakeSections.map((sec) => ({
     sec,
     qs: S.presets.intakeQuestions.filter((q) => q.section === sec && intakeVisible(q)),
   })).filter((s) => s.qs.length);
+
+  const secIcon = (sec) => sec === "Primary Health Objectives" ? "sparkle" : sec === "Objective-Specific Questions" ? "activity" : "shield";
 
   view().innerHTML = `${wizHead()}
   <div class="card card-pad" style="max-width:820px">
@@ -724,21 +832,35 @@ function wizStepIntake() {
       <span class="hint">Pick an existing patient for a follow-up, or leave as new.</span>
     </div>
 
-    <div class="intake-sec-title">${icon("user", 15)} Demographics &amp; baseline</div>
+    <div class="qf-box">
+      <label>${icon("sparkle", 15)} Quick fill — paste patient details</label>
+      <div style="display:flex;gap:8px">
+        <input class="input" id="qf-input" placeholder="Ahmed Ali, 0501234567, 35y Male, 180cm, 95kg, diabetic...">
+        <button class="btn btn-secondary" id="qf-parse" type="button">Parse</button>
+      </div>
+      <span class="hint">Paste a quick note and the fields below fill in automatically — always confirm before continuing.</span>
+    </div>
+
+    <div class="intake-sec-title first">${icon("user", 15)} Identity</div>
     <div class="form-grid">
-      <div class="field"><label for="wp-name">Full name <span class="req">*</span></label><input class="input" id="wp-name" value="${esc(w.patient.name)}" autocomplete="off"></div>
-      <div class="field"><label for="wp-mobile">Mobile (with country code) <span class="req">*</span></label><input class="input" id="wp-mobile" type="tel" inputmode="tel" placeholder="9715xxxxxxxx" value="${esc(w.patient.mobile)}"></div>
-      <div class="field"><label for="wp-title">Title</label><select class="input" id="wp-title">${["", "Mr", "Ms", "Mrs", "Dr"].map((t) => `<option ${w.patient.title === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
-      <div class="field"><label for="wp-age">Age</label><input class="input" id="wp-age" type="number" inputmode="numeric" min="12" max="110" value="${esc(w.patient.age)}"></div>
-      <div class="field"><label for="wp-gender">Gender</label><select class="input" id="wp-gender">${["", "Male", "Female", "Other"].map((g) => `<option ${w.patient.gender === g ? "selected" : ""}>${g}</option>`).join("")}</select></div>
-      <div class="field"><label for="wp-activity">Activity level</label><select class="input" id="wp-activity">${Object.keys(S.presets.activityLevels).map((a) => `<option ${w.patient.activityLevel === a ? "selected" : ""}>${a}</option>`).join("")}</select></div>
-      <div class="field"><label for="wp-height">Height (cm)</label><input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}"></div>
-      <div class="field"><label for="wp-weight">Weight (kg)</label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
+      <div class="field full"><label for="wp-name">Full name (as per passport/ID) <span class="req">*</span></label><input class="input" id="wp-name" value="${esc(w.patient.name)}" autocomplete="off"></div>
+      <div class="field"><label for="wp-mobile">Mobile number <span class="req">*</span></label><input class="input" id="wp-mobile" type="tel" inputmode="tel" placeholder="9715xxxxxxxx" value="${esc(w.patient.mobile)}"></div>
+      <div class="field"><label for="wp-email">Email</label><input class="input" id="wp-email" type="email" placeholder="patient@example.com" value="${esc(w.patient.email)}"></div>
+      <div class="field full" style="margin-top:-8px"><span class="hint">Mobile number or email is required (at least one) — mobile is needed for the patient's portal login.</span></div>
+      <div class="field full"><label>Title</label><div class="chip-row">${titleChips.map((t) => `<button type="button" class="chip ${w.patient.title === t ? "on" : ""}" data-demochip="title" data-v="${t}">${t}</button>`).join("")}</div></div>
+    </div>
+
+    <div class="intake-sec-title">${icon("clipboard", 15)} Demographics</div>
+    <div class="form-grid">
+      <div class="field"><label for="wp-age">Age <span class="req">*</span></label><input class="input" id="wp-age" type="number" inputmode="numeric" min="12" max="110" value="${esc(w.patient.age)}"></div>
+      <div class="field"><label>Gender <span class="req">*</span></label><div class="chip-row">${genderChips.map((g) => `<button type="button" class="chip ${w.patient.gender === g ? "on" : ""}" data-demochip="gender" data-v="${g}">${g}</button>`).join("")}</div></div>
+      <div class="field"><label for="wp-height">Height (cm) <span class="req">*</span></label><input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}"></div>
+      <div class="field"><label for="wp-weight">Weight (kg) <span class="req">*</span></label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
     </div>
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
 
     ${sections.map((s) => `
-      <div class="intake-sec-title">${icon(s.sec.includes("Objective") ? "activity" : s.sec.includes("Health Status") ? "shield" : "heart", 15)} ${esc(s.sec)}</div>
+      <div class="intake-sec-title">${icon(secIcon(s.sec), 15)} ${esc(s.sec)}</div>
       ${s.qs.map(renderIntakeQuestion).join("")}
     `).join("")}
 
@@ -748,26 +870,47 @@ function wizStepIntake() {
     </div>
   </div>`;
 
+  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight" };
   const commitDemo = () => {
-    Object.entries(demoIds).forEach(([k, id]) => { S.wizard.patient[k] = document.getElementById(id).value; });
+    Object.entries(demoTextIds).forEach(([k, id]) => { w.patient[k] = document.getElementById(id).value; });
   };
   const liveMetrics = () => {
     commitDemo();
     document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
   };
-  // typing fields update live metrics, no re-render
-  ["wp-name", "wp-mobile", "wp-title", "wp-age", "wp-height", "wp-weight"].forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
-  // gender / activity are structural (affect conditional questions + metrics) → re-render
-  ["wp-gender", "wp-activity"].forEach((id) => document.getElementById(id).addEventListener("change", () => { commitDemo(); wizStepIntake(); }));
+  Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
+
+  view().querySelectorAll("[data-demochip]").forEach((b) => b.addEventListener("click", () => {
+    commitDemo();
+    const f = b.dataset.demochip, v = b.dataset.v;
+    w.patient[f] = (w.patient[f] === v ? "" : v);
+    wizStepIntake();
+  }));
 
   wireIntake(view(), () => { commitDemo(); wizStepIntake(); });
 
+  document.getElementById("qf-parse").addEventListener("click", () => {
+    commitDemo();
+    const inp = document.getElementById("qf-input");
+    if (!inp.value.trim()) return;
+    const changed = applyQuickFill(inp.value);
+    wizStepIntake();
+    toast(changed.length ? `Filled in: ${changed.join(", ")}` : "Nothing recognised — please fill in manually", changed.length ? "ok" : "bad");
+  });
+  document.getElementById("qf-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); document.getElementById("qf-parse").click(); }
+  });
+
   document.getElementById("wz-existing").addEventListener("change", (e) => {
     commitDemo();
-    S.wizard.existingId = e.target.value ? Number(e.target.value) : null;
-    if (S.wizard.existingId) {
-      const p = S.patients.find((x) => x.id === S.wizard.existingId);
-      Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "" });
+    w.existingId = e.target.value ? Number(e.target.value) : null;
+    if (w.existingId) {
+      const p = S.patients.find((x) => x.id === w.existingId);
+      Object.assign(w.patient, {
+        name: p.name, mobile: p.mobile, email: p.email || "", title: p.title || "", age: p.age || "",
+        gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "",
+        intake: p.intake_json ? JSON.parse(p.intake_json) : {},
+      });
     }
     wizStepIntake();
   });
@@ -775,12 +918,15 @@ function wizStepIntake() {
   document.getElementById("wz-next").addEventListener("click", () => {
     commitDemo();
     const err = document.getElementById("wz-err");
-    if (!S.wizard.patient.name.trim() || !S.wizard.patient.mobile.trim()) {
-      err.textContent = "Name and mobile number are required — the mobile number is the patient's portal ID.";
+    const missing = validateIntake();
+    if (missing.length) {
+      err.textContent = `Please complete: ${missing.join(", ")}.`;
       err.hidden = false;
       return;
     }
-    S.wizard.step = 1;
+    err.hidden = true;
+    if ((w.patient.intake.health_goals || []).includes("Weight loss")) w.category = "glp1";
+    w.step = 1;
     paintWizard();
   });
 }
@@ -1178,12 +1324,17 @@ function wizStepReview() {
     const btn = document.getElementById("wz-publish");
     const err = document.getElementById("wz-err");
     err.hidden = true;
+    if (!w.patient.mobile.trim()) {
+      err.textContent = "A mobile number is required to publish — it's how the patient signs in to their portal. Go back to Intake and add one.";
+      err.hidden = false;
+      return;
+    }
     btn.classList.add("loading");
     try {
       let patientId = w.existingId, newPin = null;
       if (!patientId) {
         const created = await api("POST", "/api/patients", {
-          name: w.patient.name, mobile: w.patient.mobile, title: w.patient.title,
+          name: w.patient.name, mobile: w.patient.mobile, email: w.patient.email, title: w.patient.title,
           age: Number(w.patient.age) || null, gender: w.patient.gender,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           activityLevel: w.patient.activityLevel, chronicIllnesses: w.patient.chronicIllnesses,
@@ -1193,7 +1344,7 @@ function wizStepReview() {
         newPin = created.pin;
       } else {
         await api("PATCH", `/api/patients/${patientId}`, {
-          chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
+          email: w.patient.email, chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
           allergies: w.patient.allergies, intake: w.patient.intake,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,
