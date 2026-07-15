@@ -152,6 +152,8 @@ route("GET", "/api/presets", (req, res) => {
     intakeSections: presets.INTAKE_SECTIONS,
     intakeQuestions: presets.INTAKE_QUESTIONS,
     weightLossGoals: presets.WEIGHT_LOSS_GOALS,
+    healthGoalPeptides: presets.HEALTH_GOAL_PEPTIDES,
+    peptideInfo: presets.PEPTIDE_INFO,
   });
 });
 

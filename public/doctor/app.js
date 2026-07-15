@@ -513,10 +513,10 @@ function checkinCard(c) {
 }
 
 // ── modals ───────────────────────────────────────────────────────
-function modal(html) {
+function modal(html, wide) {
   const scrim = document.createElement("div");
   scrim.className = "modal-scrim";
-  scrim.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+  scrim.innerHTML = `<div class="modal${wide ? " modal-wide" : ""}" role="dialog" aria-modal="true">${html}</div>`;
   scrim.addEventListener("click", (e) => { if (e.target === scrim) scrim.remove(); });
   document.addEventListener("keydown", function onEsc(e) { if (e.key === "Escape") { scrim.remove(); document.removeEventListener("keydown", onEsc); } });
   document.body.appendChild(scrim);
@@ -854,11 +854,11 @@ function retreatIntake() {
   if (S.wizard.intakeSub > 0) { S.wizard.intakeSub--; wizStepIntake(); }
 }
 
-function wizIntakeShell(bodyHtml) {
+function wizIntakeShell(bodyHtml, sideHtml) {
   const steps = intakeSubSteps();
   const idx = S.wizard.intakeSub;
-  view().innerHTML = `${wizHead()}
-  <div class="card card-pad" style="max-width:820px">
+  const mainCard = `
+  <div class="card card-pad">
     ${intakeProgressHTML()}
     ${bodyHtml}
     <p class="err-text" id="wz-err" hidden role="alert"></p>
@@ -867,6 +867,9 @@ function wizIntakeShell(bodyHtml) {
       <button class="btn btn-primary" id="wz-next">${idx === steps.length - 1 ? "Continue to program" : "Continue"} ${icon("chevR", 17)}</button>
     </div>
   </div>`;
+  view().innerHTML = sideHtml
+    ? `${wizHead()}<div class="two-col">${mainCard}<div id="wz-side">${sideHtml}</div></div>`
+    : `${wizHead()}<div style="max-width:820px">${mainCard}</div>`;
 }
 
 function showIntakeErr(missing) {
@@ -1043,14 +1046,109 @@ function wizIntakeClinical() {
 }
 
 // ── Sub-step 3: Primary Health Objectives ─────────────────────────────
+// Suggested-peptides side panel, keyed off the currently selected health
+// goals (ported concept from Consult-Buddy's LivePeptideSuggestions —
+// merges each goal's list, Primary priority wins if any goal marks it so).
+function suggestedPeptidesHTML() {
+  const goals = S.wizard.patient.intake.health_goals || [];
+  if (!goals.length) {
+    return `<div class="card card-pad suggested-peptides">
+      <div class="card-title">${icon("sparkle", 17)} Suggested Peptides</div>
+      <div class="empty" style="padding:16px 6px">${icon("droplet", 28)}<p>Select a health goal to see suggested peptides here.</p></div>
+    </div>`;
+  }
+  const seen = new Map();
+  for (const g of goals) {
+    const list = (S.presets.healthGoalPeptides || {})[g] || [];
+    for (const item of list) {
+      const cur = seen.get(item.name);
+      if (!cur || (cur !== "Primary" && item.priority === "Primary")) seen.set(item.name, item.priority);
+    }
+  }
+  const entries = [...seen.entries()].sort((a, b) => (a[1] === "Primary" ? -1 : 1) - (b[1] === "Primary" ? -1 : 1));
+  return `<div class="card card-pad suggested-peptides">
+    <div class="card-title">${icon("sparkle", 17)} Suggested Peptides</div>
+    ${entries.length ? `
+    <div class="sp-list">
+      ${entries.map(([name, priority]) => `
+        <div class="sp-row">
+          <div class="sp-name"><span>${esc(name)}</span><span class="badge ${priority === "Primary" ? "badge-teal" : "badge-gray"}">${priority}</span></div>
+          <button type="button" class="sp-info" data-peptide="${esc(name)}" aria-label="View ${esc(name)} details">${icon("info", 14)}</button>
+        </div>`).join("")}
+    </div>
+    <p class="hint" style="margin-top:10px">Based on selected health goals · Tap ${icon("info", 11)} for full protocol details.</p>`
+    : `<p class="hint">No commonly-suggested peptides for these goals — a custom program may suit best.</p>`}
+  </div>`;
+}
+
+function wirePeptideInfoButtons(scope) {
+  scope.querySelectorAll("[data-peptide]").forEach((b) => b.addEventListener("click", () => showPeptideDetail(b.dataset.peptide)));
+}
+
+// Peptide clinical-reference detail modal (ported layout from Consult-Buddy's
+// PeptideDetailSheet: Talking Points → How It Works → Best Use For → Target
+// Benefits → Prescribing Info grid → Contraindications → side effects etc).
+function showPeptideDetail(name) {
+  const info = (S.presets.peptideInfo || {})[name];
+  if (!info) return;
+
+  const talkingPoints = [
+    info.howItWorks ? { label: "Mechanism", text: info.howItWorks.split(".")[0] + "." } : null,
+    info.targetBenefits ? { label: "Benefits", text: info.targetBenefits } : null,
+    info.treatmentDuration ? { label: "Timeline", text: info.treatmentDuration } : null,
+    info.commonSideEffects ? { label: "Side Effects", text: info.commonSideEffects } : null,
+  ].filter(Boolean);
+
+  const section = (ico, title, content, cls) => content ? `
+    <div class="pep-sec ${cls}">
+      <div class="pep-sec-head">${icon(ico, 15)} ${esc(title)}</div>
+      <p>${esc(content)}</p>
+    </div>` : "";
+
+  const infoCard = (label, value) => value ? `<div class="pep-info-card"><div class="lbl">${esc(label)}</div><div class="val">${esc(value)}</div></div>` : "";
+
+  modal(`
+    <div class="modal-head">
+      <h3 style="display:flex;align-items:center;gap:8px">${icon("syringe", 18)} ${esc(name)}</h3>
+      <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
+    </div>
+    <p class="hint" style="margin:-8px 0 14px">Clinical reference for practitioner use</p>
+    ${info.categories && info.categories.length ? `<div class="chip-row" style="margin-bottom:14px">${info.categories.map((c) => `<span class="badge badge-teal">${esc(c)}</span>`).join("")}</div>` : ""}
+
+    <div class="pep-talking">
+      <div class="pep-sec-head" style="margin-bottom:2px">${icon("sparkle", 15)} Talking Points for Patients</div>
+      ${talkingPoints.map((t) => `<div class="pep-tp"><span class="badge badge-cyan">${esc(t.label)}</span><span>${esc(t.text)}</span></div>`).join("")}
+    </div>
+
+    ${section("activity", "How It Works", info.howItWorks, "teal")}
+    ${section("book", "Best Use For", info.bestUseFor, "amber")}
+    ${section("activity", "Target Benefits", info.targetBenefits, "green")}
+
+    <div class="pep-rx-title">Prescribing Information</div>
+    <div class="pep-rx-grid">
+      ${infoCard("Dosage", info.dosageInstructions)}
+      ${infoCard("Route", info.administrationRoute)}
+      ${infoCard("Strength", info.strengthVolume)}
+      ${infoCard("Duration", info.treatmentDuration)}
+    </div>
+
+    ${info.contraindications ? `<div class="pep-warn"><div class="pep-sec-head">${icon("alert", 15)} Contraindications</div><p>${esc(info.contraindications)}</p></div>` : ""}
+    ${section("alert", "Common Side Effects", info.commonSideEffects, "rose")}
+    ${section("droplet", "Key Blood Tests", info.keyBloodTests, "violet")}
+    ${section("layers", "Possible Combinations", info.possibleCombinations, "sky")}
+    ${section("pill", "Recommended Supplements", info.recommendedSupplements, "amber")}
+  `, true);
+}
+
 function wizIntakeGoals() {
   const goalsQ = S.presets.intakeQuestions.find((q) => q.id === "health_goals");
   wizIntakeShell(`
     <div class="card-title">${icon("sparkle", 19)} Primary Health Objectives</div>
     <p class="hint" style="margin-bottom:14px">Select every goal that applies — choosing <b>Weight loss</b> routes this consultation into the GLP-1 / weight-loss program, and each goal reveals its own follow-up questions next.</p>
     ${renderIntakeQuestion(goalsQ)}
-  `);
+  `, suggestedPeptidesHTML());
   wireIntake(view(), () => wizIntakeGoals());
+  wirePeptideInfoButtons(view());
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => {
     const missing = validateGoals();
