@@ -578,6 +578,7 @@ async function viewConsult() {
   const preselect = (location.hash.match(/patient=(\d+)/) || [])[1];
   S.wizard = {
     step: 0,
+    intakeSub: 0, // sub-step within Intake: identity → clinical → goals → objective
     existingId: preselect ? Number(preselect) : null,
     patient: { name: "", mobile: "", email: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     category: "glp1",
@@ -710,19 +711,24 @@ function wireIntake(scope, rerender) {
   }));
 }
 
-// Validate the mandatory intake fields. Returns an array of missing-field
-// labels (empty = valid). Mobile-OR-email is enough to continue the intake,
-// but a mobile number is still required before publish (portal login = mobile+PIN).
-function validateIntake() {
-  const w = S.wizard, p = w.patient, missing = [];
+// Per-sub-step validators — mobile-OR-email is enough to continue the
+// intake, but a mobile number is still required before publish (portal
+// login = mobile+PIN).
+function validateIdentity() {
+  const p = S.wizard.patient, missing = [];
   if (!p.name.trim()) missing.push("full name");
   if (!p.mobile.trim() && !p.email.trim()) missing.push("mobile number or email");
   if (!p.age) missing.push("age");
   if (!p.gender) missing.push("gender");
   if (!p.heightCm) missing.push("height");
   if (!p.weightKg) missing.push("weight");
+  return missing;
+}
+
+function validateClinical() {
+  const p = S.wizard.patient, missing = [];
   for (const q of S.presets.intakeQuestions) {
-    if (!q.required || !intakeVisible(q)) continue;
+    if (q.section !== "Clinical" || !q.required || !intakeVisible(q)) continue;
     if (q.type === "multiselect") {
       if (p.intake[q.id + "__gate"] === undefined) missing.push(q.question.toLowerCase());
     } else if (!p.intake[q.id]) {
@@ -730,6 +736,11 @@ function validateIntake() {
     }
   }
   return missing;
+}
+
+function validateGoals() {
+  const goals = S.wizard.patient.intake.health_goals;
+  return Array.isArray(goals) && goals.length ? [] : ["at least one health goal"];
 }
 
 // ── Quick fill — deterministic (no AI call) parser for a pasted free-text
@@ -807,22 +818,79 @@ function applyQuickFill(text) {
   return changed;
 }
 
+// ── Intake sub-wizard (mirrors Consult-Buddy's step-per-section flow:
+// Identity & Demographics → Vitals & Medical History → Primary Health
+// Objectives → Objective-Specific). The last sub-step is skipped entirely
+// when no objective-specific question applies to the selected goals —
+// same dynamic step count Consult-Buddy's peptide intake uses.
+function intakeSubSteps() {
+  const steps = [
+    { key: "identity", label: "Identity & Demographics" },
+    { key: "clinical", label: "Vitals & Medical History" },
+    { key: "goals", label: "Primary Health Objectives" },
+  ];
+  const hasObjective = S.presets.intakeQuestions.some((q) => q.section === "Objective-Specific Questions" && intakeVisible(q));
+  if (hasObjective) steps.push({ key: "objective", label: "Objective-Specific Questions" });
+  return steps;
+}
+
+function intakeProgressHTML() {
+  const steps = intakeSubSteps();
+  const idx = Math.min(S.wizard.intakeSub, steps.length - 1);
+  const pct = Math.round(((idx + 1) / steps.length) * 100);
+  return `<div class="intake-progress">
+    <div class="intake-progress-top"><span>Step ${idx + 1} of ${steps.length} — ${esc(steps[idx].label)}</span><span>${pct}%</span></div>
+    <div class="intake-progress-bar"><div style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function advanceIntake() {
+  const steps = intakeSubSteps();
+  if (S.wizard.intakeSub + 1 < steps.length) { S.wizard.intakeSub++; wizStepIntake(); }
+  else { S.wizard.step = 1; paintWizard(); }
+}
+
+function retreatIntake() {
+  if (S.wizard.intakeSub > 0) { S.wizard.intakeSub--; wizStepIntake(); }
+}
+
+function wizIntakeShell(bodyHtml) {
+  const steps = intakeSubSteps();
+  const idx = S.wizard.intakeSub;
+  view().innerHTML = `${wizHead()}
+  <div class="card card-pad" style="max-width:820px">
+    ${intakeProgressHTML()}
+    ${bodyHtml}
+    <p class="err-text" id="wz-err" hidden role="alert"></p>
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px">
+      <button class="btn btn-ghost" id="wz-back" ${idx === 0 ? "disabled" : ""}>${icon("chevL", 17)} Back</button>
+      <button class="btn btn-primary" id="wz-next">${idx === steps.length - 1 ? "Continue to program" : "Continue"} ${icon("chevR", 17)}</button>
+    </div>
+  </div>`;
+}
+
+function showIntakeErr(missing) {
+  const err = document.getElementById("wz-err");
+  err.textContent = `Please complete: ${missing.join(", ")}.`;
+  err.hidden = false;
+}
+
 function wizStepIntake() {
+  const key = intakeSubSteps()[Math.min(S.wizard.intakeSub, intakeSubSteps().length - 1)].key;
+  if (key === "identity") return wizIntakeIdentity();
+  if (key === "clinical") return wizIntakeClinical();
+  if (key === "goals") return wizIntakeGoals();
+  return wizIntakeObjective();
+}
+
+// ── Sub-step 1: Identity & Demographics ───────────────────────────────
+function wizIntakeIdentity() {
   const w = S.wizard;
   const genderChips = ["Male", "Female", "Other"];
   const titleChips = ["Mr", "Ms", "Mrs", "Dr"];
 
-  // Group intake questions by section (visible only)
-  const sections = S.presets.intakeSections.map((sec) => ({
-    sec,
-    qs: S.presets.intakeQuestions.filter((q) => q.section === sec && intakeVisible(q)),
-  })).filter((s) => s.qs.length);
-
-  const secIcon = (sec) => sec === "Primary Health Objectives" ? "sparkle" : sec === "Objective-Specific Questions" ? "activity" : "shield";
-
-  view().innerHTML = `${wizHead()}
-  <div class="card card-pad" style="max-width:820px">
-    <div class="card-title">${icon("user", 19)} Intake &amp; assessment</div>
+  wizIntakeShell(`
+    <div class="card-title">${icon("user", 19)} Identity &amp; Demographics</div>
     <div class="field">
       <label for="wz-existing">Existing patient</label>
       <select class="input" id="wz-existing">
@@ -858,17 +926,7 @@ function wizStepIntake() {
       <div class="field"><label for="wp-weight">Weight (kg) <span class="req">*</span></label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
     </div>
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
-
-    ${sections.map((s) => `
-      <div class="intake-sec-title">${icon(secIcon(s.sec), 15)} ${esc(s.sec)}</div>
-      ${s.qs.map(renderIntakeQuestion).join("")}
-    `).join("")}
-
-    <p class="err-text" id="wz-err" hidden role="alert"></p>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
-    </div>
-  </div>`;
+  `);
 
   const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight" };
   const commitDemo = () => {
@@ -884,17 +942,15 @@ function wizStepIntake() {
     commitDemo();
     const f = b.dataset.demochip, v = b.dataset.v;
     w.patient[f] = (w.patient[f] === v ? "" : v);
-    wizStepIntake();
+    wizIntakeIdentity();
   }));
-
-  wireIntake(view(), () => { commitDemo(); wizStepIntake(); });
 
   document.getElementById("qf-parse").addEventListener("click", () => {
     commitDemo();
     const inp = document.getElementById("qf-input");
     if (!inp.value.trim()) return;
     const changed = applyQuickFill(inp.value);
-    wizStepIntake();
+    wizIntakeIdentity();
     toast(changed.length ? `Filled in: ${changed.join(", ")}` : "Nothing recognised — please fill in manually", changed.length ? "ok" : "bad");
   });
   document.getElementById("qf-input").addEventListener("keydown", (e) => {
@@ -912,23 +968,108 @@ function wizStepIntake() {
         intake: p.intake_json ? JSON.parse(p.intake_json) : {},
       });
     }
-    wizStepIntake();
+    wizIntakeIdentity();
   });
 
+  document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => {
     commitDemo();
-    const err = document.getElementById("wz-err");
-    const missing = validateIntake();
-    if (missing.length) {
-      err.textContent = `Please complete: ${missing.join(", ")}.`;
-      err.hidden = false;
-      return;
-    }
-    err.hidden = true;
-    if ((w.patient.intake.health_goals || []).includes("Weight loss")) w.category = "glp1";
-    w.step = 1;
-    paintWizard();
+    const missing = validateIdentity();
+    if (missing.length) return showIntakeErr(missing);
+    advanceIntake();
   });
+}
+
+// ── Sub-step 2: Vitals & Medical History ──────────────────────────────
+function wizIntakeClinical() {
+  const w = S.wizard;
+  const m = wizMetrics();
+  const bmiColor = !m.bmi ? "var(--bg)" : m.bmi < 18.5 ? "var(--primary-soft)" : m.bmi < 25 ? "var(--accent-soft)" : m.bmi < 30 ? "var(--amber-soft)" : "var(--danger-soft)";
+  const bmiFg = !m.bmi ? "var(--muted)" : m.bmi < 18.5 ? "var(--primary)" : m.bmi < 25 ? "var(--accent)" : m.bmi < 30 ? "var(--amber)" : "var(--danger)";
+
+  const qById = (id) => S.presets.intakeQuestions.find((q) => q.id === id);
+  const chronicQ = qById("health_conditions"), allergyQ = qById("allergies"), cancerQ = qById("cancer_history"), glp1Q = qById("previous_glp1");
+  const pregQ = qById("is_pregnant"), breastQ = qById("is_breastfeeding");
+  const showPregBox = w.patient.gender === "Female";
+
+  wizIntakeShell(`
+    <div class="card-title">${icon("clipboard", 19)} Vitals &amp; Medical History</div>
+
+    <div class="bmi-badge" style="background:${bmiColor};color:${bmiFg}">
+      <span>BMI: ${m.bmi ?? "—"}</span>
+      <span class="cat">${esc(m.bmiCat || "Waiting for data…")}</span>
+    </div>
+
+    <div class="metabolic-box">
+      <h3>${icon("flame", 14)} Metabolic stats</h3>
+      <div class="metabolic-grid">
+        <div><div class="m-lbl">BMR (resting)</div><div class="m-val">${m.bmr ?? "—"} <span style="font-size:12px;font-weight:500">kcal</span></div></div>
+        <div><div class="m-lbl">${icon("utensils", 12)} Maintenance (TDEE)</div><div class="m-val">${m.tdee ?? "—"} <span style="font-size:12px;font-weight:500">kcal</span></div></div>
+      </div>
+      <div class="metabolic-target">
+        <div class="m-lbl">${icon("trend", 12)} Weight-loss target</div>
+        <div class="m-val">${m.target ?? "—"} <span style="font-size:13px;font-weight:500">kcal/day</span></div>
+      </div>
+    </div>
+
+    ${showPregBox ? `
+    <div class="preg-box">
+      <h3>Pregnancy screening</h3>
+      ${renderIntakeQuestion(pregQ)}
+      ${renderIntakeQuestion(breastQ)}
+    </div>` : ""}
+
+    <div class="clinical-box chronic">
+      <h3>${icon("shield", 13)} Chronic illnesses</h3>
+      ${renderIntakeQuestion(chronicQ)}
+    </div>
+
+    <div class="clinical-box allergy">
+      <h3>${icon("alert", 13)} Allergy history</h3>
+      ${renderIntakeQuestion(allergyQ)}
+    </div>
+
+    ${renderIntakeQuestion(cancerQ)}
+    ${renderIntakeQuestion(glp1Q)}
+  `);
+
+  wireIntake(view(), () => wizIntakeClinical());
+  document.getElementById("wz-back").addEventListener("click", retreatIntake);
+  document.getElementById("wz-next").addEventListener("click", () => {
+    const missing = validateClinical();
+    if (missing.length) return showIntakeErr(missing);
+    advanceIntake();
+  });
+}
+
+// ── Sub-step 3: Primary Health Objectives ─────────────────────────────
+function wizIntakeGoals() {
+  const goalsQ = S.presets.intakeQuestions.find((q) => q.id === "health_goals");
+  wizIntakeShell(`
+    <div class="card-title">${icon("sparkle", 19)} Primary Health Objectives</div>
+    <p class="hint" style="margin-bottom:14px">Select every goal that applies — choosing <b>Weight loss</b> routes this consultation into the GLP-1 / weight-loss program, and each goal reveals its own follow-up questions next.</p>
+    ${renderIntakeQuestion(goalsQ)}
+  `);
+  wireIntake(view(), () => wizIntakeGoals());
+  document.getElementById("wz-back").addEventListener("click", retreatIntake);
+  document.getElementById("wz-next").addEventListener("click", () => {
+    const missing = validateGoals();
+    if (missing.length) return showIntakeErr(missing);
+    if ((S.wizard.patient.intake.health_goals || []).includes("Weight loss")) S.wizard.category = "glp1";
+    advanceIntake();
+  });
+}
+
+// ── Sub-step 4: Objective-Specific Questions (skipped if none apply) ──
+function wizIntakeObjective() {
+  const qs = S.presets.intakeQuestions.filter((q) => q.section === "Objective-Specific Questions" && intakeVisible(q));
+  wizIntakeShell(`
+    <div class="card-title">${icon("activity", 19)} Objective-Specific Questions</div>
+    ${qs.map(renderIntakeQuestion).join("")}
+  `);
+  wireIntake(view(), () => wizIntakeObjective());
+  document.getElementById("wz-back").addEventListener("click", retreatIntake);
+  document.getElementById("wz-next").addEventListener("click", () => advanceIntake());
 }
 
 function wizStepProgram() {
