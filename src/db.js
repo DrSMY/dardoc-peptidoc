@@ -158,23 +158,32 @@ function seed() {
     console.log(`Seeded admin account: ${email} (change the password after first login)`);
   }
 
-  const tplCount = db.prepare("SELECT COUNT(*) AS n FROM templates").get().n;
-  if (tplCount === 0) {
-    const ins = db.prepare("INSERT INTO templates (name, category, config_json, builtin) VALUES (?,?,?,1)");
-    for (const [med, cfg] of Object.entries(presets.GLP1_MEDICATIONS)) {
-      ins.run(med, "glp1", JSON.stringify({
-        medication: med,
-        generic: cfg.generic,
-        route: cfg.route,
-        frequency: cfg.frequency,
-        halfLifeHours: cfg.halfLifeHours,
-        doses: cfg.doses,
-      }));
-    }
-    for (const [pep, protocols] of Object.entries(presets.PEPTIDE_PROTOCOLS)) {
-      ins.run(pep, "peptide", JSON.stringify({ medication: pep, protocols }));
-    }
-    console.log("Seeded built-in GLP-1 and peptide templates");
+  // Builtin templates mirror src/presets.js — upsert by name so clinical
+  // data updates (new protocols, titration schedules) propagate to existing
+  // databases on boot. Custom (non-builtin) templates are untouched.
+  const findBuiltin = db.prepare("SELECT id FROM templates WHERE name = ? AND builtin = 1");
+  const insertTpl = db.prepare("INSERT INTO templates (name, category, config_json, builtin) VALUES (?,?,?,1)");
+  const updateTpl = db.prepare("UPDATE templates SET category = ?, config_json = ? WHERE id = ?");
+  const upsertBuiltin = (name, category, config) => {
+    const existing = findBuiltin.get(name);
+    const configJson = JSON.stringify(config);
+    if (existing) updateTpl.run(category, configJson, existing.id);
+    else insertTpl.run(name, category, configJson);
+  };
+  for (const [med, cfg] of Object.entries(presets.GLP1_MEDICATIONS)) {
+    upsertBuiltin(med, "glp1", {
+      medication: med,
+      generic: cfg.generic,
+      route: cfg.route,
+      frequency: cfg.frequency,
+      halfLifeHours: cfg.halfLifeHours,
+      doses: cfg.doses,
+      titration: cfg.titration,
+      administration: cfg.administration,
+    });
+  }
+  for (const [pep, protocols] of Object.entries(presets.PEPTIDE_PROTOCOLS)) {
+    upsertBuiltin(pep, "peptide", { medication: pep, protocols });
   }
 }
 

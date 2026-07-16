@@ -149,11 +149,14 @@ route("GET", "/api/presets", (req, res) => {
     phasesWeekly: presets.PK_PHASES_WEEKLY,
     phasesDaily: presets.PK_PHASES_DAILY,
     activityLevels: presets.ACTIVITY_LEVELS,
+    bodyShapes: presets.BODY_SHAPES,
     intakeSections: presets.INTAKE_SECTIONS,
     intakeQuestions: presets.INTAKE_QUESTIONS,
     weightLossGoals: presets.WEIGHT_LOSS_GOALS,
     healthGoalPeptides: presets.HEALTH_GOAL_PEPTIDES,
     peptideInfo: presets.PEPTIDE_INFO,
+    goalDescriptions: presets.GOAL_DESCRIPTIONS,
+    glp1Eligibility: presets.GLP1_ELIGIBILITY,
   });
 });
 

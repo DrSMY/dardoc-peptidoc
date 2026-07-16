@@ -266,7 +266,7 @@ async function viewPatients() {
   <div class="card" id="pt-list"></div>`;
   const paint = (q = "") => {
     const list = S.patients.filter((p) =>
-      !q || p.name.toLowerCase().includes(q) || String(p.mobile).includes(q.replace(/\D/g, "") || " "));
+      !q || p.name.toLowerCase().includes(q) || String(p.mobile).includes(q.replace(/\D/g, "") || " "));
     document.getElementById("pt-list").innerHTML = list.length ? list.map((p) => `
       <a class="pt-row" href="#/patient/${p.id}">
         <div class="avatar">${esc(initials(p.name))}</div>
@@ -671,7 +671,7 @@ function renderIntakeQuestion(q) {
         <button type="button" class="chip ${ans[q.id + "__gate"] === false ? "on" : ""}" data-gate="${q.id}" data-v="no">No</button>
       </div>` : ""}
       ${gateOn ? `<div class="chip-row">
-        ${q.options.map((o) => `<button type="button" class="chip ${selected.includes(o) ? "on" : ""}" data-iqmulti="${q.id}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}
+        ${q.options.map((o) => `<button type="button" class="chip ${selected.includes(o) ? "on" : ""}" data-iqmulti="${q.id}" data-v="${esc(o)}"${q.id === "health_goals" && (S.presets.goalDescriptions || {})[o] ? ` title="${esc(S.presets.goalDescriptions[o])}"` : ""}>${esc(o)}</button>`).join("")}
         ${q.hasOther ? `<button type="button" class="chip ${selected.includes("Other") ? "on" : ""}" data-iqmulti="${q.id}" data-v="Other">Other</button>` : ""}
       </div>
       ${q.hasOther && selected.includes("Other") ? `<input class="input" data-iqother="${q.id}" placeholder="Other — please specify" value="${esc(ans[q.id + "__other"] || "")}" style="margin-top:6px">` : ""}
@@ -927,6 +927,8 @@ function wizIntakeIdentity() {
       <div class="field"><label>Gender <span class="req">*</span></label><div class="chip-row">${genderChips.map((g) => `<button type="button" class="chip ${w.patient.gender === g ? "on" : ""}" data-demochip="gender" data-v="${g}">${g}</button>`).join("")}</div></div>
       <div class="field"><label for="wp-height">Height (cm) <span class="req">*</span></label><input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}"></div>
       <div class="field"><label for="wp-weight">Weight (kg) <span class="req">*</span></label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
+      <div class="field full"><label>Activity level</label><div class="chip-row">${Object.keys(S.presets.activityLevels || {}).map((a) => `<button type="button" class="chip ${w.patient.activityLevel === a ? "on" : ""}" data-demochip="activityLevel" data-v="${a}">${a}</button>`).join("")}</div></div>
+      <div class="field full"><label>Body shape</label><div class="chip-row">${(S.presets.bodyShapes || []).map((b) => `<button type="button" class="chip ${w.patient.intake.body_shape === b ? "on" : ""}" data-demochip="intake.body_shape" data-v="${b}">${b}</button>`).join("")}</div></div>
     </div>
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
   `);
@@ -1256,10 +1258,10 @@ function wizStepProgram() {
       ${phasesEditor()}`;
       det.querySelector("#g-dose").addEventListener("change", (e) => {
         w.dose = e.target.value;
-        w.phases = suggestTitration(doses, w.dose);
+        w.phases = suggestTitration(doses, w.dose, w.template.config.titration);
         wizStepProgram();
       });
-      if (!w.phases.length) w.phases = suggestTitration(doses, w.dose);
+      if (!w.phases.length) w.phases = suggestTitration(doses, w.dose, w.template.config.titration);
       det.insertAdjacentHTML("beforeend", "");
       // re-render phases with suggestion
       det.querySelector("#phases-box").outerHTML = phasesRows();
@@ -1324,7 +1326,20 @@ function inferFreqLabel(time) {
   return "daily";
 }
 
-function suggestTitration(ladder, start) {
+// Uses the real per-medication titration schedule (src/presets.js
+// GLP1_MEDICATIONS[].titration) when available; falls back to a generic
+// 2-step suggestion for medications/peptides without one.
+function suggestTitration(ladder, start, schedule) {
+  if (schedule && schedule.length) {
+    const idx = schedule.findIndex((s) => s.dose === start);
+    const from = idx >= 0 ? idx : 0;
+    return schedule.slice(from).map((s) => ({
+      label: s.note || s.dose,
+      dose: s.dose,
+      weeks: s.weeks ?? "",
+      note: s.weeks ? `${s.weeks}-week step — confirm tolerance at follow-up before advancing` : "Maintenance dose — continue until reviewed",
+    }));
+  }
   const i = ladder.indexOf(start);
   const phases = [{ label: "Starting phase", dose: start, weeks: 4, note: "Begin here — take it slow and steady" }];
   if (i >= 0 && i + 1 < ladder.length) {
@@ -1377,12 +1392,17 @@ function wirePhases(scope) {
 function defaultInstructions() {
   const w = S.wizard;
   if (w.category === "glp1") {
-    return w.route === "oral"
-      ? "Take your tablet first thing in the morning on an empty stomach with a small sip of water. Wait at least 30 minutes before eating, drinking or taking other medicines.\nEat slowly, stop when comfortably full, and prioritise protein at every meal.\nStay well hydrated (2–3 L water daily)."
-      : "Inject once weekly, on the same day each week, at any time of day.\nRotate injection sites: abdomen, thigh, or upper arm.\nEat slowly, stop when comfortably full, and prioritise protein at every meal.\nStay well hydrated (2–3 L water daily).";
+    const admin = w.template && w.template.config.administration;
+    const base = admin || (w.route === "oral"
+      ? "Take your tablet first thing in the morning on an empty stomach with a small sip of water. Wait at least 30 minutes before eating, drinking or taking other medicines."
+      : "Inject once weekly, on the same day each week, at any time of day. Rotate injection sites: abdomen, thigh, or upper arm.");
+    return `${base}\nEat slowly, stop when comfortably full, and prioritise protein at every meal.\nStay well hydrated (2–3 L water daily).`;
   }
   if (w.category === "peptide" && w.protocol) {
-    return `${w.protocol.time}.\nRoute: ${w.protocol.route}.\nCycle: ${w.protocol.cycle}.\nStore vials refrigerated (2–8°C) away from light.`;
+    const info = (S.presets.peptideInfo || {})[w.medication];
+    const storage = (info && info.storageNotes) || "Store vials refrigerated (2–8°C) away from light.";
+    const missed = info && info.missedDose ? `\nMissed dose: ${info.missedDose}` : "";
+    return `${w.protocol.time}.\nRoute: ${w.protocol.route}.\nCycle: ${w.protocol.cycle}.\n${storage}${missed}`;
   }
   return "";
 }
@@ -1390,9 +1410,15 @@ function defaultInstructions() {
 function defaultWarnings() {
   const w = S.wizard;
   if (w.category === "glp1") {
-    return "Contact me promptly if you experience: severe or persistent abdominal pain, repeated vomiting or inability to keep fluids down, signs of dehydration (dizziness, dark urine), severe constipation lasting more than 4 days, or an allergic reaction (rash, swelling, difficulty breathing).\nMild nausea, softer stools and reduced appetite are common in the first weeks and usually settle.";
+    const flags = (S.presets.glp1Eligibility && S.presets.glp1Eligibility.redFlags) || [];
+    const flagsText = flags.length ? `Contact me promptly if you experience:\n- ${flags.join("\n- ")}` : "Contact me promptly if you experience any severe or concerning symptom.";
+    return `${flagsText}\nMild nausea, softer stools and reduced appetite are common in the first weeks and usually settle.`;
   }
   if (w.category === "peptide") {
+    const info = (S.presets.peptideInfo || {})[w.medication];
+    if (info && info.redFlags && info.redFlags.length) {
+      return `Contact me promptly if you notice:\n- ${info.redFlags.join("\n- ")}`;
+    }
     return "Contact me if you notice: significant redness, swelling or pain at the injection site, rash or itching elsewhere, unusual fatigue, or any symptom that concerns you.";
   }
   return "Contact your doctor if you experience any unexpected or severe symptoms.";
