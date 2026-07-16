@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Admin — DarDoc · PeptiDoc</title>
+<link rel="stylesheet" href="/theme.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%236C4FB0'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'>A</text></svg>">
+<style>
+  /* ── app shell (mirrors /doctor's, brand-tinted violet for super admin) ── */
+  .shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100dvh; }
+  .sidebar {
+    background: var(--violet); color: #EAE3F7;
+    display: flex; flex-direction: column; padding: 20px 14px;
+    position: sticky; top: 0; height: 100dvh;
+  }
+  .sb-brand { display: flex; align-items: center; gap: 11px; padding: 4px 10px 20px; color: #fff; }
+  .sb-mark { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; }
+  .sb-name { font-family: var(--font-head); font-weight: 800; font-size: 15.5px; line-height: 1.15; }
+  .sb-sub { font-size: 11px; opacity: .7; }
+  .sb-nav { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+  .sb-link {
+    display: flex; align-items: center; gap: 12px; padding: 11px 12px;
+    border-radius: var(--r-md); color: #DCCEF2; text-decoration: none;
+    font-family: var(--font-head); font-weight: 600; font-size: 14.5px;
+    transition: background .15s var(--ease), color .15s var(--ease);
+  }
+  .sb-link:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .sb-link.on { background: rgba(255,255,255,.16); color: #fff; }
+  .sb-user { display: flex; align-items: center; gap: 10px; padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.14); color: #fff; }
+  .sb-user .avatar { background: rgba(255,255,255,.16); color: #fff; width: 36px; height: 36px; font-size: 13px; }
+  .sb-user-name { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
+  .sb-user-role { font-size: 11px; opacity: .7; }
+  .sb-user .icon-btn { margin-left: auto; color: #DCCEF2; }
+  .sb-user .icon-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+  .main { padding: clamp(16px, 3vw, 32px); max-width: 1200px; width: 100%; margin: 0 auto; }
+  .page-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+  .page-head h1 { font-size: clamp(21px, 3vw, 26px); font-weight: 800; }
+  .page-head .sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
+
+  .mobile-bar, .m-nav { display: none; }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .mobile-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      position: sticky; top: 0; z-index: 50;
+      background: var(--violet); color: #fff; padding: 12px 16px;
+    }
+    .mobile-bar .brand-line { display: flex; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 800; font-size: 15.5px; }
+    .m-nav {
+      display: flex; position: sticky; top: 58px; z-index: 49;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .m-nav a {
+      flex-shrink: 0; padding: 12px 15px; text-decoration: none; color: var(--muted);
+      font-family: var(--font-head); font-weight: 600; font-size: 13.5px;
+      border-bottom: 2.5px solid transparent;
+    }
+    .m-nav a.on { color: var(--violet); border-bottom-color: var(--violet); }
+  }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--border); margin-bottom: 18px; overflow-x: auto; }
+  .tab {
+    padding: 11px 16px; border: none; background: none; color: var(--muted);
+    font-family: var(--font-head); font-weight: 600; font-size: 14px;
+    border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; white-space: nowrap; cursor: pointer;
+  }
+  .tab.on { color: var(--violet); border-bottom-color: var(--violet); }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  .metric-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
+  .metric { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 14px; font-size: 13px; }
+  .metric b { font-family: var(--font-head); font-size: 15px; display: block; }
+
+  /* admin-specific: protocol/kb list rows + editors */
+  .adm-row { display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .adm-row:last-child { border-bottom: none; }
+  .adm-row:hover { background: #FAFCFC; }
+  .adm-row-info { flex: 1; min-width: 0; }
+  .adm-row-name { font-family: var(--font-head); font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 8px; }
+  .adm-row-meta { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+  .json-editor { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; min-height: 220px; white-space: pre; }
+  .kb-editor { min-height: 260px; }
+  .modal-wide { width: min(680px, 100%); }
+  .goal-matrix-row { display: grid; grid-template-columns: 1.4fr 1fr 90px 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
+  @media (max-width: 700px) { .goal-matrix-row { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/shared.js"></script>
+<script src="/admin/app.js"></script>
+</body>
+</html>

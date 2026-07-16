@@ -26,6 +26,7 @@ const PAGE_ROUTES = {
   "/": "index.html",
   "/doctor": "doctor/index.html",
   "/portal": "portal/index.html",
+  "/admin": "admin/index.html",
 };
 
 function serveFile(res, filePath) {

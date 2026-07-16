@@ -72,7 +72,33 @@ CREATE TABLE IF NOT EXISTS templates (
   category TEXT NOT NULL DEFAULT 'custom',
   config_json TEXT NOT NULL DEFAULT '{}',
   builtin INTEGER NOT NULL DEFAULT 0,
+  is_customized INTEGER NOT NULL DEFAULT 0,    -- edited via super admin panel — never re-seeded from presets.js
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS peptide_info (
+  name TEXT PRIMARY KEY,
+  data_json TEXT NOT NULL DEFAULT '{}',        -- clinical + patient-facing fields (see src/presets.js PEPTIDE_INFO shape)
+  is_customized INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS health_goal_peptides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal TEXT NOT NULL,
+  peptide_name TEXT NOT NULL,
+  priority TEXT NOT NULL DEFAULT 'Secondary',  -- Primary | Secondary
+  is_customized INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(goal, peptide_name)
+);
+
+CREATE TABLE IF NOT EXISTS kb_articles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'General',
+  body TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS dose_logs (
@@ -131,6 +157,7 @@ addColumn("patients", "intake_json", "TEXT DEFAULT '{}'");        // structured 
 addColumn("patients", "email", "TEXT DEFAULT ''");                // optional — identity alongside/instead of mobile
 addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
 addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
+addColumn("templates", "is_customized", "INTEGER NOT NULL DEFAULT 0"); // edited via super admin panel
 
 // ── password / pin hashing (scrypt) ─────────────────────────────
 function hashSecret(secret) {
@@ -149,23 +176,36 @@ function verifySecret(secret, stored) {
 
 // ── seed ─────────────────────────────────────────────────────────
 function seed() {
-  const userCount = db.prepare("SELECT COUNT(*) AS n FROM users").get().n;
-  if (userCount === 0) {
-    const email = process.env.ADMIN_EMAIL || "drsamimoha2018@gmail.com";
-    const password = process.env.ADMIN_PASSWORD || "DarDoc@2026";
+  // Dr. Sami's own account is the super admin — one login for both running
+  // consultations and managing clinical protocols/knowledge base. Fresh
+  // databases get it seeded directly as 'superadmin'; a database seeded
+  // before the super admin panel existed gets promoted once (and its
+  // password reset to the value below) the first time this code runs
+  // against it — after that one-time promotion it's left alone so a later
+  // password change (via Settings) is never clobbered on reboot.
+  const adminEmail = (process.env.ADMIN_EMAIL || "drsamimoha2018@gmail.com").toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || "Drsami@1985";
+  const existingAdmin = db.prepare("SELECT * FROM users WHERE email = ?").get(adminEmail);
+  if (!existingAdmin) {
     db.prepare("INSERT INTO users (email, password_hash, name, role) VALUES (?,?,?,?)")
-      .run(email.toLowerCase(), hashSecret(password), "Dr. Sami", "admin");
-    console.log(`Seeded admin account: ${email} (change the password after first login)`);
+      .run(adminEmail, hashSecret(adminPassword), "Dr. Sami", "superadmin");
+    console.log(`Seeded super admin account: ${adminEmail}`);
+  } else if (existingAdmin.role !== "superadmin") {
+    db.prepare("UPDATE users SET role = 'superadmin', password_hash = ? WHERE id = ?")
+      .run(hashSecret(adminPassword), existingAdmin.id);
+    console.log(`Promoted ${adminEmail} to super admin (password reset)`);
   }
 
-  // Builtin templates mirror src/presets.js — upsert by name so clinical
-  // data updates (new protocols, titration schedules) propagate to existing
-  // databases on boot. Custom (non-builtin) templates are untouched.
-  const findBuiltin = db.prepare("SELECT id FROM templates WHERE name = ? AND builtin = 1");
+  // Builtin templates/peptide-info/health-goal-mappings mirror src/presets.js
+  // — upserted by name on every boot so code-pushed clinical-data updates
+  // propagate to existing databases, EXCEPT rows the super admin panel has
+  // customized (is_customized = 1), which are left untouched forever.
+  const findBuiltin = db.prepare("SELECT id, is_customized FROM templates WHERE name = ? AND builtin = 1");
   const insertTpl = db.prepare("INSERT INTO templates (name, category, config_json, builtin) VALUES (?,?,?,1)");
   const updateTpl = db.prepare("UPDATE templates SET category = ?, config_json = ? WHERE id = ?");
   const upsertBuiltin = (name, category, config) => {
     const existing = findBuiltin.get(name);
+    if (existing && existing.is_customized) return;
     const configJson = JSON.stringify(config);
     if (existing) updateTpl.run(category, configJson, existing.id);
     else insertTpl.run(name, category, configJson);
@@ -184,6 +224,24 @@ function seed() {
   }
   for (const [pep, protocols] of Object.entries(presets.PEPTIDE_PROTOCOLS)) {
     upsertBuiltin(pep, "peptide", { medication: pep, protocols });
+  }
+
+  const findInfo = db.prepare("SELECT is_customized FROM peptide_info WHERE name = ?");
+  const upsertInfo = db.prepare(`
+    INSERT INTO peptide_info (name, data_json) VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET data_json = excluded.data_json, updated_at = datetime('now')`);
+  for (const [name, info] of Object.entries(presets.PEPTIDE_INFO)) {
+    const existing = findInfo.get(name);
+    if (existing && existing.is_customized) continue;
+    upsertInfo.run(name, JSON.stringify(info));
+  }
+
+  const goalCount = db.prepare("SELECT COUNT(*) AS n FROM health_goal_peptides").get().n;
+  if (goalCount === 0) {
+    const insertGoal = db.prepare("INSERT OR IGNORE INTO health_goal_peptides (goal, peptide_name, priority) VALUES (?,?,?)");
+    for (const [goal, list] of Object.entries(presets.HEALTH_GOAL_PEPTIDES)) {
+      for (const item of list) insertGoal.run(goal, item.name, item.priority);
+    }
   }
 }
 

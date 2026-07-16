@@ -95,6 +95,7 @@ const NAV = [
   { hash: "#/consult", label: "New consultation", ico: "plus" },
   { hash: "#/patients", label: "Patients", ico: "users" },
   { hash: "#/templates", label: "Program library", ico: "layers" },
+  { hash: "#/kb", label: "Knowledge Base", ico: "book" },
   { hash: "#/settings", label: "Settings", ico: "settings" },
 ];
 
@@ -149,6 +150,7 @@ function route() {
   if (h.startsWith("#/patients")) return viewPatients();
   if (h.startsWith("#/consult")) return viewConsult();
   if (h.startsWith("#/templates")) return viewTemplates();
+  if (h.startsWith("#/kb")) return viewKb();
   if (h.startsWith("#/settings")) return viewSettings();
   return viewDashboard();
 }
@@ -1843,6 +1845,52 @@ function publishedModal(patientId, w, pin) {
 }
 
 // ── templates library ────────────────────────────────────────────
+// ── knowledge base (read-only — managed by the super admin panel) ──
+async function viewKb() {
+  view().innerHTML = `<div class="skel" style="height:300px"></div>`;
+  const articles = await api("GET", "/api/kb");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>Knowledge Base</h1><div class="sub">Reference articles maintained by your super admin</div></div>
+  </div>
+  <div class="field" style="max-width:420px">
+    <label for="kb-search" style="position:absolute;left:-9999px">Search knowledge base</label>
+    <input class="input" id="kb-search" type="search" placeholder="Search articles…">
+  </div>
+  <div id="kb-results"></div>`;
+
+  const paint = (q = "") => {
+    const list = articles.filter((a) => !q || a.title.toLowerCase().includes(q) || a.category.toLowerCase().includes(q));
+    const byCat = {};
+    for (const a of list) (byCat[a.category] || (byCat[a.category] = [])).push(a);
+    document.getElementById("kb-results").innerHTML = list.length ? Object.entries(byCat).map(([cat, items]) => `
+      <h2 style="font-size:16px;margin:18px 0 10px;color:var(--brand)">${esc(cat)}</h2>
+      <div class="card">
+        ${items.map((a) => `
+          <div class="pt-row" data-kbarticle="${a.id}">
+            <div class="pt-info">
+              <div class="pt-name">${esc(a.title)}</div>
+              <div class="pt-meta">Updated ${esc(fmtDate(a.updated_at))}</div>
+            </div>
+            ${icon("chevR", 17)}
+          </div>`).join("")}
+      </div>`).join("") : `<div class="empty">${icon("book", 34)}<div class="empty-title">${q ? "No matching articles" : "No articles yet"}</div><p>${q ? "Try a different search." : "Your super admin can add reference articles from the admin panel."}</p></div>`;
+    document.getElementById("kb-results").querySelectorAll("[data-kbarticle]").forEach((r) => r.addEventListener("click", () => {
+      const a = articles.find((x) => x.id === Number(r.dataset.kbarticle));
+      modal(`
+        <div class="modal-head">
+          <h3>${esc(a.title)}</h3>
+          <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
+        </div>
+        <span class="badge badge-violet" style="margin-bottom:14px;display:inline-block">${esc(a.category)}</span>
+        <p style="font-size:14.5px;line-height:1.65;white-space:pre-wrap">${esc(a.body)}</p>
+      `, true);
+    }));
+  };
+  paint();
+  document.getElementById("kb-search").addEventListener("input", (e) => paint(e.target.value.toLowerCase().trim()));
+}
+
 async function viewTemplates() {
   const cats = [
     { key: "glp1", label: "GLP-1 / Weight loss" },

@@ -61,6 +61,13 @@ function getDoctor(req) {
   return db.prepare("SELECT id, email, name, role FROM users WHERE id = ?").get(s.ref_id) || null;
 }
 
+// Super admin: a distinct role (not "doctor"/"admin") dedicated to managing
+// clinical protocols and the knowledge base — separate login, no patient access.
+function requireSuperadmin(req) {
+  const user = getDoctor(req);
+  return user && user.role === "superadmin" ? user : null;
+}
+
 function getPatient(req) {
   const token = getCookies(req).pdpat;
   if (!token) return null;
@@ -143,6 +150,22 @@ route("POST", "/api/auth/password", async (req, res, _p, body) => {
 });
 
 // ── presets & templates ─────────────────────────────────────────
+// Peptide info + health-goal mappings are served live from the DB (seeded
+// from presets.js, then editable via the super admin panel — see src/db.js
+// seed() for the is_customized protection against being overwritten).
+function dbPeptideInfo() {
+  const out = {};
+  for (const r of db.prepare("SELECT name, data_json FROM peptide_info").all()) out[r.name] = JSON.parse(r.data_json);
+  return out;
+}
+function dbHealthGoalPeptides() {
+  const out = {};
+  for (const r of db.prepare("SELECT goal, peptide_name, priority FROM health_goal_peptides ORDER BY id").all()) {
+    (out[r.goal] || (out[r.goal] = [])).push({ name: r.peptide_name, priority: r.priority });
+  }
+  return out;
+}
+
 route("GET", "/api/presets", (req, res) => {
   json(res, 200, {
     symptoms: presets.SYMPTOMS,
@@ -153,8 +176,8 @@ route("GET", "/api/presets", (req, res) => {
     intakeSections: presets.INTAKE_SECTIONS,
     intakeQuestions: presets.INTAKE_QUESTIONS,
     weightLossGoals: presets.WEIGHT_LOSS_GOALS,
-    healthGoalPeptides: presets.HEALTH_GOAL_PEPTIDES,
-    peptideInfo: presets.PEPTIDE_INFO,
+    healthGoalPeptides: dbHealthGoalPeptides(),
+    peptideInfo: dbPeptideInfo(),
     goalDescriptions: presets.GOAL_DESCRIPTIONS,
     glp1Eligibility: presets.GLP1_ELIGIBILITY,
   });
@@ -173,6 +196,130 @@ route("POST", "/api/templates", async (req, res, _p, body) => {
   const r = db.prepare("INSERT INTO templates (name, category, config_json) VALUES (?,?,?)")
     .run(body.name, body.category || "custom", JSON.stringify(body.config || {}));
   json(res, 200, { id: Number(r.lastInsertRowid) });
+});
+
+// ── super admin: protocols & knowledge base ─────────────────────
+route("POST", "/api/admin/login", async (req, res, _p, body) => {
+  const email = String(body.email || "").toLowerCase().trim();
+  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  if (!user || !verifySecret(body.password || "", user.password_hash) || user.role !== "superadmin") {
+    return json(res, 401, { error: "Invalid email or password." });
+  }
+  setSession(res, "doctor", user.id);
+  json(res, 200, { id: user.id, name: user.name, email: user.email, role: user.role });
+});
+
+route("GET", "/api/admin/me", (req, res) => {
+  const user = requireSuperadmin(req);
+  if (!user) return json(res, 401, { error: "Not signed in as super admin." });
+  json(res, 200, user);
+});
+
+// Protocols: builtin GLP-1 medications & peptide dosing ladders (the
+// `templates` table — same one doctors read from, edits here go live
+// immediately and are protected from the next code-push reseed).
+route("PUT", "/api/admin/templates/:id", async (req, res, p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const row = db.prepare("SELECT id FROM templates WHERE id = ?").get(Number(p.id));
+  if (!row) return json(res, 404, { error: "Protocol not found." });
+  db.prepare("UPDATE templates SET name = ?, category = ?, config_json = ?, is_customized = 1 WHERE id = ?")
+    .run(body.name, body.category, JSON.stringify(body.config || {}), Number(p.id));
+  json(res, 200, { ok: true });
+});
+
+route("POST", "/api/admin/templates", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  if (!body.name || !body.category) return json(res, 400, { error: "Name and category are required." });
+  const r = db.prepare("INSERT INTO templates (name, category, config_json, builtin, is_customized) VALUES (?,?,?,1,1)")
+    .run(body.name, body.category, JSON.stringify(body.config || {}));
+  json(res, 200, { id: Number(r.lastInsertRowid) });
+});
+
+route("DELETE", "/api/admin/templates/:id", (req, res, p) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  db.prepare("DELETE FROM templates WHERE id = ?").run(Number(p.id));
+  json(res, 200, { ok: true });
+});
+
+// Peptide clinical/patient-facing reference info (keyed by name, not a
+// numeric id, so upsert/delete take the name in the request body instead
+// of a URL param).
+route("GET", "/api/admin/peptide-info", (req, res) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const rows = db.prepare("SELECT name, data_json, is_customized, updated_at FROM peptide_info ORDER BY name").all()
+    .map((r) => ({ name: r.name, data: JSON.parse(r.data_json), isCustomized: !!r.is_customized, updatedAt: r.updated_at }));
+  json(res, 200, rows);
+});
+
+route("POST", "/api/admin/peptide-info", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const name = String(body.name || "").trim();
+  if (!name) return json(res, 400, { error: "Peptide name is required." });
+  db.prepare(`
+    INSERT INTO peptide_info (name, data_json, is_customized) VALUES (?, ?, 1)
+    ON CONFLICT(name) DO UPDATE SET data_json = excluded.data_json, is_customized = 1, updated_at = datetime('now')`)
+    .run(name, JSON.stringify(body.data || {}));
+  json(res, 200, { ok: true });
+});
+
+route("POST", "/api/admin/peptide-info/delete", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  db.prepare("DELETE FROM peptide_info WHERE name = ?").run(String(body.name || ""));
+  db.prepare("DELETE FROM health_goal_peptides WHERE peptide_name = ?").run(String(body.name || ""));
+  json(res, 200, { ok: true });
+});
+
+// Health-goal → peptide mapping (the "Suggested Peptides" side panel data)
+route("GET", "/api/admin/health-goal-peptides", (req, res) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  json(res, 200, db.prepare("SELECT * FROM health_goal_peptides ORDER BY goal, priority DESC, peptide_name").all());
+});
+
+route("POST", "/api/admin/health-goal-peptides", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const goal = String(body.goal || "").trim(), peptideName = String(body.peptideName || "").trim();
+  if (!goal || !peptideName) return json(res, 400, { error: "Goal and peptide name are required." });
+  db.prepare(`
+    INSERT INTO health_goal_peptides (goal, peptide_name, priority, is_customized) VALUES (?,?,?,1)
+    ON CONFLICT(goal, peptide_name) DO UPDATE SET priority = excluded.priority, is_customized = 1`)
+    .run(goal, peptideName, body.priority === "Primary" ? "Primary" : "Secondary");
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/admin/health-goal-peptides/:id", (req, res, p) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  db.prepare("DELETE FROM health_goal_peptides WHERE id = ?").run(Number(p.id));
+  json(res, 200, { ok: true });
+});
+
+// Knowledge base — readable by any signed-in doctor/superadmin, writable
+// only by super admin.
+route("GET", "/api/kb", (req, res) => {
+  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  json(res, 200, db.prepare("SELECT * FROM kb_articles ORDER BY category, title").all());
+});
+
+route("POST", "/api/admin/kb", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  if (!body.title) return json(res, 400, { error: "Title is required." });
+  const r = db.prepare("INSERT INTO kb_articles (title, category, body) VALUES (?,?,?)")
+    .run(body.title, body.category || "General", body.body || "");
+  json(res, 200, { id: Number(r.lastInsertRowid) });
+});
+
+route("PUT", "/api/admin/kb/:id", async (req, res, p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const row = db.prepare("SELECT id FROM kb_articles WHERE id = ?").get(Number(p.id));
+  if (!row) return json(res, 404, { error: "Article not found." });
+  db.prepare("UPDATE kb_articles SET title = ?, category = ?, body = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(body.title, body.category || "General", body.body || "", Number(p.id));
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/admin/kb/:id", (req, res, p) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  db.prepare("DELETE FROM kb_articles WHERE id = ?").run(Number(p.id));
+  json(res, 200, { ok: true });
 });
 
 // ── dashboard ────────────────────────────────────────────────────
