@@ -249,8 +249,8 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#0E7490", icon: "scale" },
-  peptide: { label: "Peptides", color: "#1E4C4E", icon: "droplet" },
+  glp1: { label: "GLP-1 / Weight loss", color: "#1E4C4E", icon: "scale" },      // dark teal/olive (brand)
+  peptide: { label: "Peptides", color: "#DAA520", icon: "droplet" },           // golden
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
 
