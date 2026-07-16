@@ -206,9 +206,22 @@ function paintProtocols() {
   }));
 }
 
+function defaultCfgFor(category) {
+  if (category === "glp1") {
+    return { medication: "", generic: "", route: "injection", frequency: "weekly", halfLifeHours: "", doses: [""], titration: [{ dose: "", weeks: "", note: "" }], administration: "" };
+  }
+  if (category === "peptide") {
+    return { medication: "", protocols: [{ protocolType: "", route: "Subcutaneous injection", strength: "", doseAmount: "", doseVolume: "", time: "", duration: "", cycle: "", summary: "" }] };
+  }
+  return { medication: "", dose: "", route: "injection", frequency: "weekly" };
+}
+
 function protocolEditorModal(tpl) {
   const isNew = !tpl;
-  modal(`
+  let category = isNew ? "peptide" : tpl.category;
+  let cfg = isNew ? defaultCfgFor(category) : JSON.parse(JSON.stringify(tpl.config));
+
+  const scrim = modal(`
     <div class="modal-head">
       <h3>${isNew ? "Add protocol" : esc(tpl.name)}</h3>
       <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
@@ -216,14 +229,10 @@ function protocolEditorModal(tpl) {
     <div class="form-grid">
       <div class="field"><label for="pe-name">Name</label><input class="input" id="pe-name" value="${isNew ? "" : esc(tpl.name)}"></div>
       <div class="field"><label>Category</label><div class="chip-row">
-        ${["glp1", "peptide", "custom"].map((c) => `<button type="button" class="chip ${(!isNew && tpl.category === c) || (isNew && c === "peptide") ? "on" : ""}" data-catchip="${c}">${c === "glp1" ? "GLP-1" : c[0].toUpperCase() + c.slice(1)}</button>`).join("")}
+        ${["glp1", "peptide", "custom"].map((c) => `<button type="button" class="chip ${category === c ? "on" : ""}" data-catchip="${c}">${c === "glp1" ? "GLP-1" : c[0].toUpperCase() + c.slice(1)}</button>`).join("")}
       </div></div>
     </div>
-    <div class="field full">
-      <label for="pe-config">Config (JSON)</label>
-      <textarea class="input json-editor" id="pe-config">${esc(JSON.stringify(isNew ? { medication: "", doses: [] } : tpl.config, null, 2))}</textarea>
-      <span class="hint">GLP-1 shape: {medication, generic, route, frequency, halfLifeHours, doses:[...], titration:[{dose,weeks,note}], administration}. Peptide shape: {medication, protocols:[{protocolType, doseVolume, doseAmount, strength, duration, cycle, time, route, summary}]}.</span>
-    </div>
+    <div id="pe-fields"></div>
     <p class="err-text" id="pe-err" hidden role="alert"></p>
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px">
       ${!isNew ? `<button class="btn btn-ghost" id="pe-delete" style="color:var(--danger)">${icon("x", 16)} Delete</button>` : `<span></span>`}
@@ -231,34 +240,183 @@ function protocolEditorModal(tpl) {
     </div>
   `, true);
 
-  let category = isNew ? "peptide" : tpl.category;
-  document.querySelectorAll("[data-catchip]").forEach((b) => b.addEventListener("click", () => {
+  // Re-renders the category-specific fields. Called on category switch and
+  // on add/remove (structural changes) only — plain text input listeners
+  // below mutate `cfg` in place instead, so typing never loses focus.
+  function renderFields() {
+    const box = scrim.querySelector("#pe-fields");
+
+    if (category === "glp1") {
+      box.innerHTML = `
+        <div class="form-grid">
+          <div class="field"><label for="pe-generic">Generic name</label><input class="input" id="pe-generic" value="${esc(cfg.generic || "")}"></div>
+          <div class="field"><label for="pe-route">Route</label><input class="input" id="pe-route" value="${esc(cfg.route || "")}"></div>
+          <div class="field"><label for="pe-freq">Frequency</label><input class="input" id="pe-freq" value="${esc(cfg.frequency || "")}"></div>
+          <div class="field"><label for="pe-halflife">Half-life (hours)</label><input class="input" id="pe-halflife" type="number" value="${esc(cfg.halfLifeHours ?? "")}"></div>
+        </div>
+        <div class="field full">
+          <label>Dose ladder</label>
+          <div id="pe-doses">
+            ${(cfg.doses || []).map((d, i) => `
+              <div class="list-row">
+                <input class="input" data-dosefield="${i}" value="${esc(d)}" placeholder="e.g. 2.5mg">
+                <button class="icon-btn" data-deldose="${i}" type="button" aria-label="Remove dose">${icon("x", 16)}</button>
+              </div>`).join("")}
+          </div>
+          <button class="btn btn-secondary btn-sm" id="pe-adddose" type="button">${icon("plus", 14)} Add dose</button>
+        </div>
+        <div class="field full">
+          <label>Titration schedule</label>
+          <div id="pe-titration">
+            ${(cfg.titration || []).map((t, i) => `
+              <div class="titration-row">
+                <input class="input" data-tifield="dose" data-i="${i}" placeholder="Dose" value="${esc(t.dose || "")}">
+                <input class="input" data-tifield="weeks" data-i="${i}" type="number" placeholder="Wks" value="${esc(t.weeks ?? "")}">
+                <input class="input" data-tifield="note" data-i="${i}" placeholder="Note" value="${esc(t.note || "")}">
+                <button class="icon-btn" data-deltitr="${i}" type="button" aria-label="Remove step">${icon("x", 16)}</button>
+              </div>`).join("")}
+          </div>
+          <button class="btn btn-secondary btn-sm" id="pe-addtitr" type="button">${icon("plus", 14)} Add step</button>
+        </div>
+        <div class="field full"><label for="pe-admin">Administration instructions</label><textarea class="input" id="pe-admin" rows="3">${esc(cfg.administration || "")}</textarea></div>`;
+
+      box.querySelector("#pe-generic").addEventListener("input", (e) => { cfg.generic = e.target.value; });
+      box.querySelector("#pe-route").addEventListener("input", (e) => { cfg.route = e.target.value; });
+      box.querySelector("#pe-freq").addEventListener("input", (e) => { cfg.frequency = e.target.value; });
+      box.querySelector("#pe-halflife").addEventListener("input", (e) => { cfg.halfLifeHours = e.target.value; });
+      box.querySelector("#pe-admin").addEventListener("input", (e) => { cfg.administration = e.target.value; });
+      box.querySelectorAll("[data-dosefield]").forEach((inp) => inp.addEventListener("input", (e) => {
+        cfg.doses[Number(e.target.dataset.dosefield)] = e.target.value;
+      }));
+      box.querySelectorAll("[data-deldose]").forEach((b) => b.addEventListener("click", () => {
+        cfg.doses.splice(Number(b.dataset.deldose), 1);
+        renderFields();
+      }));
+      box.querySelector("#pe-adddose").addEventListener("click", () => {
+        (cfg.doses || (cfg.doses = [])).push("");
+        renderFields();
+      });
+      box.querySelectorAll("[data-tifield]").forEach((inp) => inp.addEventListener("input", (e) => {
+        cfg.titration[Number(e.target.dataset.i)][e.target.dataset.tifield] = e.target.value;
+      }));
+      box.querySelectorAll("[data-deltitr]").forEach((b) => b.addEventListener("click", () => {
+        cfg.titration.splice(Number(b.dataset.deltitr), 1);
+        renderFields();
+      }));
+      box.querySelector("#pe-addtitr").addEventListener("click", () => {
+        (cfg.titration || (cfg.titration = [])).push({ dose: "", weeks: "", note: "" });
+        renderFields();
+      });
+
+    } else if (category === "peptide") {
+      box.innerHTML = `
+        <label>Dosing protocols</label>
+        ${(cfg.protocols || []).map((p, i) => `
+          <div class="protocol-card">
+            <button class="icon-btn pc-remove" data-delproto="${i}" type="button" aria-label="Remove variant">${icon("x", 16)}</button>
+            <div class="pc-title">Variant ${i + 1}</div>
+            <div class="form-grid">
+              <div class="field"><label>Protocol name</label><input class="input" data-pfield="protocolType" data-i="${i}" value="${esc(p.protocolType || "")}" placeholder="e.g. Standard Protocol"></div>
+              <div class="field"><label>Route</label><input class="input" data-pfield="route" data-i="${i}" value="${esc(p.route || "")}" placeholder="e.g. Subcutaneous injection"></div>
+              <div class="field"><label>Strength / concentration</label><input class="input" data-pfield="strength" data-i="${i}" value="${esc(p.strength || "")}" placeholder="e.g. 2000mcg/ml in 5ml vial"></div>
+              <div class="field"><label>Dose amount</label><input class="input" data-pfield="doseAmount" data-i="${i}" value="${esc(p.doseAmount || "")}" placeholder="e.g. 0.15 ml (15 units)"></div>
+              <div class="field"><label>Dose volume</label><input class="input" data-pfield="doseVolume" data-i="${i}" value="${esc(p.doseVolume || "")}" placeholder="e.g. 0.15 ml"></div>
+              <div class="field"><label>Timing</label><input class="input" data-pfield="time" data-i="${i}" value="${esc(p.time || "")}" placeholder="e.g. Once daily, morning"></div>
+              <div class="field"><label>Duration</label><input class="input" data-pfield="duration" data-i="${i}" value="${esc(p.duration || "")}" placeholder="e.g. 33 Days"></div>
+              <div class="field"><label>Cycle</label><input class="input" data-pfield="cycle" data-i="${i}" value="${esc(p.cycle || "")}" placeholder="e.g. 4-12 weeks"></div>
+            </div>
+            <div class="field full"><label>Summary</label><textarea class="input" data-pfield="summary" data-i="${i}" rows="2">${esc(p.summary || "")}</textarea></div>
+          </div>`).join("")}
+        <button class="btn btn-secondary btn-sm" id="pe-addproto" type="button">${icon("plus", 14)} Add protocol variant</button>`;
+
+      box.querySelectorAll("[data-pfield]").forEach((inp) => inp.addEventListener("input", (e) => {
+        cfg.protocols[Number(e.target.dataset.i)][e.target.dataset.pfield] = e.target.value;
+      }));
+      box.querySelectorAll("[data-delproto]").forEach((b) => b.addEventListener("click", () => {
+        cfg.protocols.splice(Number(b.dataset.delproto), 1);
+        renderFields();
+      }));
+      box.querySelector("#pe-addproto").addEventListener("click", () => {
+        (cfg.protocols || (cfg.protocols = [])).push({ protocolType: "", route: "Subcutaneous injection", strength: "", doseAmount: "", doseVolume: "", time: "", duration: "", cycle: "", summary: "" });
+        renderFields();
+      });
+
+    } else {
+      box.innerHTML = `
+        <div class="form-grid">
+          <div class="field"><label for="pe-med">Medication</label><input class="input" id="pe-med" value="${esc(cfg.medication || "")}"></div>
+          <div class="field"><label for="pe-dose">Dose</label><input class="input" id="pe-dose" value="${esc(cfg.dose || "")}"></div>
+          <div class="field"><label for="pe-croute">Route</label><input class="input" id="pe-croute" value="${esc(cfg.route || "")}"></div>
+          <div class="field"><label for="pe-cfreq">Frequency</label><input class="input" id="pe-cfreq" value="${esc(cfg.frequency || "")}"></div>
+        </div>`;
+      box.querySelector("#pe-med").addEventListener("input", (e) => { cfg.medication = e.target.value; });
+      box.querySelector("#pe-dose").addEventListener("input", (e) => { cfg.dose = e.target.value; });
+      box.querySelector("#pe-croute").addEventListener("input", (e) => { cfg.route = e.target.value; });
+      box.querySelector("#pe-cfreq").addEventListener("input", (e) => { cfg.frequency = e.target.value; });
+    }
+  }
+  renderFields();
+
+  scrim.querySelectorAll("[data-catchip]").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.catchip === category) return;
     category = b.dataset.catchip;
-    document.querySelectorAll("[data-catchip]").forEach((x) => x.classList.toggle("on", x === b));
+    cfg = defaultCfgFor(category);
+    scrim.querySelectorAll("[data-catchip]").forEach((x) => x.classList.toggle("on", x === b));
+    renderFields();
   }));
 
-  document.getElementById("pe-save").addEventListener("click", async () => {
-    const err = document.getElementById("pe-err");
+  scrim.querySelector("#pe-save").addEventListener("click", async () => {
+    const err = scrim.querySelector("#pe-err");
     err.hidden = true;
-    let config;
-    try { config = JSON.parse(document.getElementById("pe-config").value); }
-    catch { err.textContent = "Config must be valid JSON."; err.hidden = false; return; }
-    const name = document.getElementById("pe-name").value.trim();
+    const name = scrim.querySelector("#pe-name").value.trim();
     if (!name) { err.textContent = "Name is required."; err.hidden = false; return; }
+
+    let config;
+    if (category === "glp1") {
+      config = {
+        medication: name,
+        generic: (cfg.generic || "").trim(),
+        route: (cfg.route || "").trim(),
+        frequency: (cfg.frequency || "").trim(),
+        halfLifeHours: cfg.halfLifeHours === "" || cfg.halfLifeHours == null ? null : Number(cfg.halfLifeHours),
+        doses: (cfg.doses || []).map((d) => d.trim()).filter(Boolean),
+        titration: (cfg.titration || [])
+          .filter((t) => (t.dose || "").trim())
+          .map((t) => ({ dose: t.dose.trim(), weeks: t.weeks === "" || t.weeks == null ? null : Number(t.weeks), note: (t.note || "").trim() })),
+        administration: (cfg.administration || "").trim(),
+      };
+    } else if (category === "peptide") {
+      config = {
+        medication: name,
+        protocols: (cfg.protocols || [])
+          .filter((p) => (p.protocolType || "").trim() || (p.summary || "").trim())
+          .map((p) => ({
+            protocolType: (p.protocolType || "").trim(), route: (p.route || "").trim(), strength: (p.strength || "").trim(),
+            doseAmount: (p.doseAmount || "").trim(), doseVolume: (p.doseVolume || "").trim(), time: (p.time || "").trim(),
+            duration: (p.duration || "").trim(), cycle: (p.cycle || "").trim(), summary: (p.summary || "").trim(),
+          })),
+      };
+    } else {
+      config = {
+        medication: (cfg.medication || "").trim(), dose: (cfg.dose || "").trim(),
+        route: (cfg.route || "").trim(), frequency: (cfg.frequency || "").trim(),
+      };
+    }
+
     try {
       if (isNew) await api("POST", "/api/admin/templates", { name, category, config });
       else await api("PUT", `/api/admin/templates/${tpl.id}`, { name, category, config });
-      document.querySelector(".modal-scrim")?.remove();
+      scrim.remove();
       toast(isNew ? "Protocol added" : "Protocol updated");
       viewProtocols();
     } catch (ex) { err.textContent = ex.message; err.hidden = false; }
   });
 
   if (!isNew) {
-    document.getElementById("pe-delete").addEventListener("click", async () => {
+    scrim.querySelector("#pe-delete").addEventListener("click", async () => {
       if (!confirm(`Delete "${tpl.name}"? This cannot be undone.`)) return;
       await api("DELETE", `/api/admin/templates/${tpl.id}`);
-      document.querySelector(".modal-scrim")?.remove();
+      scrim.remove();
       toast("Protocol deleted");
       viewProtocols();
     });
@@ -290,26 +448,59 @@ async function viewPeptideInfo() {
   }));
 }
 
+// Field spec for the peptide clinical-info form. "lines" fields are the
+// list-type PEPTIDE_INFO properties (arrays) edited as one-item-per-line
+// text, split/joined on load/save instead of JSON array syntax.
+const PEPTIDE_INFO_FIELDS = [
+  { key: "categories", label: "Categories", type: "lines" },
+  { key: "howItWorks", label: "How it works", type: "textarea" },
+  { key: "targetBenefits", label: "Target benefits", type: "textarea" },
+  { key: "bestUseFor", label: "Best use for", type: "textarea" },
+  { key: "dosageInstructions", label: "Dosage instructions", type: "textarea" },
+  { key: "administrationRoute", label: "Administration route", type: "text" },
+  { key: "strengthVolume", label: "Strength / volume", type: "text" },
+  { key: "treatmentDuration", label: "Treatment duration", type: "text" },
+  { key: "contraindications", label: "Contraindications", type: "textarea" },
+  { key: "commonSideEffects", label: "Common side effects", type: "textarea" },
+  { key: "keyBloodTests", label: "Key blood tests", type: "textarea" },
+  { key: "recommendedSupplements", label: "Recommended supplements", type: "textarea" },
+  { key: "possibleCombinations", label: "Possible combinations", type: "textarea" },
+  { key: "whoItsFor", label: "Who it's for", type: "lines" },
+  { key: "dailyRoutine", label: "Daily routine", type: "textarea" },
+  { key: "storageNotes", label: "Storage notes", type: "textarea" },
+  { key: "onset", label: "Onset", type: "text" },
+  { key: "missedDose", label: "Missed dose", type: "textarea" },
+  { key: "redFlags", label: "Red flags", type: "lines" },
+  { key: "lifestyleTips", label: "Lifestyle tips", type: "lines" },
+];
+const PEPTIDE_INFO_SHORT_KEYS = ["administrationRoute", "strengthVolume", "treatmentDuration", "onset"];
+
 function peptideInfoModal(entry) {
   const isNew = !entry;
-  const exampleShape = {
-    categories: ["Longevity"],
-    howItWorks: "", targetBenefits: "", bestUseFor: "",
-    dosageInstructions: "", administrationRoute: "", strengthVolume: "", treatmentDuration: "",
-    contraindications: "", commonSideEffects: "", keyBloodTests: "", recommendedSupplements: "", possibleCombinations: "",
-    whoItsFor: [], dailyRoutine: "", storageNotes: "", onset: "", missedDose: "", redFlags: [], lifestyleTips: [],
+  const data = isNew ? {} : entry.data;
+
+  const fieldHtml = (f) => {
+    const id = `pi-${f.key}`;
+    if (f.type === "text") {
+      return `<div class="field"><label for="${id}">${esc(f.label)}</label><input class="input" id="${id}" value="${esc(data[f.key] || "")}"></div>`;
+    }
+    if (f.type === "lines") {
+      const text = Array.isArray(data[f.key]) ? data[f.key].join("\n") : "";
+      return `<div class="field full"><label for="${id}">${esc(f.label)}</label><textarea class="input" id="${id}" rows="3" placeholder="One per line">${esc(text)}</textarea></div>`;
+    }
+    return `<div class="field full"><label for="${id}">${esc(f.label)}</label><textarea class="input" id="${id}" rows="2">${esc(data[f.key] || "")}</textarea></div>`;
   };
+
   modal(`
     <div class="modal-head">
       <h3>${isNew ? "Add peptide clinical info" : esc(entry.name)}</h3>
       <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
     </div>
     <div class="field"><label for="pi-name">Peptide name</label><input class="input" id="pi-name" value="${isNew ? "" : esc(entry.name)}" ${isNew ? "" : "disabled"}></div>
-    <div class="field full">
-      <label for="pi-data">Clinical &amp; patient-facing info (JSON)</label>
-      <textarea class="input json-editor" id="pi-data" style="min-height:340px">${esc(JSON.stringify(isNew ? exampleShape : entry.data, null, 2))}</textarea>
-      <span class="hint">Fields: categories[], howItWorks, targetBenefits, bestUseFor, dosageInstructions, administrationRoute, strengthVolume, treatmentDuration, contraindications, commonSideEffects, keyBloodTests, recommendedSupplements, possibleCombinations, whoItsFor[], dailyRoutine, storageNotes, onset, missedDose, redFlags[], lifestyleTips[].</span>
+    <div class="form-grid">
+      ${PEPTIDE_INFO_FIELDS.filter((f) => PEPTIDE_INFO_SHORT_KEYS.includes(f.key)).map(fieldHtml).join("")}
     </div>
+    ${PEPTIDE_INFO_FIELDS.filter((f) => !PEPTIDE_INFO_SHORT_KEYS.includes(f.key)).map(fieldHtml).join("")}
     <p class="err-text" id="pi-err" hidden role="alert"></p>
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px">
       ${!isNew ? `<button class="btn btn-ghost" id="pi-delete" style="color:var(--danger)">${icon("x", 16)} Delete</button>` : `<span></span>`}
@@ -320,13 +511,15 @@ function peptideInfoModal(entry) {
   document.getElementById("pi-save").addEventListener("click", async () => {
     const err = document.getElementById("pi-err");
     err.hidden = true;
-    let data;
-    try { data = JSON.parse(document.getElementById("pi-data").value); }
-    catch { err.textContent = "Info must be valid JSON."; err.hidden = false; return; }
     const name = document.getElementById("pi-name").value.trim() || (entry && entry.name);
     if (!name) { err.textContent = "Name is required."; err.hidden = false; return; }
+    const out = {};
+    for (const f of PEPTIDE_INFO_FIELDS) {
+      const el = document.getElementById(`pi-${f.key}`);
+      out[f.key] = f.type === "lines" ? el.value.split("\n").map((s) => s.trim()).filter(Boolean) : el.value.trim();
+    }
     try {
-      await api("POST", "/api/admin/peptide-info", { name, data });
+      await api("POST", "/api/admin/peptide-info", { name, data: out });
       document.querySelector(".modal-scrim")?.remove();
       toast(isNew ? "Peptide info added" : "Peptide info updated");
       viewPeptideInfo();
