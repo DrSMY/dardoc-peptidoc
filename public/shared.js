@@ -260,6 +260,12 @@ function waLink(mobile, text) {
   return `https://wa.me/${m}?text=${encodeURIComponent(text)}`;
 }
 
+// Mirrors the server's normMobile() in src/api.js, so a mobile number typed
+// into the intake form can be matched against already-stored patient records.
+function normMobileClient(m) {
+  return String(m || "").replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
+}
+
 // ── clinical metrics (matches Consult-Buddy's WeightLossIntake maths) ─────
 // p: { heightCm, weightKg, age, gender, activityLevel }
 function computeMetrics(p, activityLevels) {

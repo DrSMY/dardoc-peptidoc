@@ -939,6 +939,29 @@ function applyQuickFill(text) {
   return changed;
 }
 
+// Banner shown under the mobile field when the typed number matches an
+// already-registered patient — surfaces a quick history (date + medication
+// per past prescription) so the doctor can decide to reuse the record.
+function existingPatientMatchHTML(p, plans) {
+  const rows = (plans || []).slice(0, 4).map((pl) => `
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0;border-top:1px solid rgba(0,0,0,.07)">
+      <span>${esc(fmtDate(pl.created_at))} · ${esc(pl.medication)}${pl.dose ? " " + esc(pl.dose) : ""}</span>
+      <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
+    </div>`).join("");
+  return `<div class="match-box">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:700;display:flex;align-items:center;gap:6px">${icon("users", 15)} Existing patient found: ${esc(p.name)}</div>
+        <div class="hint">+${esc(p.mobile)}${p.age ? ` · ${esc(p.age)}y` : ""}${p.gender ? ` · ${esc(p.gender)}` : ""}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" id="wz-use-existing" type="button">${icon("checkCircle", 15)} Use this patient</button>
+    </div>
+    <div style="margin-top:8px">
+      ${rows || `<p class="hint" style="margin:6px 0 0">No previous prescriptions on file yet.</p>`}
+    </div>
+  </div>`;
+}
+
 // ── Intake sub-wizard (mirrors Consult-Buddy's step-per-section flow:
 // Identity & Demographics → Vitals & Medical History → Primary Health
 // Objectives → Objective-Specific). The last sub-step is skipped entirely
@@ -1039,6 +1062,7 @@ function wizIntakeIdentity() {
       <div class="field"><label for="wp-mobile">Mobile number <span class="req">*</span></label><input class="input" id="wp-mobile" type="tel" inputmode="tel" placeholder="9715xxxxxxxx" value="${esc(w.patient.mobile)}"></div>
       <div class="field"><label for="wp-email">Email</label><input class="input" id="wp-email" type="email" placeholder="patient@example.com" value="${esc(w.patient.email)}"></div>
       <div class="field full" style="margin-top:-8px"><span class="hint">Mobile number or email is required (at least one) — mobile is needed for the patient's portal login.</span></div>
+      <div class="field full" id="wz-mobile-match"></div>
       <div class="field full"><label>Title</label><div class="chip-row">${titleChips.map((t) => `<button type="button" class="chip ${w.patient.title === t ? "on" : ""}" data-demochip="title" data-v="${t}">${t}</button>`).join("")}</div></div>
     </div>
 
@@ -1064,10 +1088,51 @@ function wizIntakeIdentity() {
   };
   Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
 
+  // Look up the mobile number against existing records as the doctor types,
+  // so a returning patient's history is one click away instead of requiring
+  // the "Existing patient" dropdown to be found manually.
+  let mobileCheckTimer = null;
+  document.getElementById("wp-mobile").addEventListener("input", (e) => {
+    clearTimeout(mobileCheckTimer);
+    mobileCheckTimer = setTimeout(() => checkMobileMatch(e.target.value), 400);
+  });
+  if (!w.existingId && w.patient.mobile) checkMobileMatch(w.patient.mobile);
+
+  function checkMobileMatch(raw) {
+    const box = document.getElementById("wz-mobile-match");
+    if (!box) return;
+    const norm = normMobileClient(raw);
+    if (norm.length < 7) { box.innerHTML = ""; return; }
+    const match = S.patients.find((p) => p.mobile === norm);
+    if (!match || match.id === w.existingId) { box.innerHTML = ""; return; }
+    const checkToken = norm;
+    box.innerHTML = `<div class="hint">${icon("search", 13)} Checking records…</div>`;
+    api("GET", `/api/patients/${match.id}`).then((d) => {
+      if (normMobileClient(document.getElementById("wp-mobile").value) !== checkToken) return; // stale response
+      box.innerHTML = existingPatientMatchHTML(match, d.plans);
+      document.getElementById("wz-use-existing").addEventListener("click", () => {
+        commitDemo();
+        w.existingId = match.id;
+        Object.assign(w.patient, {
+          name: match.name, mobile: match.mobile, email: match.email || "", title: match.title || "", age: match.age || "",
+          gender: match.gender || "", heightCm: match.height_cm || "", weightKg: match.last_weight || match.start_weight_kg || "",
+          intake: match.intake_json ? JSON.parse(match.intake_json) : {},
+        });
+        toast(`Loaded existing record for ${match.name}`);
+        wizIntakeIdentity();
+      });
+    }).catch(() => { box.innerHTML = ""; });
+  }
+
   view().querySelectorAll("[data-demochip]").forEach((b) => b.addEventListener("click", () => {
     commitDemo();
     const f = b.dataset.demochip, v = b.dataset.v;
-    w.patient[f] = (w.patient[f] === v ? "" : v);
+    if (f.startsWith("intake.")) {
+      const key = f.slice("intake.".length);
+      w.patient.intake[key] = (w.patient.intake[key] === v ? "" : v);
+    } else {
+      w.patient[f] = (w.patient[f] === v ? "" : v);
+    }
     wizIntakeIdentity();
   }));
 
