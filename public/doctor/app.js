@@ -168,6 +168,8 @@ async function viewDashboard() {
     <a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>
   </div>
 
+  <div id="practice-stats"></div>
+
   <div class="stat-grid" style="margin-bottom:20px">
     ${stat("users", "var(--brand-soft)", "var(--brand)", d.activePatients, "Active patients")}
     ${stat("syringe", "var(--primary-soft)", "var(--primary)", d.doses7, "Doses logged · 7d")}
@@ -235,10 +237,129 @@ async function viewDashboard() {
     toast("Alert marked as reviewed");
     viewDashboard();
   }));
+
+  renderPracticeStats(d);
 }
 
 function stat(ico, bg, fg, val, lbl) {
   return `<div class="stat"><div class="stat-ico" style="background:${bg};color:${fg}">${icon(ico, 19)}</div><div class="stat-val">${val}</div><div class="stat-lbl">${lbl}</div></div>`;
+}
+
+// ── Practice statistics: animated, interactive KPIs + charts ─────
+const CATEGORY_META = {
+  glp1: { label: "GLP-1 / Weight loss", color: "#0E7490", icon: "scale" },
+  peptide: { label: "Peptides", color: "#1E4C4E", icon: "droplet" },
+  custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
+};
+
+function practiceStatsHTML(d) {
+  const filter = S.dashFilter || "all";
+  const catCount = (cat) => (d.categoryBreakdown.find((c) => c.category === cat) || {}).n || 0;
+  const filteredRxTotal = filter === "all" ? d.prescriptionsTotal : catCount(filter);
+  const pctPrescribedVsConsulted = d.consultationsTotal ? Math.round((filteredRxTotal / d.consultationsTotal) * 100) : 0;
+
+  // 14-day buckets from raw plan rows (client-side, so tab filtering needs no refetch)
+  const days = 14;
+  const buckets = [];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(today); dt.setDate(today.getDate() - i);
+    buckets.push({ key: dt.toISOString().slice(0, 10), label: dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" }), glp1: 0, peptide: 0, custom: 0 });
+  }
+  const bmap = new Map(buckets.map((b) => [b.key, b]));
+  for (const r of d.recentPlans || []) {
+    const b = bmap.get(String(r.created_at).slice(0, 10));
+    if (b && r.category in b) b[r.category]++;
+  }
+  const series = Object.keys(CATEGORY_META).filter((k) => filter === "all" || filter === k)
+    .map((k) => ({ key: k, color: CATEGORY_META[k].color, label: CATEGORY_META[k].label }));
+  const hasTrend = buckets.some((b) => series.some((s) => b[s.key]));
+
+  const distribution = Object.keys(CATEGORY_META).filter((k) => filter === "all" || filter === k)
+    .map((k) => ({ name: CATEGORY_META[k].label, value: catCount(k), color: CATEGORY_META[k].color, key: k }));
+  const distTotal = distribution.reduce((s, x) => s + x.value, 0);
+
+  const medRows = (d.medBreakdown || []).filter((m) => filter === "all" || m.category === filter).slice(0, 6);
+  const medTotal = medRows.reduce((s, m) => s + m.n, 0) || 1;
+
+  return `
+  <div class="card card-pad" style="margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div>
+        <div class="card-title" style="margin:0">${icon("activity", 19)} Practice Statistics</div>
+        <p class="hint" style="margin-top:2px">Prescriptions, consultations &amp; medication mix</p>
+      </div>
+      <div class="pstat-tabs">
+        <button class="pstat-tab ${filter === "all" ? "on" : ""}" data-dashfilter="all">All</button>
+        <button class="pstat-tab ${filter === "glp1" ? "on" : ""}" data-dashfilter="glp1">${icon("scale", 13)} GLP-1</button>
+        <button class="pstat-tab ${filter === "peptide" ? "on" : ""}" data-dashfilter="peptide">${icon("droplet", 13)} Peptides</button>
+      </div>
+    </div>
+
+    <div class="stat-grid" style="margin-bottom:18px">
+      <div class="stat pstat-kpi">
+        <div class="stat-ico" style="background:var(--primary-soft);color:var(--primary)">${icon("pill", 19)}</div>
+        <div class="stat-val" data-count="${filteredRxTotal}">0</div>
+        <div class="stat-lbl">Prescriptions issued</div>
+      </div>
+      <div class="stat pstat-kpi">
+        <div class="stat-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("checkCircle", 19)}</div>
+        <div class="stat-val" data-count="${d.consultationsTotal}">0</div>
+        <div class="stat-lbl">Consultations completed</div>
+      </div>
+      <div class="stat pstat-kpi">
+        <div class="stat-ico" style="background:var(--accent-soft);color:var(--accent)">${icon("trend", 19)}</div>
+        <div class="stat-val" data-count="${pctPrescribedVsConsulted}" data-suffix="%">0%</div>
+        <div class="stat-lbl">Prescribed vs. consulted</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card card-pad" style="box-shadow:none">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:2px">14-day prescribing trend</div>
+        <p class="hint" style="margin-bottom:8px">Daily prescriptions by program</p>
+        ${hasTrend ? stackedBarChart(buckets, series, { aria: "14-day prescribing trend" }) : `<div class="empty" style="padding:20px 0">${icon("chart", 28)}<p>No prescriptions in the last 14 days.</p></div>`}
+      </div>
+      <div class="card card-pad" style="box-shadow:none">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:2px">Medication mix</div>
+        <p class="hint" style="margin-bottom:8px">% of prescriptions by category</p>
+        ${distTotal ? donutChart(distribution, { aria: "Medication mix" }) : `<div class="empty" style="padding:20px 0">${icon("droplet", 28)}<p>No prescriptions yet.</p></div>`}
+        ${distTotal ? `<div class="pstat-legend">
+          ${distribution.map((x) => {
+            const pct = Math.round((x.value / (distTotal || 1)) * 100);
+            return `<div class="pstat-legend-row"><span><span class="dot" style="background:${x.color}"></span>${esc(x.name)}</span><b>${x.value} <span class="hint">(${pct}%)</span></b></div>`;
+          }).join("")}
+        </div>` : ""}
+      </div>
+    </div>
+
+    ${medRows.length ? `
+    <div style="margin-top:18px">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Top prescribed medications</div>
+      ${medRows.map((m) => {
+        const pct = Math.round((m.n / medTotal) * 100);
+        const color = (CATEGORY_META[m.category] || {}).color || "#8AA09D";
+        return `<div style="margin-bottom:9px">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${esc(m.medication)}</span><b>${m.n} <span class="hint">(${pct}%)</span></b></div>
+          <div style="height:6px;border-radius:4px;background:#EDF2F1;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div></div>
+        </div>`;
+      }).join("")}
+    </div>` : ""}
+  </div>`;
+}
+
+function renderPracticeStats(d) {
+  const box = document.getElementById("practice-stats");
+  if (!box) return;
+  box.innerHTML = practiceStatsHTML(d);
+  box.querySelectorAll("[data-count]").forEach((el) => {
+    const target = Number(el.dataset.count) || 0;
+    animateCountUp(el, target, 900, el.dataset.suffix || "");
+  });
+  box.querySelectorAll("[data-dashfilter]").forEach((b) => b.addEventListener("click", () => {
+    S.dashFilter = b.dataset.dashfilter;
+    renderPracticeStats(d);
+  }));
 }
 
 function alertSummary(symptoms) {

@@ -160,6 +160,74 @@ function lineChart(points, opts = {}) {
   </svg>`;
 }
 
+// ── animated stacked bar chart: buckets = [{label, [seriesKey]: n, ...}] ──
+// series = [{key, color, label}]. Bars grow from 0 on mount via CSS
+// (`.bar-rise`, defined in theme.css) staggered by nth-of-type delay.
+function stackedBarChart(buckets, series, opts = {}) {
+  const H = opts.height || 190, W = 700, PAD = { t: 10, r: 10, b: 24, l: 8 };
+  const innerH = H - PAD.t - PAD.b;
+  const maxTotal = Math.max(1, ...buckets.map((b) => series.reduce((s, sr) => s + (b[sr.key] || 0), 0)));
+  const bw = (W - PAD.l - PAD.r) / buckets.length;
+  const barW = Math.min(22, bw * 0.6);
+  let bars = "", xLabels = "";
+  const xIdx = buckets.length > 2 ? [0, Math.floor(buckets.length / 2), buckets.length - 1] : buckets.map((_, i) => i);
+  buckets.forEach((b, i) => {
+    const cx = PAD.l + bw * i + bw / 2;
+    let yCursor = H - PAD.b;
+    series.forEach((sr) => {
+      const v = b[sr.key] || 0;
+      if (!v) return;
+      const h = (v / maxTotal) * innerH;
+      yCursor -= h;
+      bars += `<rect class="bar-rise" style="animation-delay:${(i * 22)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yCursor.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2.5" fill="${sr.color}"><title>${esc(b.label)} — ${esc(sr.label)}: ${v}</title></rect>`;
+    });
+    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#8AA09D">${esc(b.label)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "Trend chart")}">
+    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E4EEEC" stroke-width="1"/>
+    ${bars}${xLabels}
+  </svg>`;
+}
+
+// ── animated donut chart: distribution = [{name, value, color}] ──────────
+// Ring segments draw in via CSS stroke-dashoffset transition (`.donut-seg`).
+function donutChart(distribution, opts = {}) {
+  const size = opts.size || 180, stroke = opts.stroke || 22;
+  const r = (size - stroke) / 2, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r;
+  const total = distribution.reduce((s, d) => s + d.value, 0) || 1;
+  let offset = 0, segs = "";
+  distribution.forEach((d, i) => {
+    if (!d.value) return;
+    const frac = d.value / total;
+    const len = frac * circ;
+    segs += `<circle class="donut-seg" style="animation-delay:${i * 120}ms" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="${stroke}"
+      stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})">
+      <title>${esc(d.name)}: ${d.value} (${Math.round(frac * 100)}%)</title>
+    </circle>`;
+    offset += len;
+  });
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:${size}px;height:auto;display:block;margin:0 auto" role="img" aria-label="${esc(opts.aria || "Distribution chart")}">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EDF2F1" stroke-width="${stroke}"/>
+    ${segs}
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#16302E)">${total}</text>
+    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#8AA09D">total</text>
+  </svg>`;
+}
+
+// ── animated count-up for KPI numbers: call after the element is in the DOM ─
+function animateCountUp(el, target, duration = 900, suffix = "") {
+  if (!el) return;
+  const start = 0;
+  const t0 = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(start + (target - start) * eased).toLocaleString() + suffix;
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 // ── domain helpers ───────────────────────────────────────────────
 function calcBMIClient(hCm, wKg) {
   if (!hCm || !wKg) return null;

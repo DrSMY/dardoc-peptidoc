@@ -216,6 +216,23 @@ textarea.input { resize: vertical; min-height: 84px; }
 .stat .stat-val { font-family: var(--font-head); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .stat .stat-lbl { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
 
+/* practice statistics (animated, interactive) */
+.pstat-tabs { display: flex; gap: 4px; background: #EDF2F1; padding: 3px; border-radius: 10px; }
+.pstat-tab { border: none; background: transparent; padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.pstat-tab.on { background: var(--brand); color: #fff; }
+.pstat-kpi { position: relative; overflow: hidden; }
+.pstat-kpi .trend-up { color: var(--accent); }
+.pstat-kpi .trend-down { color: var(--danger); }
+.pstat-legend { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.pstat-legend-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.pstat-legend-row .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 7px; }
+@keyframes bar-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.bar-rise { transform-origin: bottom; transform-box: fill-box; animation: bar-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes donut-fade { from { opacity: 0; } to { opacity: 1; } }
+.donut-seg { animation: donut-fade .5s ease both; }
+@keyframes bar-grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.bar-grow-x { transform-origin: left; animation: bar-grow-x .7s cubic-bezier(.2,.8,.2,1) both; }
+
 /* tables */
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th {

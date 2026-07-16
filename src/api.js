@@ -204,7 +204,24 @@ route("GET", "/api/dashboard", (req, res) => {
              d.dose AS detail, 0 AS flagged
       FROM dose_logs d JOIN patients p ON p.id = d.patient_id
     ) ORDER BY created_at DESC LIMIT 20`).all();
-  json(res, 200, { activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent });
+
+  // Practice statistics (prescriptions = every published plan; consultations
+  // completed = every registered patient, since both are created together at
+  // publish time in this app's flow).
+  const prescriptionsTotal = db.prepare("SELECT COUNT(*) AS n FROM plans").get().n;
+  const consultationsTotal = totalPatients;
+  const categoryBreakdown = db.prepare("SELECT category, COUNT(*) AS n FROM plans GROUP BY category").all();
+  const medBreakdown = db.prepare(`
+    SELECT medication, category, COUNT(*) AS n FROM plans
+    GROUP BY medication, category ORDER BY n DESC LIMIT 8`).all();
+  const recentPlans = db.prepare(`
+    SELECT created_at, category FROM plans
+    WHERE created_at > datetime('now','-14 days')`).all();
+
+  json(res, 200, {
+    activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent,
+    prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans,
+  });
 });
 
 // ── patients ─────────────────────────────────────────────────────
