@@ -1,10 +1,10 @@
-/* DarDoc · PeptiDoc design system — clinical trust, light theme */
+/* DoCare design system — preventive health & wellness, olive + gold */
 @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  --brand: #55682B;          /* DarDoc rich olive */
-  --brand-strong: #3B4A1D;
-  --brand-soft: #EEF0E0;
+  --brand: #454A1D;          /* DoCare deep olive (from logo) */
+  --brand-strong: #2A2E10;
+  --brand-soft: #EFEFDC;
   --primary: #B08A28;        /* rich gold — secondary accent, links, focus */
   --primary-soft: #FAF0D8;
   --accent: #7C9A46;         /* olive-lime — success / active states */
@@ -73,7 +73,7 @@ svg { display: block; flex-shrink: 0; }
 .btn-accent { background: var(--accent); color: #fff; }
 .btn-accent:hover { background: #116232; }
 .btn-secondary { background: var(--brand-soft); color: var(--brand); }
-.btn-secondary:hover { background: #D2E6E2; }
+.btn-secondary:hover { background: #E4E4CB; }
 .btn-ghost { background: transparent; color: var(--muted); }
 .btn-ghost:hover { background: var(--brand-soft); color: var(--brand); }
 .btn-danger { background: var(--danger-soft); color: var(--danger); }

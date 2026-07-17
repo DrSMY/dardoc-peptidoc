@@ -143,7 +143,7 @@ function timeAgo(iso) {
 // points: [{x: Date|number, y: number, label}], opts: {height, color, unit}
 function lineChart(points, opts = {}) {
   const H = opts.height || 180, W = 600, PAD = { t: 16, r: 14, b: 26, l: 40 };
-  const color = opts.color || "#55682B";
+  const color = opts.color || "#454A1D";
   if (!points || points.length === 0) return "";
   const xs = points.map((p) => +new Date(p.x));
   const ys = points.map((p) => p.y);

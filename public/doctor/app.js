@@ -37,16 +37,13 @@ window.addEventListener("hashchange", () => { if (S.user) route(); });
 
 // ── login ────────────────────────────────────────────────────────
 function renderLogin() {
-  document.title = "Sign in — DarDoc · PeptiDoc";
+  document.title = "Sign in — DoCare";
   app.innerHTML = `
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px">
-        <div style="width:46px;height:46px;border-radius:13px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center">${icon("leaf", 24)}</div>
-        <div>
-          <div style="font-family:var(--font-head);font-weight:800;font-size:17px">DarDoc · PeptiDoc</div>
-          <div style="font-size:12.5px;color:var(--muted)">Doctor dashboard</div>
-        </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:22px">
+        <img src="/brand/docare-olive-sm.png" alt="DoCare" style="height:72px;width:auto">
+        <div style="font-size:12.5px;color:var(--muted)">Doctor dashboard</div>
       </div>
       <h1 style="font-size:22px;margin-bottom:4px">Welcome back</h1>
       <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Sign in to manage consultations and patients.</p>
@@ -100,10 +97,10 @@ const NAV = [
 ];
 
 function renderShell() {
-  document.title = "Doctor Dashboard — DarDoc · PeptiDoc";
+  document.title = "Doctor Dashboard — DoCare";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line">${icon("leaf", 20)} DarDoc · PeptiDoc</div>
+    <div class="brand-line"><img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:30px;width:auto"></div>
     <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
@@ -111,9 +108,9 @@ function renderShell() {
   </nav>
   <div class="shell">
     <aside class="sidebar">
-      <div class="sb-brand">
-        <div class="sb-mark">${icon("leaf", 21)}</div>
-        <div><div class="sb-name">DarDoc · PeptiDoc</div><div class="sb-sub">Doctor dashboard</div></div>
+      <div class="sb-brand" style="flex-direction:column;align-items:flex-start;gap:7px">
+        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:56px;width:auto">
+        <div class="sb-sub">Doctor dashboard</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
         ${NAV.map((n) => `<a class="sb-link" href="${n.hash}">${icon(n.ico, 19)} ${esc(n.label)}</a>`).join("")}
@@ -249,7 +246,7 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#55682B", icon: "scale" },      // rich olive (brand)
+  glp1: { label: "GLP-1 / Weight loss", color: "#454A1D", icon: "scale" },      // rich olive (brand)
   peptide: { label: "Peptides", color: "#B08A28", icon: "droplet" },           // rich gold
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
@@ -466,7 +463,7 @@ async function viewPatient(id) {
         <div style="display:flex;flex-direction:column;gap:18px">
           <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
-            ${weights.length > 1 ? lineChart(weights, { color: "#55682B", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
+            ${weights.length > 1 ? lineChart(weights, { color: "#454A1D", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
           <div class="card card-pad">
             <div class="card-title">${icon("layers", 19)} Programs</div>
@@ -541,7 +538,7 @@ async function viewPatient(id) {
         document.getElementById("btn-print").addEventListener("click", () => window.print());
         document.getElementById("btn-wa").addEventListener("click", () => {
           const link = `${location.origin}/portal`;
-          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${pl.medication} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, DarDoc · PeptiDoc`;
+          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${pl.medication} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, DoCare`;
           window.open(waLink(p.mobile, txt), "_blank");
         });
       }
@@ -657,7 +654,7 @@ async function sharePinModal(p) {
   scrim.querySelector("#gen-pin").addEventListener("click", async () => {
     const { pin } = await api("POST", `/api/patients/${p.id}/pin`);
     const link = `${location.origin}/portal`;
-    const waText = `Hello ${p.title ? p.title + " " : ""}${p.name}, here is your access to your personal treatment portal:\n\n🔗 ${link}\n📱 Mobile: +${p.mobile}\n🔑 PIN: ${pin}\n\nYou can view your guide, log your doses and report how you feel — I'll be following your progress.\n\n— ${S.user.name}, DarDoc · PeptiDoc`;
+    const waText = `Hello ${p.title ? p.title + " " : ""}${p.name}, here is your access to your personal treatment portal:\n\n🔗 ${link}\n📱 Mobile: +${p.mobile}\n🔑 PIN: ${pin}\n\nYou can view your guide, log your doses and report how you feel — I'll be following your progress.\n\n— ${S.user.name}, DoCare`;
     scrim.querySelector("#pin-zone").innerHTML = `
       <div class="pin-display">${pin}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1920,8 +1917,8 @@ function publishedModal(patientId, w, pin) {
   const name = `${w.patient.title ? w.patient.title + " " : ""}${w.patient.name}`;
   const medSummary = w.cart.length > 1 ? `${w.cart.length} programs` : `${w.cart[0].medication}${w.cart[0].dose ? " " + w.cart[0].dose : ""}`;
   const waText = pin
-    ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, DarDoc · PeptiDoc`
-    : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, DarDoc · PeptiDoc`;
+    ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, DoCare`
+    : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, DoCare`;
   const scrim = modal(`
     <div style="text-align:center;padding:6px 0 2px">
       <div style="width:60px;height:60px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">${icon("checkCircle", 30)}</div>

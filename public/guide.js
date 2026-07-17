@@ -38,9 +38,8 @@ function buildGuide(plan, patient, doctorName) {
   <div class="guide">
     <header class="g-head">
       <div class="g-brand">
-        <div class="g-logo">${icon("leaf", 22)}</div>
+        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:48px;width:auto">
         <div>
-          <div class="g-brand-name">DarDoc · PeptiDoc</div>
           <div class="g-brand-sub">Personal Treatment Guide</div>
         </div>
       </div>

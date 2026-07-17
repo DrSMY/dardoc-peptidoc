@@ -23,12 +23,9 @@ function renderLogin() {
   app.innerHTML = `
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px">
-        <div style="width:46px;height:46px;border-radius:13px;background:var(--gold-deep);color:#fff;display:flex;align-items:center;justify-content:center">${icon("leaf", 24)}</div>
-        <div>
-          <div style="font-family:var(--font-head);font-weight:800;font-size:17px">Super Admin</div>
-          <div style="font-size:12.5px;color:var(--muted)">Protocols &amp; knowledge base</div>
-        </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:22px">
+        <img src="/brand/docare-olive-sm.png" alt="DoCare" style="height:72px;width:auto">
+        <div style="font-size:12.5px;color:var(--muted)">Super Admin · Protocols &amp; knowledge base</div>
       </div>
       <h1 style="font-size:22px;margin-bottom:4px">Admin sign in</h1>
       <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Manage clinical protocols, peptide info and the knowledge base.</p>
@@ -80,10 +77,10 @@ const NAV = [
 ];
 
 function renderShell() {
-  document.title = "Super Admin — DarDoc · PeptiDoc";
+  document.title = "Super Admin — DoCare";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line">${icon("leaf", 20)} Super Admin</div>
+    <div class="brand-line"><img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:28px;width:auto"> Super Admin</div>
     <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
@@ -91,9 +88,9 @@ function renderShell() {
   </nav>
   <div class="shell">
     <aside class="sidebar">
-      <div class="sb-brand">
-        <div class="sb-mark">${icon("leaf", 21)}</div>
-        <div><div class="sb-name">Super Admin</div><div class="sb-sub">DarDoc · PeptiDoc</div></div>
+      <div class="sb-brand" style="flex-direction:column;align-items:flex-start;gap:7px">
+        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:56px;width:auto">
+        <div class="sb-sub">Super Admin console</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
         ${NAV.map((n) => `<a class="sb-link" href="${n.hash}">${icon(n.ico, 19)} ${esc(n.label)}</a>`).join("")}

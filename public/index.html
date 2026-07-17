@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DarDoc · PeptiDoc — Consult, Guide & Follow-up</title>
+<title>DoCare — Preventive Health & Wellness</title>
 <meta name="description" content="One platform for the full treatment journey: doctor consultation, personalised patient guides, and follow-up tracking.">
 <link rel="stylesheet" href="/theme.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2355682B'/><path d='M50 78c-16 0-28-12-28-28 0-10 5-18 13-23 3 8 8 13 16 16 8 3 15 8 18 16a26 26 0 0 1-19 19Z' fill='none' stroke='%23E9C766' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/><path d='M30 70c3-8 9-13 16-16' fill='none' stroke='%23E9C766' stroke-width='6' stroke-linecap='round'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23262B0F'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23C9A544' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23C9A544'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23C9A544' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23C9A544'/></svg>">
 <style>
   .land { min-height: 100dvh; display: flex; flex-direction: column; }
   .land-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(16px, 5vw, 48px); }
@@ -32,17 +32,13 @@
 <div class="land">
   <nav class="land-nav">
     <div class="brand">
-      <div class="brand-mark" id="brand-ico"></div>
-      <div>
-        <div class="brand-name">DarDoc · PeptiDoc</div>
-        <div class="brand-tag">Consult → Guide → Follow-up</div>
-      </div>
+      <img src="/brand/docare-olive-sm.png" alt="DoCare — Doc·Care, Preventive Health &amp; Wellness" style="height:58px;width:auto">
     </div>
     <a class="btn btn-ghost btn-sm" href="/doctor">Doctor sign in</a>
   </nav>
 
   <main class="hero">
-    <span class="badge badge-cyan hero-badge">One platform, the whole treatment journey</span>
+    <span class="badge badge-cyan hero-badge">Preventive health &amp; wellness — the whole treatment journey</span>
     <h1>From consultation to <em>personalised guide</em> to daily follow-up.</h1>
     <p>Run the consultation and publish a personal treatment guide. Your patient follows it, logs doses and side effects — and you see it all, live.</p>
 
@@ -60,12 +56,11 @@
     </div>
   </main>
 
-  <footer class="land-foot">© <span id="yr"></span> DarDoc · PeptiDoc — Clinical decision support &amp; patient follow-up. Not a substitute for emergency care.</footer>
+  <footer class="land-foot">© <span id="yr"></span> DoCare — Preventive health &amp; wellness. Clinical decision support &amp; patient follow-up. Not a substitute for emergency care.</footer>
 </div>
 <script src="/shared.js"></script>
 <script>
-  document.getElementById("brand-ico").innerHTML = icon("leaf", 24);
-  document.getElementById("ico-doc").innerHTML = icon("leaf", 20);
+  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 20);
   document.getElementById("chev1").innerHTML = icon("chevR", 18);
   document.getElementById("f1").innerHTML = icon("file", 17);
   document.getElementById("f2").innerHTML = icon("bell", 17);
