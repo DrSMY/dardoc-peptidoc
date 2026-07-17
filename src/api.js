@@ -461,12 +461,12 @@ route("POST", "/api/plans", async (req, res, _p, body) => {
   if (!body.medication || !body.title) return json(res, 400, { error: "Program title and medication are required." });
   const followupDays = body.followupDays ?? 28;
   const r = db.prepare(`INSERT INTO plans
-    (patient_id, doctor_id, category, title, medication, dose, route, frequency, half_life_hours,
+    (patient_id, doctor_id, category, title, medication, dose, quantity, route, frequency, half_life_hours,
      phases_json, instructions, warnings, diet_json, followup_days, next_followup, blood_test, clinical_note,
      clinical_suggestion, supplements)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?,?,?)`)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?,?,?)`)
     .run(body.patientId, doc.id, body.category || "custom", body.title, body.medication,
-      body.dose || "", body.route || "injection", body.frequency || "weekly", body.halfLifeHours || null,
+      body.dose || "", Number(body.quantity) || 1, body.route || "injection", body.frequency || "weekly", body.halfLifeHours || null,
       JSON.stringify(body.phases || []), body.instructions || "", body.warnings || "",
       JSON.stringify(body.diet || {}), followupDays, `+${followupDays} days`,
       body.bloodTest || "none", body.clinicalNote || "",
@@ -478,7 +478,7 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
   if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
   const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
   if (!plan) return json(res, 404, { error: "Plan not found." });
-  const fields = { status: "status", title: "title", medication: "medication", dose: "dose", route: "route",
+  const fields = { status: "status", title: "title", medication: "medication", dose: "dose", quantity: "quantity", route: "route",
     frequency: "frequency", instructions: "instructions", warnings: "warnings", bloodTest: "blood_test",
     clinicalNote: "clinical_note", nextFollowup: "next_followup", followupDays: "followup_days" };
   const sets = [], vals = [];

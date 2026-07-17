@@ -477,7 +477,7 @@ async function viewPatient(id) {
                   <div style="font-weight:700;font-family:var(--font-head);font-size:14.5px">${esc(pl.title)}
                     <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
                   </div>
-                  <div style="font-size:13px;color:var(--muted)">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} · ${esc(pl.frequency)} · started ${esc(fmtDate(pl.created_at))}</div>
+                  <div style="font-size:13px;color:var(--muted)">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}${pl.quantity > 1 ? " × " + pl.quantity : ""} · ${esc(pl.frequency)} · started ${esc(fmtDate(pl.created_at))}</div>
                 </div>
                 ${pl.status === "active" ? `
                 <div style="display:flex;gap:6px">
@@ -696,6 +696,17 @@ function editDoseModal(pl, done) {
 // ── consultation wizard ──────────────────────────────────────────
 const WIZ_STEPS = ["Intake", "Program", "Clinical", "Review & publish"];
 
+// A blank "program in progress" — the Program step builds one of these at a
+// time, then "+ Add to program" pushes a copy into S.wizard.cart so a single
+// consultation can prescribe several medications (e.g. a GLP-1 + a peptide).
+function freshDraft(category) {
+  return {
+    category, template: null, protocol: null,
+    medication: "", dose: "", quantity: 1, route: "injection", frequency: "weekly", halfLifeHours: null,
+    phases: [],
+  };
+}
+
 async function viewConsult() {
   if (!S.patients.length) { try { S.patients = await api("GET", "/api/patients"); } catch {} }
   const preselect = (location.hash.match(/patient=(\d+)/) || [])[1];
@@ -704,13 +715,10 @@ async function viewConsult() {
     intakeSub: 0, // sub-step within Intake: identity → clinical → goals → objective
     existingId: preselect ? Number(preselect) : null,
     patient: { name: "", mobile: "", email: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
-    category: "glp1",
-    template: null,
-    protocol: null,
-    medication: "", dose: "", route: "injection", frequency: "weekly", halfLifeHours: null,
-    phases: [],
-    instructions: "", warnings: "", bloodTest: "none", followupDays: 28, clinicalNote: "", supplements: "",
-    diet: {},
+    cart: [],              // programs added so far this consultation (one entry per medication)
+    draft: freshDraft("glp1"), // the program currently being configured on the Program step
+    followupDays: 28, clinicalNote: "", supplements: "",
+    diet: {},              // shared metabolic targets — only relevant while a glp1 program is in the cart
   };
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
@@ -735,7 +743,7 @@ function patientSummaryHTML(showRx) {
   if (m.tdee) rows.push(cell("TDEE", m.tdee + " kcal"));
   if (m.target) rows.push(cell("Weight-loss target", m.target + " kcal"));
   if (m.proteinMin) rows.push(cell("Protein / day", `${m.proteinMin}–${m.proteinMax} g`));
-  if (showRx && w.medication) rows.push(cell("Rx", esc(w.medication) + (w.dose ? " " + esc(w.dose) : "")));
+  if (showRx && w.cart.length) rows.push(cell("Rx", esc(w.cart.map((c) => c.medication + (c.dose ? " " + c.dose : "")).join(", "))));
   if (!rows.length) return "";
   return `<div class="metric-strip">${rows.join("")}</div>`;
 }
@@ -1360,22 +1368,33 @@ function wizIntakeObjective() {
   document.getElementById("wz-next").addEventListener("click", () => advanceIntake());
 }
 
+// A doctor can prescribe several programs in one consultation (e.g. a
+// GLP-1 plus a peptide). The Program step builds one at a time in
+// `w.draft`; "+ Add to program" pushes a snapshot into `w.cart` and resets
+// the draft so another can be configured. "Continue" also silently adds
+// whatever is currently in the draft (if valid) so the common single-
+// medication case still works in one click, exactly as before.
 function wizStepProgram() {
   const w = S.wizard;
+  const d = w.draft;
   const cats = [
     { key: "glp1", label: "GLP-1 / Weight loss", ico: "syringe" },
     { key: "peptide", label: "Peptide therapy", ico: "droplet" },
     { key: "custom", label: "Custom program", ico: "sparkle" },
   ];
-  const tpls = S.templates.filter((t) => t.category === w.category);
+  const tpls = S.templates.filter((t) => t.category === d.category);
 
   view().innerHTML = `${wizHead()}
   <div class="card card-pad">
     <div class="card-title">${icon("layers", 19)} Choose the treatment program</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
-      ${cats.map((c) => `<button class="chip ${w.category === c.key ? "on" : ""}" data-cat="${c.key}">${esc(c.label)}</button>`).join("")}
+      ${cats.map((c) => `<button class="chip ${d.category === c.key ? "on" : ""}" data-cat="${c.key}">${esc(c.label)}</button>`).join("")}
     </div>
     <div id="wz-program-body"></div>
+    <div style="margin-top:14px">
+      <button class="btn btn-secondary" id="wz-add-cart" type="button">${icon("plus", 16)} Add to program</button>
+    </div>
+    ${cartHTML()}
     <p class="err-text" id="wz-err" hidden role="alert"></p>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:18px">
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
@@ -1383,122 +1402,166 @@ function wizStepProgram() {
     </div>
   </div>`;
 
+  function cartHTML() {
+    if (!w.cart.length) return "";
+    return `
+    <div class="card" style="background:var(--bg);margin-top:16px">
+      <div class="card-title" style="padding:14px 16px 0">${icon("checkCircle", 17)} Programs added (${w.cart.length})</div>
+      ${w.cart.map((c, i) => `
+        <div class="pt-row">
+          <div class="pt-info">
+            <div class="pt-name">${esc(c.medication)}${c.dose ? " · " + esc(c.dose) : ""}${c.quantity > 1 ? ` × ${c.quantity}` : ""} <span class="badge ${c.category === "glp1" ? "badge-cyan" : c.category === "peptide" ? "badge-teal" : "badge-gray"}">${c.category === "glp1" ? "GLP-1" : c.category[0].toUpperCase() + c.category.slice(1)}</span></div>
+            <div class="pt-meta">${esc(c.frequency)}</div>
+          </div>
+          <button class="icon-btn" data-delcart="${i}" aria-label="Remove ${esc(c.medication)}">${icon("x", 16)}</button>
+        </div>`).join("")}
+    </div>`;
+  }
+
+  view().querySelectorAll("[data-delcart]").forEach((b) => b.addEventListener("click", () => {
+    w.cart.splice(Number(b.dataset.delcart), 1);
+    wizStepProgram();
+  }));
+
   view().querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
-    w.category = b.dataset.cat;
-    w.template = null; w.protocol = null; w.medication = ""; w.dose = ""; w.phases = [];
+    w.draft = freshDraft(b.dataset.cat);
     wizStepProgram();
   }));
 
   const body = document.getElementById("wz-program-body");
 
-  if (w.category === "custom") {
+  if (d.category === "custom") {
     body.innerHTML = `
     <div class="form-grid">
-      <div class="field"><label for="cu-med">Medication / treatment name <span class="req">*</span></label><input class="input" id="cu-med" value="${esc(w.medication)}" placeholder="e.g. Metformin XR"></div>
-      <div class="field"><label for="cu-dose">Dose</label><input class="input" id="cu-dose" value="${esc(w.dose)}" placeholder="e.g. 500 mg"></div>
-      <div class="field"><label for="cu-route">Route</label><select class="input" id="cu-route">${["injection", "oral", "nasal", "topical"].map((r) => `<option ${w.route === r ? "selected" : ""}>${r}</option>`).join("")}</select></div>
-      <div class="field"><label for="cu-freq">Frequency</label><select class="input" id="cu-freq">${["daily", "twice daily", "weekly", "twice a week", "every 3 days", "every other day", "as needed"].map((f) => `<option ${w.frequency === f ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+      <div class="field"><label for="cu-med">Medication / treatment name <span class="req">*</span></label><input class="input" id="cu-med" value="${esc(d.medication)}" placeholder="e.g. Metformin XR"></div>
+      <div class="field"><label for="cu-dose">Dose</label><input class="input" id="cu-dose" value="${esc(d.dose)}" placeholder="e.g. 500 mg"></div>
+      <div class="field"><label for="cu-route">Route</label><select class="input" id="cu-route">${["injection", "oral", "nasal", "topical"].map((r) => `<option ${d.route === r ? "selected" : ""}>${r}</option>`).join("")}</select></div>
+      <div class="field"><label for="cu-freq">Frequency</label><select class="input" id="cu-freq">${["daily", "twice daily", "weekly", "twice a week", "every 3 days", "every other day", "as needed"].map((f) => `<option ${d.frequency === f ? "selected" : ""}>${f}</option>`).join("")}</select></div>
     </div>
     ${phasesEditor()}`;
     wirePhases(body);
     ["cu-med", "cu-dose", "cu-route", "cu-freq"].forEach((id) => body.querySelector("#" + id).addEventListener("input", () => {
-      w.medication = body.querySelector("#cu-med").value;
-      w.dose = body.querySelector("#cu-dose").value;
-      w.route = body.querySelector("#cu-route").value;
-      w.frequency = body.querySelector("#cu-freq").value;
+      d.medication = body.querySelector("#cu-med").value;
+      d.dose = body.querySelector("#cu-dose").value;
+      d.route = body.querySelector("#cu-route").value;
+      d.frequency = body.querySelector("#cu-freq").value;
     }));
   } else {
     body.innerHTML = `
     <div class="tpl-grid">
       ${tpls.map((t) => `
-        <button class="tpl-card ${w.template && w.template.id === t.id ? "sel" : ""}" data-tpl="${t.id}">
-          ${icon(w.category === "glp1" ? "syringe" : "droplet", 20)}
+        <button class="tpl-card ${d.template && d.template.id === t.id ? "sel" : ""}" data-tpl="${t.id}">
+          ${icon(d.category === "glp1" ? "syringe" : "droplet", 20)}
           <div class="tpl-name">${esc(t.name)}</div>
-          <div class="tpl-sub">${w.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : (t.config.protocols ? t.config.protocols.length + " protocol" + (t.config.protocols.length > 1 ? "s" : "") : "")}</div>
+          <div class="tpl-sub">${d.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : (t.config.protocols ? t.config.protocols.length + " protocol" + (t.config.protocols.length > 1 ? "s" : "") : "")}</div>
         </button>`).join("")}
     </div>
     <div id="wz-tpl-detail" style="margin-top:18px"></div>`;
 
     body.querySelectorAll("[data-tpl]").forEach((b) => b.addEventListener("click", () => {
-      w.template = S.templates.find((t) => t.id === Number(b.dataset.tpl));
-      w.medication = w.template.config.medication || w.template.name;
-      if (w.category === "glp1") {
-        w.route = w.template.config.route;
-        w.frequency = w.template.config.frequency;
-        w.halfLifeHours = w.template.config.halfLifeHours;
-        w.dose = w.template.config.doses[0];
+      d.template = S.templates.find((t) => t.id === Number(b.dataset.tpl));
+      d.medication = d.template.config.medication || d.template.name;
+      if (d.category === "glp1") {
+        d.route = d.template.config.route;
+        d.frequency = d.template.config.frequency;
+        d.halfLifeHours = d.template.config.halfLifeHours;
+        d.dose = d.template.config.doses[0];
+        d.phases = suggestTitration(d.template.config.doses, d.dose, d.template.config.titration);
       } else {
-        w.protocol = w.template.config.protocols[0];
-        applyProtocol();
+        d.protocol = d.template.config.protocols[0];
+        applyProtocolTo(d);
       }
       wizStepProgram();
     }));
 
     const det = document.getElementById("wz-tpl-detail");
-    if (w.template && w.category === "glp1") {
-      const doses = w.template.config.doses;
+    if (d.template && d.category === "glp1") {
+      const doses = d.template.config.doses;
       det.innerHTML = `
       <hr class="divider">
       <div class="form-grid">
-        <div class="field"><label for="g-dose">Starting dose</label><select class="input" id="g-dose">${doses.map((d) => `<option ${w.dose === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
-        <div class="field"><label>Frequency</label><input class="input" value="${esc(w.frequency)}" disabled></div>
+        <div class="field"><label for="g-dose">Starting dose</label><select class="input" id="g-dose">${doses.map((dd) => `<option ${d.dose === dd ? "selected" : ""}>${dd}</option>`).join("")}</select></div>
+        <div class="field"><label for="g-qty">Quantity (pens/units)</label><input class="input" id="g-qty" type="number" min="1" step="1" value="${esc(d.quantity || 1)}"></div>
       </div>
       ${phasesEditor()}`;
       det.querySelector("#g-dose").addEventListener("change", (e) => {
-        w.dose = e.target.value;
-        w.phases = suggestTitration(doses, w.dose, w.template.config.titration);
+        d.dose = e.target.value;
+        d.phases = suggestTitration(doses, d.dose, d.template.config.titration);
         wizStepProgram();
       });
-      if (!w.phases.length) w.phases = suggestTitration(doses, w.dose, w.template.config.titration);
-      det.insertAdjacentHTML("beforeend", "");
-      // re-render phases with suggestion
+      det.querySelector("#g-qty").addEventListener("input", (e) => { d.quantity = Number(e.target.value) || 1; });
+      if (!d.phases.length) d.phases = suggestTitration(doses, d.dose, d.template.config.titration);
       det.querySelector("#phases-box").outerHTML = phasesRows();
       wirePhases(det);
     }
-    if (w.template && w.category === "peptide") {
-      const protos = w.template.config.protocols;
+    if (d.template && d.category === "peptide") {
+      const protos = d.template.config.protocols;
       det.innerHTML = `
       <hr class="divider">
       <div class="field">
         <label for="pp-proto">Protocol</label>
-        <select class="input" id="pp-proto">${protos.map((pr, i) => `<option value="${i}" ${w.protocol === pr ? "selected" : ""}>${esc(pr.protocolType)} — ${esc(pr.doseVolume)} · ${esc(pr.time)}</option>`).join("")}</select>
+        <select class="input" id="pp-proto">${protos.map((pr, i) => `<option value="${i}" ${d.protocol === pr ? "selected" : ""}>${esc(pr.protocolType)} — ${esc(pr.doseVolume)} · ${esc(pr.time)}</option>`).join("")}</select>
       </div>
       <div class="metric-strip">
-        <div class="metric"><b>${esc(w.protocol.strength)}</b>Strength</div>
-        <div class="metric"><b>${esc(w.protocol.doseAmount || w.protocol.doseVolume)}</b>Dose</div>
-        <div class="metric"><b>${esc(w.protocol.duration)}</b>Vial lasts</div>
-        <div class="metric"><b>${esc(w.protocol.cycle)}</b>Cycle</div>
+        <div class="metric"><b>${esc(d.protocol.strength)}</b>Strength</div>
+        <div class="metric"><b>${esc(d.protocol.doseAmount || d.protocol.doseVolume)}</b>Dose</div>
+        <div class="metric"><b>${esc(d.protocol.duration)}</b>Vial lasts</div>
+        <div class="metric"><b>${esc(d.protocol.cycle)}</b>Cycle</div>
       </div>
-      <p class="hint">${esc(w.protocol.summary)}</p>`;
+      <p class="hint">${esc(d.protocol.summary)}</p>`;
       det.querySelector("#pp-proto").addEventListener("change", (e) => {
-        w.protocol = protos[Number(e.target.value)];
-        applyProtocol();
+        d.protocol = protos[Number(e.target.value)];
+        applyProtocolTo(d);
         wizStepProgram();
       });
     }
   }
 
-  function applyProtocol() {
-    const pr = w.protocol;
-    w.dose = pr.doseVolume + (pr.doseAmount ? ` (${pr.doseAmount})` : "");
-    w.route = pr.route.toLowerCase().includes("oral") ? "oral" : pr.route.toLowerCase().includes("nasal") ? "nasal" : pr.route.toLowerCase().includes("topical") ? "topical" : "injection";
-    const f = inferFreqLabel(pr.time);
-    w.frequency = f;
-    w.phases = [{ label: pr.protocolType, dose: w.dose, weeks: "", note: `${pr.time} — ${pr.cycle}` }];
-  }
-
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 0; paintWizard(); });
+
+  document.getElementById("wz-add-cart").addEventListener("click", () => {
+    const err = document.getElementById("wz-err");
+    err.hidden = true;
+    if (!addDraftToCart()) { err.textContent = "Choose a program (or enter a custom medication) before adding it."; err.hidden = false; return; }
+    toast("Added to program");
+    wizStepProgram();
+  });
+
   document.getElementById("wz-next").addEventListener("click", () => {
     const err = document.getElementById("wz-err");
-    if (!w.medication) { err.textContent = "Choose a program (or enter a custom medication) before continuing."; err.hidden = false; return; }
+    addDraftToCart(); // silently include an in-progress selection, if any
+    if (!w.cart.length) { err.textContent = "Add at least one program before continuing."; err.hidden = false; return; }
     w.step = 2;
-    // pre-fill clinical defaults
     prefillFromIntake();
-    if (!w.instructions) w.instructions = defaultInstructions();
-    if (!w.warnings) w.warnings = defaultWarnings();
-    if (!Object.keys(w.diet).length) w.diet = defaultDiet();
+    if (!Object.keys(w.diet).length && w.cart.some((c) => c.category === "glp1")) w.diet = defaultDiet();
     paintWizard();
   });
+}
+
+// Pushes the current draft into the cart (computing its default
+// instructions/warnings/blood-test suggestion) and resets the draft to a
+// blank program of the same category. Returns false if the draft has no
+// medication selected yet.
+function addDraftToCart() {
+  const w = S.wizard, d = w.draft;
+  if (!d.medication) return false;
+  w.cart.push({
+    ...d,
+    phases: d.phases.map((p) => ({ ...p })),
+    instructions: defaultInstructionsFor(d),
+    warnings: defaultWarningsFor(d),
+    bloodTest: "none",
+  });
+  w.draft = freshDraft(d.category);
+  return true;
+}
+
+function applyProtocolTo(d) {
+  const pr = d.protocol;
+  d.dose = pr.doseVolume + (pr.doseAmount ? ` (${pr.doseAmount})` : "");
+  d.route = pr.route.toLowerCase().includes("oral") ? "oral" : pr.route.toLowerCase().includes("nasal") ? "nasal" : pr.route.toLowerCase().includes("topical") ? "topical" : "injection";
+  d.frequency = inferFreqLabel(pr.time);
+  d.phases = [{ label: pr.protocolType, dose: d.dose, weeks: "", note: `${pr.time} — ${pr.cycle}` }];
 }
 
 function inferFreqLabel(time) {
@@ -1517,34 +1580,34 @@ function inferFreqLabel(time) {
 // Uses the real per-medication titration schedule (src/presets.js
 // GLP1_MEDICATIONS[].titration) when available; falls back to a generic
 // 2-step suggestion for medications/peptides without one.
+// Auto-fill only a single ~1-month phase (the starting dose) rather than
+// the whole escalation ladder — a doctor prescribes one month at a time
+// and reviews at follow-up, so the default should match that, not commit
+// the patient's guide to a multi-month schedule up front. "+ Add phase"
+// still lets a doctor manually plan further steps if they want to.
 function suggestTitration(ladder, start, schedule) {
   if (schedule && schedule.length) {
     const idx = schedule.findIndex((s) => s.dose === start);
-    const from = idx >= 0 ? idx : 0;
-    return schedule.slice(from).map((s) => ({
-      label: s.note || s.dose,
-      dose: s.dose,
-      weeks: s.weeks ?? "",
-      note: s.weeks ? `${s.weeks}-week step — confirm tolerance at follow-up before advancing` : "Maintenance dose — continue until reviewed",
-    }));
+    const step = schedule[idx >= 0 ? idx : 0];
+    return [{
+      label: step.note || step.dose,
+      dose: step.dose,
+      weeks: step.weeks ?? 4,
+      note: "1-month starting supply — review and adjust at follow-up",
+    }];
   }
   const i = ladder.indexOf(start);
-  const phases = [{ label: "Starting phase", dose: start, weeks: 4, note: "Begin here — take it slow and steady" }];
-  if (i >= 0 && i + 1 < ladder.length) {
-    phases.push({ label: "Step up", dose: ladder[i + 1], weeks: 4, note: "Only if well tolerated — confirm at follow-up" });
-  }
-  phases.push({ label: "Review", dose: "", weeks: "", note: "Dose reviewed at your follow-up consultation" });
-  return phases;
+  return [{ label: "Starting phase", dose: ladder[i >= 0 ? i : 0] ?? start, weeks: 4, note: "1-month starting supply — review and adjust at follow-up" }];
 }
 
 function phasesEditor() {
-  return `<hr class="divider"><div class="card-title" style="font-size:14.5px">${icon("layers", 17)} Dose schedule / titration <span class="hint" style="font-weight:400">(shown in the patient guide)</span></div>${phasesRows()}`;
+  return `<hr class="divider"><div class="card-title" style="font-size:14.5px">${icon("layers", 17)} Dose schedule <span class="hint" style="font-weight:400">(1 month by default — add more phases only if planning the escalation ahead)</span></div>${phasesRows()}`;
 }
 
 function phasesRows() {
-  const w = S.wizard;
+  const phases = S.wizard.draft.phases;
   return `<div id="phases-box">
-    ${w.phases.map((ph, i) => `
+    ${phases.map((ph, i) => `
     <div class="phase-row" data-i="${i}">
       <input class="input" data-k="label" placeholder="Phase name" value="${esc(ph.label || "")}" aria-label="Phase ${i + 1} name">
       <input class="input" data-k="dose" placeholder="Dose" value="${esc(ph.dose || "")}" aria-label="Phase ${i + 1} dose">
@@ -1557,53 +1620,53 @@ function phasesRows() {
 }
 
 function wirePhases(scope) {
-  const w = S.wizard;
+  const phases = S.wizard.draft.phases;
   const box = scope.querySelector("#phases-box");
   if (!box) return;
   box.querySelectorAll(".phase-row").forEach((row) => {
     row.querySelectorAll("input").forEach((inp) => inp.addEventListener("input", () => {
-      w.phases[Number(row.dataset.i)][inp.dataset.k] = inp.value;
+      phases[Number(row.dataset.i)][inp.dataset.k] = inp.value;
     }));
   });
   box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
-    w.phases.splice(Number(b.dataset.del), 1);
+    phases.splice(Number(b.dataset.del), 1);
     box.outerHTML = phasesRows();
     wirePhases(scope);
   }));
   box.querySelector("#add-phase").addEventListener("click", () => {
-    w.phases.push({ label: "", dose: "", weeks: "", note: "" });
+    phases.push({ label: "", dose: "", weeks: "", note: "" });
     box.outerHTML = phasesRows();
     wirePhases(scope);
   });
 }
 
-function defaultInstructions() {
-  const w = S.wizard;
-  if (w.category === "glp1") {
-    const admin = w.template && w.template.config.administration;
-    const base = admin || (w.route === "oral"
+// item: {category, template, protocol, medication, route} — a cart entry
+// or the in-progress draft; both share this shape.
+function defaultInstructionsFor(item) {
+  if (item.category === "glp1") {
+    const admin = item.template && item.template.config.administration;
+    const base = admin || (item.route === "oral"
       ? "Take your tablet first thing in the morning on an empty stomach with a small sip of water. Wait at least 30 minutes before eating, drinking or taking other medicines."
       : "Inject once weekly, on the same day each week, at any time of day. Rotate injection sites: abdomen, thigh, or upper arm.");
     return `${base}\nEat slowly, stop when comfortably full, and prioritise protein at every meal.\nStay well hydrated (2–3 L water daily).`;
   }
-  if (w.category === "peptide" && w.protocol) {
-    const info = (S.presets.peptideInfo || {})[w.medication];
+  if (item.category === "peptide" && item.protocol) {
+    const info = (S.presets.peptideInfo || {})[item.medication];
     const storage = (info && info.storageNotes) || "Store vials refrigerated (2–8°C) away from light.";
     const missed = info && info.missedDose ? `\nMissed dose: ${info.missedDose}` : "";
-    return `${w.protocol.time}.\nRoute: ${w.protocol.route}.\nCycle: ${w.protocol.cycle}.\n${storage}${missed}`;
+    return `${item.protocol.time}.\nRoute: ${item.protocol.route}.\nCycle: ${item.protocol.cycle}.\n${storage}${missed}`;
   }
   return "";
 }
 
-function defaultWarnings() {
-  const w = S.wizard;
-  if (w.category === "glp1") {
+function defaultWarningsFor(item) {
+  if (item.category === "glp1") {
     const flags = (S.presets.glp1Eligibility && S.presets.glp1Eligibility.redFlags) || [];
     const flagsText = flags.length ? `Contact me promptly if you experience:\n- ${flags.join("\n- ")}` : "Contact me promptly if you experience any severe or concerning symptom.";
     return `${flagsText}\nMild nausea, softer stools and reduced appetite are common in the first weeks and usually settle.`;
   }
-  if (w.category === "peptide") {
-    const info = (S.presets.peptideInfo || {})[w.medication];
+  if (item.category === "peptide") {
+    const info = (S.presets.peptideInfo || {})[item.medication];
     if (info && info.redFlags && info.redFlags.length) {
       return `Contact me promptly if you notice:\n- ${info.redFlags.join("\n- ")}`;
     }
@@ -1613,8 +1676,6 @@ function defaultWarnings() {
 }
 
 function defaultDiet() {
-  const w = S.wizard;
-  if (w.category !== "glp1") return {};
   const m = wizMetrics();
   const diet = {};
   if (m.proteinMin) { diet.proteinMin = m.proteinMin; diet.proteinMax = m.proteinMax; }
@@ -1641,26 +1702,50 @@ function prefillFromIntake() {
   if (!w.patient.allergies) w.patient.allergies = intakeText("allergies");
 }
 
+// Builds one combined EMR note across every program added this
+// consultation: a full clinical paragraph for the first, a one-line
+// "Also prescribed" for each additional medication, then the doctor's
+// private note.
+function buildMultiClinicalSuggestion(patient, items, metrics, note) {
+  if (!items.length) return "";
+  const first = buildClinicalSuggestion(patient, { ...items[0], clinicalNote: "" }, metrics);
+  const rest = items.slice(1).map((it) => {
+    const routeFreq = [it.route, it.frequency].filter(Boolean).join(", ");
+    return `Also prescribed: ${it.medication}${it.dose ? " " + it.dose : ""}${routeFreq ? ` (${routeFreq})` : ""}`;
+  });
+  return [first, ...rest, note].filter(Boolean).join("\n\n");
+}
+
 function wizStepClinical() {
   const w = S.wizard;
+  const hasGlp1 = w.cart.some((c) => c.category === "glp1");
+
   view().innerHTML = `${wizHead()}
   <div class="card card-pad" style="max-width:820px">
     <div class="card-title">${icon("clipboard", 19)} Clinical details &amp; guide content</div>
+
+    ${w.cart.map((c, i) => `
+      <div class="card" style="background:var(--bg);margin-bottom:14px">
+        <div class="card-title" style="padding:14px 16px 0;font-size:15px">${icon(c.category === "glp1" ? "syringe" : "droplet", 17)} ${esc(c.medication)}${c.dose ? " · " + esc(c.dose) : ""}${c.quantity > 1 ? ` × ${c.quantity}` : ""}</div>
+        <div class="form-grid" style="padding:12px 16px 16px">
+          <div class="field full"><label for="ci-instr-${i}">Instructions for the patient</label><textarea class="input" id="ci-instr-${i}" rows="4">${esc(c.instructions)}</textarea></div>
+          <div class="field full"><label for="ci-warn-${i}">Warnings — when to contact you</label><textarea class="input" id="ci-warn-${i}" rows="3">${esc(c.warnings)}</textarea></div>
+          <div class="field"><label for="ci-blood-${i}">Blood test</label>
+            <select class="input" id="ci-blood-${i}">
+              <option value="none" ${c.bloodTest === "none" ? "selected" : ""}>Not needed</option>
+              <option value="recommended" ${c.bloodTest === "recommended" ? "selected" : ""}>Recommended</option>
+              <option value="required" ${c.bloodTest === "required" ? "selected" : ""}>Required</option>
+            </select>
+          </div>
+        </div>
+      </div>`).join("")}
+
     <div class="form-grid">
-      <div class="field full"><label for="cl-instr">Instructions for the patient</label><textarea class="input" id="cl-instr" rows="5">${esc(w.instructions)}</textarea></div>
-      <div class="field full"><label for="cl-warn">Warnings — when to contact you</label><textarea class="input" id="cl-warn" rows="4">${esc(w.warnings)}</textarea></div>
       <div class="field"><label for="cl-chronic">Chronic illnesses</label><input class="input" id="cl-chronic" value="${esc(w.patient.chronicIllnesses)}" placeholder="None"></div>
       <div class="field"><label for="cl-meds">Current medications</label><input class="input" id="cl-meds" value="${esc(w.patient.medications)}" placeholder="None"></div>
       <div class="field"><label for="cl-allergy">Allergies</label><input class="input" id="cl-allergy" value="${esc(w.patient.allergies)}" placeholder="None"></div>
-      <div class="field"><label for="cl-blood">Blood test</label>
-        <select class="input" id="cl-blood">
-          <option value="none" ${w.bloodTest === "none" ? "selected" : ""}>Not needed</option>
-          <option value="recommended" ${w.bloodTest === "recommended" ? "selected" : ""}>Recommended</option>
-          <option value="required" ${w.bloodTest === "required" ? "selected" : ""}>Required</option>
-        </select>
-      </div>
       <div class="field"><label for="cl-fu">Follow-up in (days)</label><input class="input" id="cl-fu" type="number" min="3" max="180" value="${esc(w.followupDays)}"></div>
-      ${w.category === "glp1" ? `
+      ${hasGlp1 ? `
       <div class="field"><label for="cl-cal">Calorie target (kcal/day)</label><input class="input" id="cl-cal" type="number" value="${esc(w.diet.calories ?? "")}"></div>
       <div class="field"><label>Protein target (g/day)</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -1688,10 +1773,9 @@ function wizStepClinical() {
 
   const refreshEmr = () => {
     collect();
-    document.getElementById("cl-emr").textContent = buildClinicalSuggestion(
+    document.getElementById("cl-emr").textContent = buildMultiClinicalSuggestion(
       { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
-      { category: w.category, medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency, blood_test: w.bloodTest, clinicalNote: w.clinicalNote },
-      wizMetrics()
+      w.cart, wizMetrics(), w.clinicalNote
     ) || "Add a medication and patient details to generate the clinical record.";
   };
   view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
@@ -1705,16 +1789,18 @@ function wizStepClinical() {
   document.getElementById("wz-next").addEventListener("click", () => { collect(); w.step = 3; paintWizard(); });
 
   function collect() {
-    w.instructions = document.getElementById("cl-instr").value;
-    w.warnings = document.getElementById("cl-warn").value;
+    w.cart.forEach((c, i) => {
+      c.instructions = document.getElementById(`ci-instr-${i}`).value;
+      c.warnings = document.getElementById(`ci-warn-${i}`).value;
+      c.bloodTest = document.getElementById(`ci-blood-${i}`).value;
+    });
     w.patient.chronicIllnesses = document.getElementById("cl-chronic").value;
     w.patient.medications = document.getElementById("cl-meds").value;
     w.patient.allergies = document.getElementById("cl-allergy").value;
-    w.bloodTest = document.getElementById("cl-blood").value;
     w.followupDays = Number(document.getElementById("cl-fu").value) || 28;
     w.supplements = document.getElementById("cl-supp").value;
     w.clinicalNote = document.getElementById("cl-note").value;
-    if (w.category === "glp1") {
+    if (hasGlp1) {
       w.diet.calories = Number(document.getElementById("cl-cal").value) || undefined;
       w.diet.proteinMin = Number(document.getElementById("cl-prot-min").value) || undefined;
       w.diet.proteinMax = Number(document.getElementById("cl-prot-max").value) || undefined;
@@ -1725,18 +1811,18 @@ function wizStepClinical() {
 function wizStepReview() {
   const w = S.wizard;
   injectGuideCss();
-  const fakePlan = {
-    title: `${w.medication} — ${w.category === "glp1" ? "Weight Loss Program" : w.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
-    medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency,
-    phases: w.phases.filter((p) => p.label || p.dose), instructions: w.instructions, warnings: w.warnings,
-    diet: w.diet, blood_test: w.bloodTest, supplements: w.supplements,
-    created_at: new Date().toISOString().slice(0, 10),
-    next_followup: new Date(Date.now() + w.followupDays * 864e5).toISOString().slice(0, 10),
-  };
-  const clinicalSuggestion = buildClinicalSuggestion(
+  const nextFollowup = new Date(Date.now() + w.followupDays * 864e5).toISOString().slice(0, 10);
+  const createdAt = new Date().toISOString().slice(0, 10);
+  const fakePlans = w.cart.map((c) => ({
+    title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
+    medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
+    phases: c.phases.filter((p) => p.label || p.dose), instructions: c.instructions, warnings: c.warnings,
+    diet: c.category === "glp1" ? w.diet : {}, blood_test: c.bloodTest, supplements: w.supplements,
+    created_at: createdAt, next_followup: nextFollowup,
+  }));
+  const clinicalSuggestion = buildMultiClinicalSuggestion(
     { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
-    { category: w.category, medication: w.medication, dose: w.dose, route: w.route, frequency: w.frequency, blood_test: w.bloodTest, clinicalNote: w.clinicalNote },
-    wizMetrics()
+    w.cart, wizMetrics(), w.clinicalNote
   );
   w.clinicalSuggestion = clinicalSuggestion;
   view().innerHTML = `${wizHead()}
@@ -1745,13 +1831,15 @@ function wizStepReview() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div class="card-title" style="margin:0">${icon("file", 19)} Guide preview — what the patient sees</div>
       </div>
-      <div id="guide-preview">${buildGuide(fakePlan, { name: w.patient.name, title: w.patient.title }, S.user.name)}</div>
+      <div id="guide-preview" style="display:flex;flex-direction:column;gap:18px">
+        ${fakePlans.map((p) => buildGuide(p, { name: w.patient.name, title: w.patient.title }, S.user.name)).join("")}
+      </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">
       <div class="card card-pad">
         <div class="card-title">${icon("send", 18)} Publish</div>
         <p style="font-size:13.5px;color:var(--muted);margin-bottom:14px">
-          Publishing saves the program for <b>${esc(w.patient.name)}</b>${w.existingId ? "" : ", registers them as a new patient"} and generates their portal access PIN to share on WhatsApp.
+          Publishing saves ${w.cart.length > 1 ? `${w.cart.length} programs` : "the program"} for <b>${esc(w.patient.name)}</b>${w.existingId ? "" : ", registers them as a new patient"} and generates their portal access PIN to share on WhatsApp.
         </p>
         <p class="err-text" id="wz-err" hidden role="alert"></p>
         <button class="btn btn-accent btn-block" id="wz-publish"><span class="spin"></span><span class="btn-label">${icon("check", 18)} Publish guide</span></button>
@@ -1803,13 +1891,19 @@ function wizStepReview() {
           age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,
         });
       }
-      await api("POST", "/api/plans", {
-        patientId, category: w.category, title: fakePlan.title, medication: w.medication,
-        dose: w.dose, route: w.route, frequency: w.frequency, halfLifeHours: w.halfLifeHours,
-        phases: fakePlan.phases, instructions: w.instructions, warnings: w.warnings,
-        diet: w.diet, followupDays: w.followupDays, bloodTest: w.bloodTest, clinicalNote: w.clinicalNote,
-        clinicalSuggestion: w.clinicalSuggestion, supplements: w.supplements,
-      });
+      // One plan row per program added this consultation — each keeps its
+      // own dose/quantity/instructions/warnings/blood test, sharing the
+      // visit-level follow-up date, clinical note and EMR suggestion.
+      for (let i = 0; i < w.cart.length; i++) {
+        const c = w.cart[i], p = fakePlans[i];
+        await api("POST", "/api/plans", {
+          patientId, category: c.category, title: p.title, medication: c.medication,
+          dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency, halfLifeHours: c.halfLifeHours,
+          phases: p.phases, instructions: c.instructions, warnings: c.warnings,
+          diet: p.diet, followupDays: w.followupDays, bloodTest: c.bloodTest, clinicalNote: w.clinicalNote,
+          clinicalSuggestion: w.clinicalSuggestion, supplements: w.supplements,
+        });
+      }
       toast("Guide published");
       publishedModal(patientId, w, newPin);
     } catch (ex) {
@@ -1824,14 +1918,15 @@ function wizStepReview() {
 function publishedModal(patientId, w, pin) {
   const link = `${location.origin}/portal`;
   const name = `${w.patient.title ? w.patient.title + " " : ""}${w.patient.name}`;
+  const medSummary = w.cart.length > 1 ? `${w.cart.length} programs` : `${w.cart[0].medication}${w.cart[0].dose ? " " + w.cart[0].dose : ""}`;
   const waText = pin
-    ? `Hello ${name}, your personal treatment guide for ${w.medication} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, DarDoc · PeptiDoc`
-    : `Hello ${name}, your updated treatment guide for ${w.medication} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, DarDoc · PeptiDoc`;
+    ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, DarDoc · PeptiDoc`
+    : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, DarDoc · PeptiDoc`;
   const scrim = modal(`
     <div style="text-align:center;padding:6px 0 2px">
       <div style="width:60px;height:60px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">${icon("checkCircle", 30)}</div>
       <h3 style="font-size:20px">Guide published</h3>
-      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${esc(w.patient.name)}'s program is live in their patient portal.</p>
+      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.</p>
       ${pin ? `<div class="pin-display">${pin}</div><p class="hint" style="margin-bottom:14px">Their portal PIN — shown once. You can regenerate it any time from the patient page.</p>` : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} Send via WhatsApp</button>

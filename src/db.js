@@ -157,6 +157,7 @@ addColumn("patients", "intake_json", "TEXT DEFAULT '{}'");        // structured 
 addColumn("patients", "email", "TEXT DEFAULT ''");                // optional — identity alongside/instead of mobile
 addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
 addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
+addColumn("plans", "quantity", "INTEGER DEFAULT 1");              // pens/units dispensed for this program
 addColumn("templates", "is_customized", "INTEGER NOT NULL DEFAULT 0"); // edited via super admin panel
 
 // ── password / pin hashing (scrypt) ─────────────────────────────
