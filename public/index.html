@@ -18,19 +18,10 @@
   .hero-badge { margin-bottom: 18px; }
   .hero h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; max-width: 720px; letter-spacing: -.02em; }
   .hero h1 em { font-style: normal; color: var(--primary); }
-  .hero p { margin: 16px auto 36px; max-width: 560px; color: var(--muted); font-size: clamp(15px, 2vw, 17.5px); }
-  .paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 18px; width: min(680px, 100%); }
-  .path {
-    display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 4px;
-    padding: 26px; border-radius: var(--r-lg); border: 1.5px solid var(--border);
-    background: var(--surface); box-shadow: var(--shadow-sm); text-decoration: none; color: var(--text);
-    transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease);
-  }
-  .path:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--brand); }
-  .path-ico { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
-  .path h2 { font-size: 20px; }
-  .path p { font-size: 14px; color: var(--muted); margin: 4px 0 16px; }
-  .path-cta { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; color: var(--brand); }
+  .hero p { margin: 16px auto 28px; max-width: 560px; color: var(--muted); font-size: clamp(15px, 2vw, 17.5px); }
+  .patient-note { margin: 18px auto 0; font-size: 13px; color: var(--faint); }
+  .patient-note a { color: var(--faint); text-decoration: underline; }
+  .patient-note a:hover { color: var(--muted); }
   .feats { display: flex; gap: clamp(16px, 4vw, 40px); flex-wrap: wrap; justify-content: center; margin-top: 52px; }
   .feat { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); font-weight: 600; }
   .feat svg { color: var(--accent); }
@@ -53,22 +44,13 @@
   <main class="hero">
     <span class="badge badge-cyan hero-badge">One platform, the whole treatment journey</span>
     <h1>From consultation to <em>personalised guide</em> to daily follow-up.</h1>
-    <p>Doctors run the consultation and publish a personal treatment guide. Patients follow it, log doses and side effects — and the doctor sees it all, live.</p>
+    <p>Run the consultation and publish a personal treatment guide. Your patient follows it, logs doses and side effects — and you see it all, live.</p>
 
-    <div class="paths">
-      <a class="path" href="/doctor">
-        <div class="path-ico" style="background:var(--brand-soft);color:var(--brand)" id="ico-doc"></div>
-        <h2>I'm a doctor</h2>
-        <p>Run consultations, build any medication program — GLP-1, peptides or fully custom — and monitor every patient.</p>
-        <span class="path-cta">Open the dashboard <span id="chev1"></span></span>
-      </a>
-      <a class="path" href="/portal">
-        <div class="path-ico" style="background:var(--primary-soft);color:var(--primary)" id="ico-pat"></div>
-        <h2>I'm a patient</h2>
-        <p>View your personal treatment guide, log your doses and check-ins, and stay connected with your doctor.</p>
-        <span class="path-cta">Open my portal <span id="chev2"></span></span>
-      </a>
-    </div>
+    <a class="btn btn-primary" style="padding:14px 28px;font-size:16px;gap:10px" href="/doctor">
+      <span id="ico-doc"></span> Open the doctor dashboard <span id="chev1"></span>
+    </a>
+
+    <p class="patient-note">Patients: use the secure portal link your doctor sent you. Lost it? <a href="/portal">Open the patient portal</a>.</p>
 
     <div class="feats">
       <div class="feat"><span id="f1"></span> Personalised treatment guides</div>
@@ -83,10 +65,8 @@
 <script src="/shared.js"></script>
 <script>
   document.getElementById("brand-ico").innerHTML = icon("stethoscope", 24);
-  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 26);
-  document.getElementById("ico-pat").innerHTML = icon("heart", 26);
-  document.getElementById("chev1").innerHTML = icon("chevR", 16);
-  document.getElementById("chev2").innerHTML = icon("chevR", 16);
+  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 20);
+  document.getElementById("chev1").innerHTML = icon("chevR", 18);
   document.getElementById("f1").innerHTML = icon("file", 17);
   document.getElementById("f2").innerHTML = icon("bell", 17);
   document.getElementById("f3").innerHTML = icon("trend", 17);
