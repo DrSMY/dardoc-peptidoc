@@ -246,7 +246,7 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#454A1D", icon: "scale" },      // rich olive (brand)
+  glp1: { label: "GLP-1 / Weight loss", color: "#4E551F", icon: "scale" },      // rich olive (brand)
   peptide: { label: "Peptides", color: "#B08A28", icon: "droplet" },           // rich gold
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
@@ -463,7 +463,7 @@ async function viewPatient(id) {
         <div style="display:flex;flex-direction:column;gap:18px">
           <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
-            ${weights.length > 1 ? lineChart(weights, { color: "#454A1D", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
+            ${weights.length > 1 ? lineChart(weights, { color: "#4E551F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
           <div class="card card-pad">
             <div class="card-title">${icon("layers", 19)} Programs</div>

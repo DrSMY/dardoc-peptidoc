@@ -205,7 +205,7 @@ function paintHome(v) {
   ${weights.length > 1 ? `
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight trend</h3><span class="badge ${weights[0].weight_kg <= weights[weights.length - 1].weight_kg ? "badge-green" : "badge-amber"}">${(weights[0].weight_kg - weights[weights.length - 1].weight_kg).toFixed(1)} kg</span></div>
-    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#454A1D", unit: " kg", height: 150, aria: "Weight trend" })}</div>
+    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#4E551F", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
   v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; paint(); });
@@ -387,7 +387,7 @@ function paintProgress(v) {
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight</h3></div>
     <div class="card-pad" style="padding-top:8px">
-      ${weights.length > 1 ? lineChart(weights, { color: "#454A1D", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
+      ${weights.length > 1 ? lineChart(weights, { color: "#4E551F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
     </div>
   </div>
 

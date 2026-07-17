@@ -2,8 +2,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  --brand: #454A1D;          /* DoCare deep olive (from logo) */
-  --brand-strong: #2A2E10;
+  --brand: #4E551F;          /* DoCare olive (from logo, tuned for contrast) */
+  --brand-strong: #23260C;
   --brand-soft: #EFEFDC;
   --primary: #B08A28;        /* rich gold — secondary accent, links, focus */
   --primary-soft: #FAF0D8;
