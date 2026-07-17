@@ -12,7 +12,7 @@ function buildGuide(plan, patient, doctorName) {
     topical: "Applied to skin (topical)",
   }[plan.route] || plan.route;
 
-  const routeIcon = plan.route === "injection" ? "syringe" : "pill";
+  const routeIco = routeIcon(plan.route);
 
   const scheduleRows = phases.map((ph, i) => `
     <tr>
@@ -38,7 +38,7 @@ function buildGuide(plan, patient, doctorName) {
   <div class="guide">
     <header class="g-head">
       <div class="g-brand">
-        <div class="g-logo">${icon("stethoscope", 22)}</div>
+        <div class="g-logo">${icon("leaf", 22)}</div>
         <div>
           <div class="g-brand-name">DarDoc · PeptiDoc</div>
           <div class="g-brand-sub">Personal Treatment Guide</div>
@@ -53,7 +53,7 @@ function buildGuide(plan, patient, doctorName) {
         <h2>${esc(patient.title ? patient.title + " " : "")}${esc(patient.name)}</h2>
         <div class="g-doc">by ${esc(doctorName || "your doctor")}</div>
       </div>
-      <div class="g-med-pill">${icon(routeIcon, 18)} ${esc(plan.medication)}${plan.dose ? ` · ${esc(plan.dose)}` : ""}</div>
+      <div class="g-med-pill">${icon(routeIco, 18)} ${esc(plan.medication)}${plan.dose ? ` · ${esc(plan.dose)}` : ""}</div>
     </section>
 
     <section class="g-sec">
@@ -125,7 +125,7 @@ function buildGuide(plan, patient, doctorName) {
 // Guide styles are injected once wherever the guide is shown.
 const GUIDE_CSS = `
 .guide { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
-.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px; background: linear-gradient(120deg, var(--brand), #2A6A6D); color: #fff; }
+.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px; background: linear-gradient(120deg, var(--brand), var(--primary)); color: #fff; }
 .g-brand { display: flex; gap: 12px; align-items: center; }
 .g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
 .g-brand-name { font-family: var(--font-head); font-weight: 800; font-size: 17px; }
@@ -152,9 +152,9 @@ const GUIDE_CSS = `
 .g-sec .g-callout { margin: 0 0 14px; }
 .guide > .g-callout { margin: 0 22px 14px; }
 .g-callout svg { flex-shrink: 0; margin-top: 1px; }
-.g-red { background: var(--danger-soft); color: #7C1D1D; }
+.g-red { background: var(--danger-soft); color: #7A2E22; }
 .g-red svg { color: var(--danger); }
-.g-amber { background: var(--amber-soft); color: #7A3E06; }
+.g-amber { background: var(--amber-soft); color: #6E4A0E; }
 .g-amber svg { color: var(--amber); }
 .g-teal { background: var(--brand-soft); color: var(--brand-strong); }
 .g-teal svg { color: var(--brand); }

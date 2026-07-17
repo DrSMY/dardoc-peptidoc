@@ -2,35 +2,37 @@
 @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  --brand: #1E4C4E;          /* DarDoc deep teal */
-  --brand-strong: #143638;
-  --brand-soft: #E3F0EE;
-  --primary: #0E7490;        /* medical cyan */
-  --primary-soft: #E0F2F7;
-  --accent: #15803D;         /* health green */
-  --accent-soft: #E3F4E9;
-  --amber: #B45309;
-  --amber-soft: #FDF1E0;
-  --danger: #DC2626;
-  --danger-soft: #FBE9E9;
+  --brand: #55682B;          /* DarDoc rich olive */
+  --brand-strong: #3B4A1D;
+  --brand-soft: #EEF0E0;
+  --primary: #B08A28;        /* rich gold — secondary accent, links, focus */
+  --primary-soft: #FAF0D8;
+  --accent: #7C9A46;         /* olive-lime — success / active states */
+  --accent-soft: #EEF3E1;
+  --amber: #AD6A15;
+  --amber-soft: #FAEEDC;
+  --danger: #C0392B;
+  --danger-soft: #F8E7E3;
   --violet: #6C4FB0;
   --violet-soft: #EFEAF9;
+  --gold-deep: #7A5C16;      /* deep bronze-gold — super admin surfaces */
+  --gold-deep-strong: #5C4510;
 
-  --bg: #F4F8F7;
+  --bg: #F7F4E9;
   --surface: #FFFFFF;
-  --border: #DDE9E6;
-  --border-strong: #C4D6D2;
-  --text: #14312F;
-  --muted: #5D7371;
-  --faint: #8AA09D;
+  --border: #E5E1CB;
+  --border-strong: #CFC8A3;
+  --text: #2B2A1C;
+  --muted: #6C6A52;
+  --faint: #99957A;
 
   --font-head: 'Figtree', system-ui, sans-serif;
   --font-body: 'Noto Sans', system-ui, sans-serif;
 
   --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
-  --shadow-sm: 0 1px 2px rgba(20,49,47,.06);
-  --shadow-md: 0 2px 8px rgba(20,49,47,.08), 0 1px 2px rgba(20,49,47,.05);
-  --shadow-lg: 0 12px 32px rgba(20,49,47,.14);
+  --shadow-sm: 0 1px 2px rgba(43,42,28,.06);
+  --shadow-md: 0 2px 8px rgba(43,42,28,.08), 0 1px 2px rgba(43,42,28,.05);
+  --shadow-lg: 0 12px 32px rgba(43,42,28,.16);
   --ease: cubic-bezier(.2,.7,.3,1);
 }
 
@@ -245,5 +247,23 @@ textarea.input { resize: vertical; min-height: 84px; }
 .table-scroll { overflow-x: auto; }
 
 /* skeleton */
-.skel { border-radius: var(--r-md); background: linear-gradient(90deg, #E8F0EE 25%, #F2F7F6 50%, #E8F0EE 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+.skel { border-radius: var(--r-md); background: linear-gradient(90deg, #EDEADA 25%, #F6F3E8 50%, #EDEADA 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ── entrance & polish animations ─────────────────────────── */
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+#view, #app > .shell .main { animation: view-in .32s var(--ease); }
+.card { transition: box-shadow .2s var(--ease), transform .2s var(--ease), border-color .2s var(--ease); }
+.tpl-card, .path, .pt-row, .adm-row { transition: background-color .15s var(--ease), border-color .18s var(--ease), transform .18s var(--ease), box-shadow .18s var(--ease); }
+.stat, .metric { transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
+.stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+@keyframes brand-shine {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.brand-gradient-text {
+  background: linear-gradient(100deg, var(--brand) 0%, var(--primary) 45%, var(--brand) 90%);
+  background-size: 220% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: brand-shine 7s linear infinite;
+}

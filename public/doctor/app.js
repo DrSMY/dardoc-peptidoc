@@ -42,7 +42,7 @@ function renderLogin() {
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px">
-        <div style="width:46px;height:46px;border-radius:13px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center">${icon("stethoscope", 24)}</div>
+        <div style="width:46px;height:46px;border-radius:13px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center">${icon("leaf", 24)}</div>
         <div>
           <div style="font-family:var(--font-head);font-weight:800;font-size:17px">DarDoc · PeptiDoc</div>
           <div style="font-size:12.5px;color:var(--muted)">Doctor dashboard</div>
@@ -103,7 +103,7 @@ function renderShell() {
   document.title = "Doctor Dashboard — DarDoc · PeptiDoc";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line">${icon("stethoscope", 20)} DarDoc · PeptiDoc</div>
+    <div class="brand-line">${icon("leaf", 20)} DarDoc · PeptiDoc</div>
     <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
@@ -112,7 +112,7 @@ function renderShell() {
   <div class="shell">
     <aside class="sidebar">
       <div class="sb-brand">
-        <div class="sb-mark">${icon("stethoscope", 21)}</div>
+        <div class="sb-mark">${icon("leaf", 21)}</div>
         <div><div class="sb-name">DarDoc · PeptiDoc</div><div class="sb-sub">Doctor dashboard</div></div>
       </div>
       <nav class="sb-nav" id="sb-nav">
@@ -249,8 +249,8 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#1E4C4E", icon: "scale" },      // dark teal/olive (brand)
-  peptide: { label: "Peptides", color: "#DAA520", icon: "droplet" },           // golden
+  glp1: { label: "GLP-1 / Weight loss", color: "#55682B", icon: "scale" },      // rich olive (brand)
+  peptide: { label: "Peptides", color: "#B08A28", icon: "droplet" },           // rich gold
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
 
@@ -466,13 +466,13 @@ async function viewPatient(id) {
         <div style="display:flex;flex-direction:column;gap:18px">
           <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
-            ${weights.length > 1 ? lineChart(weights, { color: "#0E7490", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
+            ${weights.length > 1 ? lineChart(weights, { color: "#55682B", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
           <div class="card card-pad">
             <div class="card-title">${icon("layers", 19)} Programs</div>
             ${plans.length ? plans.map((pl) => `
               <div class="timeline-item">
-                <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon(pl.route === "injection" ? "syringe" : "pill", 16)}</div>
+                <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon(routeIcon(pl.route), 16)}</div>
                 <div style="flex:1">
                   <div style="font-weight:700;font-family:var(--font-head);font-size:14.5px">${esc(pl.title)}
                     <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
@@ -1307,7 +1307,7 @@ function showPeptideDetail(name) {
 
   modal(`
     <div class="modal-head">
-      <h3 style="display:flex;align-items:center;gap:8px">${icon("syringe", 18)} ${esc(name)}</h3>
+      <h3 style="display:flex;align-items:center;gap:8px">${icon(routeIcon(info.administrationRoute), 18)} ${esc(name)}</h3>
       <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
     </div>
     <p class="hint" style="margin:-8px 0 14px">Clinical reference for practitioner use</p>
@@ -1410,7 +1410,7 @@ function wizStepProgram() {
       ${w.cart.map((c, i) => `
         <div class="pt-row">
           <div class="pt-info">
-            <div class="pt-name">${esc(c.medication)}${c.dose ? " · " + esc(c.dose) : ""}${c.quantity > 1 ? ` × ${c.quantity}` : ""} <span class="badge ${c.category === "glp1" ? "badge-cyan" : c.category === "peptide" ? "badge-teal" : "badge-gray"}">${c.category === "glp1" ? "GLP-1" : c.category[0].toUpperCase() + c.category.slice(1)}</span></div>
+            <div class="pt-name">${esc(c.medication)}${c.dose ? " · " + esc(c.dose) : ""}${c.quantity > 1 ? ` × ${c.quantity}` : ""} <span class="badge ${c.category === "glp1" ? "badge-teal" : c.category === "peptide" ? "badge-cyan" : "badge-gray"}">${c.category === "glp1" ? "GLP-1" : c.category[0].toUpperCase() + c.category.slice(1)}</span></div>
             <div class="pt-meta">${esc(c.frequency)}</div>
           </div>
           <button class="icon-btn" data-delcart="${i}" aria-label="Remove ${esc(c.medication)}">${icon("x", 16)}</button>
@@ -1451,7 +1451,7 @@ function wizStepProgram() {
     <div class="tpl-grid">
       ${tpls.map((t) => `
         <button class="tpl-card ${d.template && d.template.id === t.id ? "sel" : ""}" data-tpl="${t.id}">
-          ${icon(d.category === "glp1" ? "syringe" : "droplet", 20)}
+          ${icon(routeIcon(t.config.route || (t.config.protocols && t.config.protocols[0] && t.config.protocols[0].route)), 20)}
           <div class="tpl-name">${esc(t.name)}</div>
           <div class="tpl-sub">${d.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : (t.config.protocols ? t.config.protocols.length + " protocol" + (t.config.protocols.length > 1 ? "s" : "") : "")}</div>
         </button>`).join("")}
@@ -2004,7 +2004,7 @@ async function viewTemplates() {
     ${list.length ? `<div class="tpl-grid">
       ${list.map((t) => `
       <div class="tpl-card" style="cursor:default">
-        ${icon(c.key === "glp1" ? "syringe" : c.key === "peptide" ? "droplet" : "sparkle", 20)}
+        ${icon(c.key === "custom" ? routeIcon(t.config.route) : routeIcon(t.config.route || (t.config.protocols && t.config.protocols[0] && t.config.protocols[0].route)), 20)}
         <div class="tpl-name">${esc(t.name)}</div>
         <div class="tpl-sub">${c.key === "glp1"
           ? `${esc(t.config.generic || "")} · ${esc(t.config.frequency)} · doses: ${t.config.doses.join(", ")}`

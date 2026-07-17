@@ -68,8 +68,28 @@ function icon(name, size = 20) {
     shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
     info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
     utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+    // route-specific medication icons — spray (nasal) and cream/tube (topical),
+    // so a program's icon always matches how it's actually taken.
+    spray: '<path d="m19 5-7 7"/><path d="M14 6.5 17.5 3"/><path d="m17 10 3.5-3.5"/><path d="M10 20a2 2 0 0 0 2-2v-3.5a2 2 0 0 0-.6-1.4l-4-4a2 2 0 0 0-1.4-.6H4a2 2 0 0 0-2 2v7.5A2 2 0 0 0 4 20Z"/>',
+    cream: '<path d="M9 3h6l1 4H8Z"/><path d="M8 7h8l1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2Z"/><path d="M9 12h6"/>',
+    capsule: '<rect x="2" y="9" width="20" height="6" rx="3"/><path d="M12 9v6"/>',
+    // brand mark — an olive leaf, used in every sidebar/login/document header
+    leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.info}</svg>`;
+}
+
+// Maps a medication's administration route to the icon that best represents
+// it (a doctor scanning a list should see "pill" for something they swallow,
+// not "syringe" — route strings are free text like "Subcutaneous injection"
+// or "Oral capsules", so this matches on keywords rather than exact values).
+function routeIcon(route) {
+  const r = String(route || "").toLowerCase();
+  if (r.includes("inject") || r.includes("subcut") || r.includes("needle")) return "syringe";
+  if (r.includes("nasal") || r.includes("spray")) return "spray";
+  if (r.includes("topical") || r.includes("cream") || r.includes("serum") || r.includes("foam") || r.includes("skin")) return "cream";
+  if (r.includes("capsule")) return "capsule";
+  return "pill"; // oral / tablet / unknown — pill is the safest generic default
 }
 
 // ── toast ────────────────────────────────────────────────────────
@@ -123,7 +143,7 @@ function timeAgo(iso) {
 // points: [{x: Date|number, y: number, label}], opts: {height, color, unit}
 function lineChart(points, opts = {}) {
   const H = opts.height || 180, W = 600, PAD = { t: 16, r: 14, b: 26, l: 40 };
-  const color = opts.color || "#0E7490";
+  const color = opts.color || "#55682B";
   if (!points || points.length === 0) return "";
   const xs = points.map((p) => +new Date(p.x));
   const ys = points.map((p) => p.y);
@@ -140,14 +160,14 @@ function lineChart(points, opts = {}) {
   for (let i = 0; i <= 3; i++) {
     const yv = yMin + ((yMax - yMin) * i) / 3;
     const yy = py(yv);
-    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E4EEEC" stroke-width="1"/>`;
-    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#8AA09D">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
+    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E7E3CD" stroke-width="1"/>`;
+    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#96927A">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
   }
   // x labels: first, middle, last
   const xIdx = points.length > 2 ? [0, Math.floor(points.length / 2), points.length - 1] : points.map((_, i) => i);
   let xLabels = "";
   for (const i of [...new Set(xIdx)]) {
-    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#8AA09D">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
+    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#96927A">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
   }
   const dots = points.length <= 40
     ? points.map((p, i) => `<circle cx="${px(xs[i])}" cy="${py(p.y)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${esc(fmtDate(String(p.x)))} — ${p.y}${esc(opts.unit || "")}</title></circle>`).join("")
@@ -181,10 +201,10 @@ function stackedBarChart(buckets, series, opts = {}) {
       yCursor -= h;
       bars += `<rect class="bar-rise" style="animation-delay:${(i * 22)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yCursor.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2.5" fill="${sr.color}"><title>${esc(b.label)} — ${esc(sr.label)}: ${v}</title></rect>`;
     });
-    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#8AA09D">${esc(b.label)}</text>`;
+    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#96927A">${esc(b.label)}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "Trend chart")}">
-    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E4EEEC" stroke-width="1"/>
+    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E7E3CD" stroke-width="1"/>
     ${bars}${xLabels}
   </svg>`;
 }
@@ -207,10 +227,10 @@ function donutChart(distribution, opts = {}) {
     offset += len;
   });
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:${size}px;height:auto;display:block;margin:0 auto" role="img" aria-label="${esc(opts.aria || "Distribution chart")}">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EDF2F1" stroke-width="${stroke}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EEEADA" stroke-width="${stroke}"/>
     ${segs}
-    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#16302E)">${total}</text>
-    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#8AA09D">total</text>
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#2B2A1C)">${total}</text>
+    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#96927A">total</text>
   </svg>`;
 }
 

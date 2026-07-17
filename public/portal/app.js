@@ -30,7 +30,7 @@ function renderLogin() {
   app.innerHTML = `
   <div class="p-app">
     <div class="login-hero">
-      <div class="brand-mark">${icon("heart", 30)}</div>
+      <div class="brand-mark">${icon("leaf", 30)}</div>
       <h1>Your treatment portal</h1>
       <p>Sign in with your mobile number and the PIN your doctor sent you on WhatsApp.</p>
     </div>
@@ -89,7 +89,7 @@ function renderShell() {
   <div class="p-app">
     <header class="p-top">
       <div class="brand-line">
-        <div class="brand-mark">${icon("heart", 20)}</div>
+        <div class="brand-mark">${icon("leaf", 20)}</div>
         <div>
           <div class="t-name">My Treatment Portal</div>
           <div class="t-sub">with ${esc(S.me.doctorName)} · DarDoc · PeptiDoc</div>
@@ -182,14 +182,14 @@ function paintHome(v) {
     <div class="phase-track">${ph.phases.map((_, i) => `<div class="phase-seg ${i <= ph.idx ? "done" : ""}"></div>`).join("")}</div>
     <div class="phase-meta"><span>${esc(nextDoseText(plan))}</span></div>
   </div>` : `
-  <div class="phase-card" style="background:linear-gradient(135deg, var(--brand), #2A6A6D)">
+  <div class="phase-card" style="background:linear-gradient(135deg, var(--brand), var(--primary))">
     <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
     <div class="phase-name">Ready to start</div>
     <div class="phase-desc">Log your first dose and this card will track where you are in each cycle.</div>
   </div>`}
 
   <div class="qa-grid">
-    <button class="qa" id="qa-dose"><span class="qa-ico" style="background:var(--primary-soft);color:var(--primary)">${icon("syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Nothing logged yet"}</span></button>
+    <button class="qa" id="qa-dose"><span class="qa-ico" style="background:var(--primary-soft);color:var(--primary)">${icon(plan ? routeIcon(plan.route) : "syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Nothing logged yet"}</span></button>
     <button class="qa" id="qa-checkin"><span class="qa-ico" style="background:var(--accent-soft);color:var(--accent)">${icon("clipboard", 20)}</span><b>Daily check-in</b><span>${lastCheckin ? "Last: " + fmtDate(lastCheckin.date) : "Tell us how you feel"}</span></button>
     <button class="qa" id="qa-guide"><span class="qa-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("book", 20)}</span><b>My guide</b><span>${plan ? esc(plan.medication) : "Not published yet"}</span></button>
     <button class="qa" id="qa-msg"><span class="qa-ico" style="background:var(--violet-soft);color:var(--violet)">${icon("message", 20)}</span><b>Message doctor</b><span>${esc(S.me.doctorName)}</span></button>
@@ -205,7 +205,7 @@ function paintHome(v) {
   ${weights.length > 1 ? `
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight trend</h3><span class="badge ${weights[0].weight_kg <= weights[weights.length - 1].weight_kg ? "badge-green" : "badge-amber"}">${(weights[0].weight_kg - weights[weights.length - 1].weight_kg).toFixed(1)} kg</span></div>
-    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#0E7490", unit: " kg", height: 150, aria: "Weight trend" })}</div>
+    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#55682B", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
   v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; paint(); });
@@ -387,7 +387,7 @@ function paintProgress(v) {
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight</h3></div>
     <div class="card-pad" style="padding-top:8px">
-      ${weights.length > 1 ? lineChart(weights, { color: "#0E7490", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
+      ${weights.length > 1 ? lineChart(weights, { color: "#55682B", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
     </div>
   </div>
 

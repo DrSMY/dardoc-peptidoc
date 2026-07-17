@@ -24,7 +24,7 @@ function renderLogin() {
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:22px">
-        <div style="width:46px;height:46px;border-radius:13px;background:var(--violet);color:#fff;display:flex;align-items:center;justify-content:center">${icon("shield", 24)}</div>
+        <div style="width:46px;height:46px;border-radius:13px;background:var(--gold-deep);color:#fff;display:flex;align-items:center;justify-content:center">${icon("leaf", 24)}</div>
         <div>
           <div style="font-family:var(--font-head);font-weight:800;font-size:17px">Super Admin</div>
           <div style="font-size:12.5px;color:var(--muted)">Protocols &amp; knowledge base</div>
@@ -83,7 +83,7 @@ function renderShell() {
   document.title = "Super Admin — DarDoc · PeptiDoc";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line">${icon("shield", 20)} Super Admin</div>
+    <div class="brand-line">${icon("leaf", 20)} Super Admin</div>
     <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
@@ -92,7 +92,7 @@ function renderShell() {
   <div class="shell">
     <aside class="sidebar">
       <div class="sb-brand">
-        <div class="sb-mark">${icon("shield", 21)}</div>
+        <div class="sb-mark">${icon("leaf", 21)}</div>
         <div><div class="sb-name">Super Admin</div><div class="sb-sub">DarDoc · PeptiDoc</div></div>
       </div>
       <nav class="sb-nav" id="sb-nav">
@@ -147,8 +147,8 @@ async function viewOverview() {
     <div><h1>Overview</h1><div class="sub">Everything a doctor's consultation flow draws on, in one place</div></div>
   </div>
   <div class="stat-grid" style="margin-bottom:20px">
-    ${stat("layers", "var(--primary-soft)", "var(--primary)", glp1Count, "GLP-1 medications")}
-    ${stat("droplet", "var(--brand-soft)", "var(--brand)", pepCount, "Peptide dosing protocols")}
+    ${stat("layers", "var(--brand-soft)", "var(--brand)", glp1Count, "GLP-1 medications")}
+    ${stat("droplet", "var(--primary-soft)", "var(--primary)", pepCount, "Peptide dosing protocols")}
     ${stat("sparkle", "var(--violet-soft)", "var(--violet)", peptideInfo.length, "Peptide clinical-info entries")}
     ${stat("book", "var(--accent-soft)", "var(--accent)", kb.length, "Knowledge base articles")}
     ${stat("edit", "var(--amber-soft)", "var(--amber)", customizedCount, "Customized (protected) entries")}
@@ -191,7 +191,7 @@ function paintProtocols() {
       <div class="adm-row" data-tpl="${t.id}">
         <div class="adm-row-info">
           <div class="adm-row-name">${esc(t.name)}
-            <span class="badge ${t.category === "glp1" ? "badge-cyan" : t.category === "peptide" ? "badge-teal" : "badge-gray"}">${esc(t.category)}</span>
+            <span class="badge ${t.category === "glp1" ? "badge-teal" : t.category === "peptide" ? "badge-cyan" : "badge-gray"}">${esc(t.category)}</span>
             ${t.is_customized ? `<span class="badge badge-amber">customized</span>` : ""}
           </div>
           <div class="adm-row-meta">${t.config.medication ? esc(t.config.medication) : ""}${t.config.doses ? " · " + t.config.doses.length + " dose steps" : ""}${t.config.protocols ? " · " + t.config.protocols.length + " protocol" + (t.config.protocols.length > 1 ? "s" : "") : ""}</div>
