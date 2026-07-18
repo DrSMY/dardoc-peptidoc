@@ -97,6 +97,31 @@ function routeIcon(route) {
 // used where a plain single-color icon feels too thin (patient portal
 // medication rows, phase card). Not a photo of any real product; drawn
 // locally so nothing is fetched or downloaded from a third party.
+// Real product photos (sourced from DarDoc's own site, with permission,
+// for the medications DarDoc actually retails/photographs). Peptides are
+// compounded in generic unlabelled vials with no official product photo,
+// so they keep the drawn illustration below.
+const MED_PHOTOS = {
+  "Wegovy": "/med-images/wegovy-pen.jpg",
+  "Wegovy Pill": "/med-images/wegovy-pill.jpg",
+  "Mounjaro": "/med-images/mounjaro-pen.jpg",
+};
+
+// Real photo when we have one for this exact medication, else null.
+function medPhoto(medication) {
+  return MED_PHOTOS[medication] || null;
+}
+
+// <img> or illustration for a medication card — prefers the real product
+// photo, falls back to the drawn illustration for the same route.
+function medVisualHTML(medication, route, size = 48) {
+  const photo = medPhoto(medication);
+  if (photo) {
+    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:${Math.round(size * 0.22)}px;background:#0B0B0B">`;
+  }
+  return productIllustration(route, size);
+}
+
 function productIllustration(route, size = 48) {
   const r = routeIcon(route);
   const bodies = {

@@ -187,7 +187,7 @@ function phaseIllustrationHTML(plan, ph) {
         <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="No dose logged yet">
           <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/>
         </svg>
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:50%;width:96px;height:96px;margin:auto">${productIllustration(plan.route, 60)}</div>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff;border-radius:50%;width:96px;height:96px;margin:auto">${medPhoto(plan.medication) ? `<img src="${medPhoto(plan.medication)}" alt="${esc(plan.medication)}" style="width:100%;height:100%;object-fit:cover">` : productIllustration(plan.route, 60)}</div>
       </div>
       <div class="phase-illus-body">
         <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
@@ -301,7 +301,7 @@ function medRowHTML(pl) {
   return `
   <details class="med-row">
     <summary class="med-row-sum">
-      <span class="med-row-illus">${productIllustration(pl.route, 40)}</span>
+      <span class="med-row-illus">${medVisualHTML(pl.medication, pl.route, 40)}</span>
       <span class="pt-info">
         <span class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
         <span class="pt-meta">${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</span>

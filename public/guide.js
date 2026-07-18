@@ -170,6 +170,7 @@ function buildGuide(plan, patient, doctorName) {
 
     <section class="g-sec">
       <h3>${icon("clipboard", 18)} Your program</h3>
+      ${typeof medPhoto === "function" && medPhoto(plan.medication) ? `<img src="${medPhoto(plan.medication)}" alt="${esc(plan.medication)}" class="g-med-photo">` : ""}
       <div class="g-facts">
         <div class="g-fact"><div class="g-fact-lbl">Medication</div><div class="g-fact-val">${esc(plan.medication)}</div></div>
         ${plan.dose ? `<div class="g-fact"><div class="g-fact-lbl">Starting dose</div><div class="g-fact-val">${esc(plan.dose)}</div></div>` : ""}
@@ -248,6 +249,7 @@ const GUIDE_CSS = `
 .g-med-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-family: var(--font-head); padding: 10px 18px; border-radius: var(--r-full); font-size: 15px; }
 .g-sec { padding: 20px 22px 4px; }
 .g-sec h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--brand); margin-bottom: 12px; }
+.g-med-photo { display: block; max-width: 220px; width: 100%; height: auto; border-radius: var(--r-md); background: #0B0B0B; margin-bottom: 14px; box-shadow: var(--shadow-sm); }
 .g-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .g-fact { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 14px; }
 .g-fact-lbl { font-size: 11.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
