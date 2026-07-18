@@ -92,6 +92,44 @@ function routeIcon(route) {
   return "pill"; // oral / tablet / unknown — pill is the safest generic default
 }
 
+// ── medication illustrations ──────────────────────────────────────
+// Small original flat-illustration graphics per administration route —
+// used where a plain single-color icon feels too thin (patient portal
+// medication rows, phase card). Not a photo of any real product; drawn
+// locally so nothing is fetched or downloaded from a third party.
+function productIllustration(route, size = 48) {
+  const r = routeIcon(route);
+  const bodies = {
+    syringe: `
+      <rect x="19" y="4" width="10" height="14" rx="3" fill="#C6A15B"/>
+      <rect x="22" y="1" width="4" height="5" rx="1.5" fill="#8F6D32"/>
+      <rect x="16" y="17" width="16" height="26" rx="6" fill="#F5EBD4" stroke="#C6A15B" stroke-width="2"/>
+      <rect x="20" y="22" width="8" height="16" rx="2" fill="#E1C784"/>
+      <path d="M24 43v6" stroke="#8F6D32" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M20 49h8" stroke="#8F6D32" stroke-width="2.5" stroke-linecap="round"/>`,
+    pill: `
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#EAEEE3"/>
+      <rect x="10" y="18" width="28" height="12" rx="6" fill="#718355" transform="rotate(-25 24 24)"/>
+      <rect x="10" y="18" width="14" height="12" rx="6" fill="#F8F7F2" transform="rotate(-25 24 24)"/>`,
+    capsule: `
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBD4"/>
+      <rect x="9" y="19" width="30" height="10" rx="5" fill="#C6A15B" transform="rotate(-8 24 24)"/>
+      <rect x="9" y="19" width="15" height="10" rx="5" fill="#283618" transform="rotate(-8 24 24)"/>`,
+    spray: `
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#EAEEE3"/>
+      <rect x="19" y="20" width="10" height="20" rx="2.5" fill="#718355"/>
+      <rect x="17" y="14" width="14" height="7" rx="2" fill="#8F6D32"/>
+      <rect x="21" y="8" width="6" height="7" rx="1.5" fill="#C6A15B"/>
+      <path d="M31 12 37 8M32 16 39 15M31 20 38 20" stroke="#C6A15B" stroke-width="2" stroke-linecap="round"/>`,
+    cream: `
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBD4"/>
+      <rect x="15" y="18" width="18" height="22" rx="4" fill="#FFFFFF" stroke="#C6A15B" stroke-width="2"/>
+      <rect x="15" y="18" width="18" height="7" rx="3" fill="#8F6D32"/>
+      <rect x="19" y="8" width="10" height="11" rx="2" fill="#8F6D32"/>`,
+  };
+  return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">${bodies[r] || bodies.pill}</svg>`;
+}
+
 // ── toast ────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
   let wrap = document.querySelector(".toast-wrap");

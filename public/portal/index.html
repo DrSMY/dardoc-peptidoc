@@ -70,10 +70,17 @@
   @media (max-width: 380px) { .phase-illus { flex-direction: column; align-items: stretch; text-align: center; } .phase-illus-ring { align-self: center; } }
 
   /* per-medication row on the home screen's "Your medications" list */
-  .med-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--border); }
+  .med-row { border-top: 1px solid var(--border); }
   .med-row:first-child { border-top: none; }
-  .med-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
-  .med-row-actions .btn { padding: 8px; min-height: 36px; }
+  .med-row-sum { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; list-style: none; }
+  .med-row-sum::-webkit-details-marker { display: none; }
+  .med-row-sum svg:last-child { color: var(--muted); transition: transform .2s var(--ease); flex-shrink: 0; }
+  .med-row[open] .med-row-sum svg:last-child { transform: rotate(90deg); }
+  .med-row-sum:hover { background: var(--brand-soft); }
+  .med-row-illus { flex-shrink: 0; line-height: 0; }
+  .med-row-sum .pt-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .med-row-body { padding: 0 16px 16px 68px; }
+  .med-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
   .qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
   .qa {

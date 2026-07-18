@@ -10,6 +10,7 @@ const S = {
 const app = document.getElementById("app");
 
 async function boot() {
+  injectGuideCss(); // accordion styles used throughout the portal, not just the Guide tab
   try {
     S.me = await api("GET", "/api/portal/me");
     S.data = await api("GET", "/api/portal/data");
@@ -179,15 +180,14 @@ function estimatedLevelPct(plan, ph) {
 // showing the estimated % of medication still active, the current phase
 // name/description, and a week-of-cycle caption.
 function phaseIllustrationHTML(plan, ph) {
-  const routeIco = routeIcon(plan.route);
   if (!ph) {
     return `
     <div class="phase-illus" style="background:linear-gradient(135deg, var(--brand), var(--primary))">
-      <div class="phase-illus-ring">
+      <div class="phase-illus-ring" style="position:relative;width:140px;height:140px">
         <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="No dose logged yet">
           <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/>
-          <g transform="translate(70,70)">${icon(routeIco, 34)}</g>
         </svg>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:50%;width:96px;height:96px;margin:auto">${productIllustration(plan.route, 60)}</div>
       </div>
       <div class="phase-illus-body">
         <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
@@ -294,20 +294,29 @@ function paintHome(v) {
 // One row per active medication on the home screen — dose/frequency at a
 // glance, plus quick links to that medication's own guide, its own dose
 // log, and a "finished this medication" flag for the doctor to reorder.
+// Each medication is its own collapsible group — tap the header to reveal
+// next-dose timing and the Guide/Log/Finished actions, instead of showing
+// everything as text up front.
 function medRowHTML(pl) {
   return `
-  <div class="med-row">
-    <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon(routeIcon(pl.route), 16)}</div>
-    <div class="pt-info">
-      <div class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</div>
-      <div class="pt-meta">${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</div>
+  <details class="med-row">
+    <summary class="med-row-sum">
+      <span class="med-row-illus">${productIllustration(pl.route, 40)}</span>
+      <span class="pt-info">
+        <span class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
+        <span class="pt-meta">${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</span>
+      </span>
+      ${icon("chevR", 16)}
+    </summary>
+    <div class="med-row-body">
+      <div class="pt-meta" style="margin-bottom:10px">${esc(nextDoseText(pl))}</div>
+      <div class="med-row-actions">
+        <button type="button" class="btn btn-secondary btn-sm" data-med-guide="${pl.id}">${icon("book", 14)} Guide</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-med-log="${pl.id}">${icon(routeIcon(pl.route), 14)} Log dose</button>
+        ${!pl.needs_refill ? `<button type="button" class="btn btn-ghost btn-sm" data-med-finish="${pl.id}">${icon("checkCircle", 14)} Finished — need refill</button>` : ""}
+      </div>
     </div>
-    <div class="med-row-actions">
-      <button type="button" class="btn btn-ghost btn-sm" data-med-guide="${pl.id}" aria-label="Open ${esc(pl.medication)} guide">${icon("book", 14)}</button>
-      <button type="button" class="btn btn-ghost btn-sm" data-med-log="${pl.id}" aria-label="Log a dose of ${esc(pl.medication)}">${icon(routeIcon(pl.route), 14)}</button>
-      ${!pl.needs_refill ? `<button type="button" class="btn btn-ghost btn-sm" data-med-finish="${pl.id}" aria-label="Report ${esc(pl.medication)} finished">${icon("checkCircle", 14)}</button>` : ""}
-    </div>
-  </div>`;
+  </details>`;
 }
 
 // ── guide ────────────────────────────────────────────────────────
@@ -391,18 +400,14 @@ function paintLog(v) {
       <div class="field"><label for="ds-notes">Notes (optional)</label><input class="input" id="ds-notes" placeholder="Anything to mention?"></div>
       <button class="btn btn-primary btn-block" type="submit"><span class="spin"></span><span class="btn-label">Save dose</span></button>
     </form>
-    ${S.data.doses.length ? `
-    <div class="list-card">
-      <div class="list-head"><h3>${icon("clock", 18)} Recent doses</h3></div>
-      ${S.data.doses.slice(0, 5).map((d) => {
-        const medName = (S.me.plans.find((pl) => pl.id === d.plan_id) || {}).medication;
-        return `
-        <div style="padding:11px 16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13.5px">
-          <span>${medName ? `<b>${esc(medName)}</b> ` : ""}${esc(d.dose || "Dose")}${d.site ? ` · ${esc(d.site)}` : ""}</span>
-          <span style="color:var(--muted)">${esc(fmtDate(d.taken_at, true))}</span>
-        </div>`;
-      }).join("")}
-    </div>` : ""}`;
+    ${S.data.doses.length ? accordion("clock", `Recent doses (${S.data.doses.length})`, S.data.doses.slice(0, 5).map((d) => {
+      const medName = (S.me.plans.find((pl) => pl.id === d.plan_id) || {}).medication;
+      return `
+      <div style="padding:9px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13.5px">
+        <span>${medName ? `<b>${esc(medName)}</b> ` : ""}${esc(d.dose || "Dose")}${d.site ? ` · ${esc(d.site)}` : ""}</span>
+        <span style="color:var(--muted)">${esc(fmtDate(d.taken_at, true))}</span>
+      </div>`;
+    }).join("").replace("border-top:1px solid var(--border);", ""), false) : ""}`;
 
     body.querySelectorAll("[data-medpick]").forEach((b) => b.addEventListener("click", () => {
       S.logPlanId = Number(b.dataset.medpick);
@@ -441,13 +446,13 @@ function paintLog(v) {
         <div class="field"><label for="ci-date">Date</label><input class="input" id="ci-date" type="date" value="${new Date().toISOString().slice(0, 10)}" max="${new Date().toISOString().slice(0, 10)}"></div>
         <div class="field"><label for="ci-wt">Weight (kg) — optional</label><input class="input" id="ci-wt" type="number" step="0.1" min="25" max="350" inputmode="decimal" placeholder="e.g. 82.5"></div>
       </div>
-      ${syms.map((s) => `
+      ${accordion("clipboard", "How are you feeling today?", syms.map((s) => `
       <div class="sym-block">
         <div class="sym-lbl">${esc(s.label)}</div>
         <div class="sym-opts" data-sym="${s.key}">
           ${s.options.map((o, i) => `<button type="button" class="chip" data-v="${esc(o)}" data-sev="${i === 0 ? "" : s.alertOn.includes(o) ? "bad" : i >= 2 ? "warn" : ""}">${esc(o)}</button>`).join("")}
         </div>
-      </div>`).join("")}
+      </div>`).join(""), true)}
       <div class="field"><label for="ci-notes">Anything else? (optional)</label><textarea class="input" id="ci-notes" rows="2" placeholder="Describe how you're feeling…"></textarea></div>
       <button class="btn btn-accent btn-block" type="submit"><span class="spin"></span><span class="btn-label">Submit check-in</span></button>
     </form>`;
