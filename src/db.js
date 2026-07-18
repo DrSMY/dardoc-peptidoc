@@ -154,6 +154,7 @@ function addColumn(table, col, def) {
   try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
 }
 addColumn("patients", "intake_json", "TEXT DEFAULT '{}'");        // structured intake answers
+addColumn("patients", "national_id", "TEXT DEFAULT ''");          // Emirates ID / passport number (optional)
 addColumn("patients", "email", "TEXT DEFAULT ''");                // optional — identity alongside/instead of mobile
 addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
 addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
@@ -237,12 +238,72 @@ function seed() {
     upsertInfo.run(name, JSON.stringify(info));
   }
 
-  const goalCount = db.prepare("SELECT COUNT(*) AS n FROM health_goal_peptides").get().n;
-  if (goalCount === 0) {
-    const insertGoal = db.prepare("INSERT OR IGNORE INTO health_goal_peptides (goal, peptide_name, priority) VALUES (?,?,?)");
-    for (const [goal, list] of Object.entries(presets.HEALTH_GOAL_PEPTIDES)) {
-      for (const item of list) insertGoal.run(goal, item.name, item.priority);
-    }
+  // Insert any (goal, peptide) pairs added in code that the DB doesn't have
+  // yet — OR IGNORE keeps every existing row (including customized ones).
+  const insertGoal = db.prepare("INSERT OR IGNORE INTO health_goal_peptides (goal, peptide_name, priority) VALUES (?,?,?)");
+  for (const [goal, list] of Object.entries(presets.HEALTH_GOAL_PEPTIDES)) {
+    for (const item of list) insertGoal.run(goal, item.name, item.priority);
+  }
+
+  seedKnowledgeBase();
+}
+
+// ── knowledge base auto-seed ─────────────────────────────────────
+// Publish every GLP-1 medication and peptide's clinical reference into the
+// doctor-facing knowledge base, organized by category. Articles are keyed by
+// title and only inserted when missing, so anything the super admin edits or
+// deletes stays untouched on later boots.
+function seedKnowledgeBase() {
+  const exists = db.prepare("SELECT id FROM kb_articles WHERE title = ?");
+  const insert = db.prepare("INSERT INTO kb_articles (title, category, body) VALUES (?,?,?)");
+  const put = (title, category, body) => { if (!exists.get(title)) insert.run(title, category, body); };
+
+  for (const [med, cfg] of Object.entries(presets.GLP1_MEDICATIONS)) {
+    const lines = [
+      `Generic: ${cfg.generic}`,
+      `Route: ${cfg.route} · Frequency: ${cfg.frequency}`,
+      cfg.halfLifeHours ? `Half-life: ~${cfg.halfLifeHours} hours` : null,
+      `Dose ladder: ${(cfg.doses || []).join(" → ")}`,
+      "",
+      "Titration schedule:",
+      ...(cfg.titration || []).map((t) => `• ${t.dose} — ${t.weeks ? `${t.weeks} week${t.weeks == 1 ? "" : "s"}` : "ongoing"}${t.note ? ` (${t.note})` : ""}`),
+      "",
+      cfg.administration ? `Administration:\n${cfg.administration}` : null,
+    ].filter((l) => l !== null);
+    put(`${med} (${cfg.generic})`, "GLP-1 Medications", lines.join("\n"));
+  }
+
+  // Complete GLP-1 nutrition guide (extracted from the DarDoc patient-guides
+  // master document by the same parser that generates public/patient-guides.js).
+  const nutriPath = path.join(__dirname, "nutrition-guide.txt");
+  if (fs.existsSync(nutriPath)) {
+    put("Complete Nutrition Guide — GLP-1 Weight Management", "GLP-1 Medications", fs.readFileSync(nutriPath, "utf8"));
+  }
+
+  for (const [name, info] of Object.entries(presets.PEPTIDE_INFO)) {
+    const cat = (info.categories && info.categories[0]) ? `Peptides — ${info.categories[0]}` : "Peptides";
+    const block = (label, v) => (v && String(v).trim()) ? `${label}:\n${Array.isArray(v) ? v.map((x) => `• ${x}`).join("\n") : v}` : null;
+    const protocols = (presets.PEPTIDE_PROTOCOLS[name] || [])
+      .map((p) => `• ${p.protocolType}: ${p.doseVolume || p.doseAmount} — ${p.time} (${p.strength}; vial lasts ${p.duration}; cycle: ${p.cycle})`)
+      .join("\n");
+    const body = [
+      block("How it works", info.howItWorks),
+      block("Best use for", info.bestUseFor),
+      block("Target benefits", info.targetBenefits),
+      block("Dosage", info.dosageInstructions),
+      block("Route", info.administrationRoute),
+      block("Strength / volume", info.strengthVolume),
+      block("Treatment duration", info.treatmentDuration),
+      protocols ? `Dosing protocols:\n${protocols}` : null,
+      block("Contraindications", info.contraindications),
+      block("Common side effects", info.commonSideEffects),
+      block("Key blood tests", info.keyBloodTests),
+      block("Possible combinations", info.possibleCombinations),
+      block("Recommended supplements", info.recommendedSupplements),
+      block("Red flags", info.redFlags),
+      block("Lifestyle tips", info.lifestyleTips),
+    ].filter(Boolean).join("\n\n");
+    put(name, cat, body || "See peptide clinical info in the consultation wizard.");
   }
 }
 

@@ -371,6 +371,23 @@ route("GET", "/api/dashboard", (req, res) => {
   });
 });
 
+// Full recent-activity feed (dose logs + check-ins), for the dedicated
+// Recent activity page — the dashboard keeps its own 20-row slice.
+route("GET", "/api/activity", (req, res) => {
+  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const rows = db.prepare(`
+    SELECT * FROM (
+      SELECT 'checkin' AS type, c.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
+             c.weight_kg AS detail, c.flagged AS flagged
+      FROM checkins c JOIN patients p ON p.id = c.patient_id
+      UNION ALL
+      SELECT 'dose' AS type, d.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
+             d.dose AS detail, 0 AS flagged
+      FROM dose_logs d JOIN patients p ON p.id = d.patient_id
+    ) ORDER BY created_at DESC LIMIT 150`).all();
+  json(res, 200, rows);
+});
+
 // ── patients ─────────────────────────────────────────────────────
 route("GET", "/api/patients", (req, res) => {
   if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
@@ -400,12 +417,12 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
   if (dup) return json(res, 409, { error: "A patient with this mobile number already exists.", patientId: dup.id });
   const pin = generatePin();
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(doc.id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
       body.heightCm || null, body.weightKg || null, body.activityLevel || "Sedentary",
       body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
-      JSON.stringify(body.intake || {}), body.email || "");
+      JSON.stringify(body.intake || {}), body.email || "", body.nationalId || "");
   json(res, 200, { id: Number(r.lastInsertRowid), pin });
 });
 
@@ -429,7 +446,8 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
   if (!patient) return json(res, 404, { error: "Patient not found." });
   const fields = { name: "name", title: "title", age: "age", gender: "gender", heightCm: "height_cm",
     weightKg: "start_weight_kg", activityLevel: "activity_level", chronicIllnesses: "chronic_illnesses",
-    medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email" };
+    medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email",
+    nationalId: "national_id" };
   const sets = [], vals = [];
   for (const [k, col] of Object.entries(fields)) {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }

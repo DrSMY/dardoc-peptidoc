@@ -195,6 +195,8 @@ function paintHome(v) {
     <button class="qa" id="qa-msg"><span class="qa-ico" style="background:var(--violet-soft);color:var(--violet)">${icon("message", 20)}</span><b>Message doctor</b><span>${esc(S.me.doctorName)}</span></button>
   </div>
 
+  ${plan ? howToCardHTML(plan) : ""}
+
   ${plan && plan.next_followup ? `
   <div class="list-card card-pad" style="display:flex;gap:12px;align-items:center">
     <span class="qa-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("calendar", 20)}</span>
@@ -208,10 +210,33 @@ function paintHome(v) {
     <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#4E551F", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
+  const howBtn = v.querySelector("#howto-guide");
+  if (howBtn) howBtn.addEventListener("click", () => { S.tab = "guide"; paint(); });
   v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; paint(); });
   v.querySelector("#qa-checkin").addEventListener("click", () => { S.tab = "log"; S.logMode = "checkin"; paint(); });
   v.querySelector("#qa-guide").addEventListener("click", () => { S.tab = "guide"; paint(); });
   v.querySelector("#qa-msg").addEventListener("click", () => { S.tab = "messages"; paint(); });
+}
+
+// "Your dose & how to take it" card — the prescribed dose plus the
+// HOW TO INJECT / TAKE / USE window from the standard medication guide.
+function howToCardHTML(plan) {
+  const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
+  const how = content && content.sections.find((s) => /^HOW TO /i.test(s.head));
+  return `
+  <div class="list-card">
+    <div class="list-head"><h3>${icon(routeIcon(plan.route), 18)} Your dose &amp; how to take it</h3></div>
+    <div class="card-pad" style="padding-top:6px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${how ? "12px" : "0"}">
+        ${plan.dose ? `<span class="badge badge-teal" style="font-size:13px;padding:6px 12px">${esc(plan.dose)}</span>` : ""}
+        <span class="badge badge-gray" style="font-size:13px;padding:6px 12px">${esc(plan.frequency)}</span>
+        ${plan.quantity && plan.quantity > 1 ? `<span class="badge badge-gray" style="font-size:13px;padding:6px 12px">× ${esc(plan.quantity)}</span>` : ""}
+      </div>
+      ${how ? `
+      <div style="font-size:13.5px;line-height:1.6">${guideProse(how.body)}</div>
+      <button class="btn btn-secondary btn-sm" id="howto-guide" style="margin-top:12px">${icon("book", 15)} Open my full guide</button>` : ""}
+    </div>
+  </div>`;
 }
 
 // ── guide ────────────────────────────────────────────────────────

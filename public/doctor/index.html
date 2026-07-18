@@ -132,6 +132,21 @@
   .intake-sec-title.first { margin-top: 0; }
 
   .chip-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  /* searchable existing-patient combobox (Intake → Identity) */
+  .pat-results {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+    max-height: 320px; overflow-y: auto;
+  }
+  .pat-result {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 10px 14px; border: none; background: none; font: inherit; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .pat-result:last-child { border-bottom: none; }
+  .pat-result:hover { background: var(--brand-soft); }
+  .linklike { border: none; background: none; padding: 0; color: var(--primary); text-decoration: underline; font: inherit; cursor: pointer; }
   .qf-box { background: var(--brand-soft); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: 14px 16px; margin: 4px 0 6px; }
   .qf-box label { display: flex; align-items: center; gap: 8px; font-family: var(--font-head); font-weight: 700; font-size: 13px; color: var(--brand); margin-bottom: 8px; }
   .qf-box label svg { color: var(--brand); }
@@ -206,6 +221,7 @@
 <body>
 <div id="app"></div>
 <script src="/shared.js"></script>
+<script src="/patient-guides.js"></script>
 <script src="/guide.js"></script>
 <script src="/doctor/app.js"></script>
 </body>

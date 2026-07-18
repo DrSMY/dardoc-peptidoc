@@ -91,6 +91,7 @@ const NAV = [
   { hash: "#/dashboard", label: "Dashboard", ico: "grid" },
   { hash: "#/consult", label: "New consultation", ico: "plus" },
   { hash: "#/patients", label: "Patients", ico: "users" },
+  { hash: "#/activity", label: "Recent activity", ico: "activity" },
   { hash: "#/templates", label: "Program library", ico: "layers" },
   { hash: "#/kb", label: "Knowledge Base", ico: "book" },
   { hash: "#/settings", label: "Settings", ico: "settings" },
@@ -147,6 +148,7 @@ function route() {
   if (h.startsWith("#/patients")) return viewPatients();
   if (h.startsWith("#/consult")) return viewConsult();
   if (h.startsWith("#/templates")) return viewTemplates();
+  if (h.startsWith("#/activity")) return viewActivity();
   if (h.startsWith("#/kb")) return viewKb();
   if (h.startsWith("#/settings")) return viewSettings();
   return viewDashboard();
@@ -238,6 +240,29 @@ async function viewDashboard() {
   }));
 
   renderPracticeStats(d);
+}
+
+// ── recent activity (dedicated page — dashboard keeps its 20-row slice) ──
+async function viewActivity() {
+  view().innerHTML = `<div class="skel" style="height:300px"></div>`;
+  const rows = await api("GET", "/api/activity");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>Recent activity</h1><div class="sub">Every patient dose log and check-in, most recent first</div></div>
+  </div>
+  <div class="card">
+    ${rows.length ? rows.map((r) => `
+      <a class="pt-row" href="#/patient/${r.patient_id}">
+        <div class="tl-ico" style="background:${r.type === "dose" ? "var(--primary-soft)" : "var(--accent-soft)"};color:${r.type === "dose" ? "var(--primary)" : "var(--accent)"}">
+          ${icon(r.type === "dose" ? "syringe" : "clipboard", 16)}
+        </div>
+        <div class="pt-info">
+          <div class="pt-name">${esc(r.patient_name)} ${r.flagged ? '<span class="badge badge-red">flagged</span>' : ""}</div>
+          <div class="pt-meta">${r.type === "dose" ? `Logged a dose${r.detail ? " · " + esc(r.detail) : ""}` : `Checked in${r.detail ? " · " + esc(r.detail) + " kg" : ""}`}</div>
+        </div>
+        <div class="pt-side">${timeAgo(r.created_at)}</div>
+      </a>`).join("") : `<div class="empty">${icon("activity", 34)}<div class="empty-title">No activity yet</div><p>Patient dose logs and check-ins will show up here.</p></div>`}
+  </div>`;
 }
 
 function stat(ico, bg, fg, val, lbl) {
@@ -504,6 +529,7 @@ async function viewPatient(id) {
               <div><b>Chronic illnesses:</b> ${esc(p.chronic_illnesses || "None recorded")}</div>
               <div><b>Medications:</b> ${esc(p.medications || "None recorded")}</div>
               <div><b>Allergies:</b> ${esc(p.allergies || "None recorded")}</div>
+              ${p.national_id ? `<div><b>Emirates ID / passport:</b> ${esc(p.national_id)}</div>` : ""}
               ${p.notes ? `<div><b>Notes:</b> ${esc(p.notes)}</div>` : ""}
               ${activePlan && activePlan.clinical_note ? `<div><b>Consultation note:</b> ${esc(activePlan.clinical_note)}</div>` : ""}
             </div>
@@ -698,7 +724,7 @@ const WIZ_STEPS = ["Intake", "Program", "Clinical", "Review & publish"];
 // consultation can prescribe several medications (e.g. a GLP-1 + a peptide).
 function freshDraft(category) {
   return {
-    category, template: null, protocol: null,
+    category, template: null, protocol: null, protocolBase: null, customizing: false,
     medication: "", dose: "", quantity: 1, route: "injection", frequency: "weekly", halfLifeHours: null,
     phases: [],
   };
@@ -711,7 +737,7 @@ async function viewConsult() {
     step: 0,
     intakeSub: 0, // sub-step within Intake: identity → clinical → goals → objective
     existingId: preselect ? Number(preselect) : null,
-    patient: { name: "", mobile: "", email: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
+    patient: { name: "", mobile: "", email: "", nationalId: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     cart: [],              // programs added so far this consultation (one entry per medication)
     draft: freshDraft("glp1"), // the program currently being configured on the Program step
     followupDays: 28, clinicalNote: "", supplements: "",
@@ -719,9 +745,19 @@ async function viewConsult() {
   };
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
-    if (p) Object.assign(S.wizard.patient, { name: p.name, mobile: p.mobile, email: p.email || "", title: p.title || "", age: p.age || "", gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "", intake: p.intake_json ? JSON.parse(p.intake_json) : {} });
+    if (p) loadPatientIntoWizard(p);
   }
   paintWizard();
+}
+
+// Copy an existing patient row into the wizard's patient draft.
+function loadPatientIntoWizard(p) {
+  Object.assign(S.wizard.patient, {
+    name: p.name, mobile: p.mobile, email: p.email || "", nationalId: p.national_id || "",
+    title: p.title || "", age: p.age || "", gender: p.gender || "",
+    heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "",
+    intake: p.intake_json ? JSON.parse(p.intake_json) : {},
+  });
 }
 
 // live metrics for the current wizard patient
@@ -863,6 +899,7 @@ function validateClinical() {
       missing.push(q.question.toLowerCase());
     }
   }
+  if (p.intake.allergies__gate === true && !p.intake.allergies__severity) missing.push("allergy severity");
   return missing;
 }
 
@@ -1046,12 +1083,15 @@ function wizIntakeIdentity() {
   wizIntakeShell(`
     <div class="card-title">${icon("user", 19)} Identity &amp; Demographics</div>
     <div class="field">
-      <label for="wz-existing">Existing patient</label>
-      <select class="input" id="wz-existing">
-        <option value="">— New patient —</option>
-        ${S.patients.map((p) => `<option value="${p.id}" ${w.existingId === p.id ? "selected" : ""}>${esc(p.name)} (+${esc(p.mobile)})</option>`).join("")}
-      </select>
-      <span class="hint">Pick an existing patient for a follow-up, or leave as new.</span>
+      <label for="wz-patsearch">Existing patient</label>
+      <div style="position:relative">
+        <input class="input" id="wz-patsearch" autocomplete="off" placeholder="Search by name or mobile number…"
+          value="${w.existingId ? esc((S.patients.find((p) => p.id === w.existingId) || {}).name || "") : ""}">
+        <div class="pat-results" id="wz-patresults" hidden></div>
+      </div>
+      <span class="hint">${w.existingId
+        ? `Follow-up for this patient — <button type="button" class="linklike" id="wz-clear-existing">clear selection</button> to start a new patient instead.`
+        : "Type to search existing patients (name or mobile) for a follow-up, or just fill the form below for a new patient."}</span>
     </div>
 
     <div class="qf-box">
@@ -1069,6 +1109,7 @@ function wizIntakeIdentity() {
       <div class="field"><label for="wp-mobile">Mobile number <span class="req">*</span></label><input class="input" id="wp-mobile" type="tel" inputmode="tel" placeholder="9715xxxxxxxx" value="${esc(w.patient.mobile)}"></div>
       <div class="field"><label for="wp-email">Email</label><input class="input" id="wp-email" type="email" placeholder="patient@example.com" value="${esc(w.patient.email)}"></div>
       <div class="field full" style="margin-top:-8px"><span class="hint">Mobile number or email is required (at least one) — mobile is needed for the patient's portal login.</span></div>
+      <div class="field full"><label for="wp-natid">Emirates ID / passport number <span class="hint" style="font-weight:400">(optional)</span></label><input class="input" id="wp-natid" autocomplete="off" placeholder="784-XXXX-XXXXXXX-X or passport no." value="${esc(w.patient.nationalId || "")}"></div>
       <div class="field full" id="wz-mobile-match"></div>
       <div class="field full"><label>Title</label><div class="chip-row">${titleChips.map((t) => `<button type="button" class="chip ${w.patient.title === t ? "on" : ""}" data-demochip="title" data-v="${t}">${t}</button>`).join("")}</div></div>
     </div>
@@ -1085,7 +1126,7 @@ function wizIntakeIdentity() {
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
   `);
 
-  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight" };
+  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight" };
   const commitDemo = () => {
     Object.entries(demoTextIds).forEach(([k, id]) => { w.patient[k] = document.getElementById(id).value; });
   };
@@ -1120,11 +1161,7 @@ function wizIntakeIdentity() {
       document.getElementById("wz-use-existing").addEventListener("click", () => {
         commitDemo();
         w.existingId = match.id;
-        Object.assign(w.patient, {
-          name: match.name, mobile: match.mobile, email: match.email || "", title: match.title || "", age: match.age || "",
-          gender: match.gender || "", heightCm: match.height_cm || "", weightKg: match.last_weight || match.start_weight_kg || "",
-          intake: match.intake_json ? JSON.parse(match.intake_json) : {},
-        });
+        loadPatientIntoWizard(match);
         toast(`Loaded existing record for ${match.name}`);
         wizIntakeIdentity();
       });
@@ -1155,17 +1192,43 @@ function wizIntakeIdentity() {
     if (e.key === "Enter") { e.preventDefault(); document.getElementById("qf-parse").click(); }
   });
 
-  document.getElementById("wz-existing").addEventListener("change", (e) => {
-    commitDemo();
-    w.existingId = e.target.value ? Number(e.target.value) : null;
-    if (w.existingId) {
-      const p = S.patients.find((x) => x.id === w.existingId);
-      Object.assign(w.patient, {
-        name: p.name, mobile: p.mobile, email: p.email || "", title: p.title || "", age: p.age || "",
-        gender: p.gender || "", heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "",
-        intake: p.intake_json ? JSON.parse(p.intake_json) : {},
-      });
-    }
+  // Searchable existing-patient picker: typing filters by name or mobile
+  // number; focusing with an empty box lists the most recent patients, so
+  // the dropdown still works like the old <select> for small practices.
+  const searchInput = document.getElementById("wz-patsearch");
+  const resultsBox = document.getElementById("wz-patresults");
+  const patMatches = (q) => {
+    const digits = q.replace(/\D/g, "");
+    return S.patients.filter((p) =>
+      !q || p.name.toLowerCase().includes(q) || (digits.length >= 3 && p.mobile.includes(digits))
+    ).slice(0, 8);
+  };
+  const paintResults = () => {
+    const q = searchInput.value.toLowerCase().trim();
+    const list = patMatches(q);
+    resultsBox.hidden = false;
+    resultsBox.innerHTML = list.length
+      ? list.map((p) => `
+        <button type="button" class="pat-result" data-pick="${p.id}">
+          <span class="avatar" style="width:30px;height:30px;font-size:11px">${esc(initials(p.name))}</span>
+          <span><b>${esc(p.name)}</b><br><span style="font-size:12px;color:var(--muted)">+${esc(p.mobile)}${p.current_plan ? " · " + esc(p.current_plan) : ""}</span></span>
+        </button>`).join("")
+      : `<div style="padding:12px 14px;font-size:13px;color:var(--muted)">No matching patients — continue below to register a new one.</div>`;
+    resultsBox.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // fire before the input's blur hides the list
+      commitDemo();
+      w.existingId = Number(b.dataset.pick);
+      loadPatientIntoWizard(S.patients.find((x) => x.id === w.existingId));
+      toast(`Loaded existing record for ${w.patient.name}`);
+      wizIntakeIdentity();
+    }));
+  };
+  searchInput.addEventListener("input", paintResults);
+  searchInput.addEventListener("focus", paintResults);
+  searchInput.addEventListener("blur", () => setTimeout(() => { resultsBox.hidden = true; }, 150));
+  const clearBtn = document.getElementById("wz-clear-existing");
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    w.existingId = null;
     wizIntakeIdentity();
   });
 
@@ -1225,6 +1288,13 @@ function wizIntakeClinical() {
     <div class="clinical-box allergy">
       <h3>${icon("alert", 13)} Allergy history</h3>
       ${renderIntakeQuestion(allergyQ)}
+      ${w.patient.intake.allergies__gate === true ? `
+      <div class="field" style="margin-top:2px">
+        <label>Severity of worst reaction <span class="req">*</span></label>
+        <div class="chip-row">
+          ${["Mild", "Moderate", "Severe / life-threatening"].map((s) => `<button type="button" class="chip ${w.patient.intake.allergies__severity === s ? "on" : ""}" data-iqchip="allergies__severity" data-field="allergies__severity" data-v="${esc(s)}">${esc(s)}</button>`).join("")}
+        </div>
+      </div>` : ""}
     </div>
 
     ${renderIntakeQuestion(cancerQ)}
@@ -1248,8 +1318,8 @@ function suggestedPeptidesHTML() {
   const goals = S.wizard.patient.intake.health_goals || [];
   if (!goals.length) {
     return `<div class="card card-pad suggested-peptides">
-      <div class="card-title">${icon("sparkle", 17)} Suggested Peptides</div>
-      <div class="empty" style="padding:16px 6px">${icon("droplet", 28)}<p>Select a health goal to see suggested peptides here.</p></div>
+      <div class="card-title">${icon("sparkle", 17)} Suggested Medications</div>
+      <div class="empty" style="padding:16px 6px">${icon("droplet", 28)}<p>Select a health goal to see suggested medications here.</p></div>
     </div>`;
   }
   const seen = new Map();
@@ -1260,19 +1330,26 @@ function suggestedPeptidesHTML() {
       if (!cur || (cur !== "Primary" && item.priority === "Primary")) seen.set(item.name, item.priority);
     }
   }
-  const entries = [...seen.entries()].sort((a, b) => (a[1] === "Primary" ? -1 : 1) - (b[1] === "Primary" ? -1 : 1));
+  const isGlp1 = (name) => S.templates.some((t) => t.category === "glp1" && (t.config.medication || t.name) === name);
+  const entries = [...seen.entries()].sort((a, b) =>
+    // GLP-1 referrals first (they exist only under the Weight loss goal),
+    // then Primary peptides, then Secondary.
+    (isGlp1(a[0]) ? -1 : 0) - (isGlp1(b[0]) ? -1 : 0) ||
+    (a[1] === "Primary" ? -1 : 1) - (b[1] === "Primary" ? -1 : 1));
   return `<div class="card card-pad suggested-peptides">
-    <div class="card-title">${icon("sparkle", 17)} Suggested Peptides</div>
+    <div class="card-title">${icon("sparkle", 17)} Suggested Medications</div>
     ${entries.length ? `
     <div class="sp-list">
       ${entries.map(([name, priority]) => `
         <div class="sp-row">
-          <div class="sp-name"><span>${esc(name)}</span><span class="badge ${priority === "Primary" ? "badge-teal" : "badge-gray"}">${priority}</span></div>
-          <button type="button" class="sp-info" data-peptide="${esc(name)}" aria-label="View ${esc(name)} details">${icon("info", 14)}</button>
+          <div class="sp-name"><span>${esc(name)}</span>${isGlp1(name)
+            ? `<span class="badge badge-teal">GLP-1</span>`
+            : `<span class="badge ${priority === "Primary" ? "badge-teal" : "badge-gray"}">${priority}</span>`}</div>
+          ${(S.presets.peptideInfo || {})[name] ? `<button type="button" class="sp-info" data-peptide="${esc(name)}" aria-label="View ${esc(name)} details">${icon("info", 14)}</button>` : ""}
         </div>`).join("")}
     </div>
     <p class="hint" style="margin-top:10px">Based on selected health goals · Tap ${icon("info", 11)} for full protocol details.</p>`
-    : `<p class="hint">No commonly-suggested peptides for these goals — a custom program may suit best.</p>`}
+    : `<p class="hint">No commonly-suggested medications for these goals — a custom program may suit best.</p>`}
   </div>`;
 }
 
@@ -1382,6 +1459,7 @@ function wizStepProgram() {
   const tpls = S.templates.filter((t) => t.category === d.category);
 
   view().innerHTML = `${wizHead()}
+  <div class="two-col">
   <div class="card card-pad">
     <div class="card-title">${icon("layers", 19)} Choose the treatment program</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
@@ -1397,7 +1475,10 @@ function wizStepProgram() {
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
       <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
     </div>
+  </div>
+  <div id="wz-side">${suggestedPeptidesHTML()}</div>
   </div>`;
+  wirePeptideInfoButtons(view());
 
   function cartHTML() {
     if (!w.cart.length) return "";
@@ -1493,24 +1574,78 @@ function wizStepProgram() {
     }
     if (d.template && d.category === "peptide") {
       const protos = d.template.config.protocols;
+      const selIdx = protos.findIndex((pr) => pr === d.protocolBase || pr === d.protocol);
       det.innerHTML = `
       <hr class="divider">
       <div class="field">
         <label for="pp-proto">Protocol</label>
-        <select class="input" id="pp-proto">${protos.map((pr, i) => `<option value="${i}" ${d.protocol === pr ? "selected" : ""}>${esc(pr.protocolType)} — ${esc(pr.doseVolume)} · ${esc(pr.time)}</option>`).join("")}</select>
+        <select class="input" id="pp-proto">${protos.map((pr, i) => `<option value="${i}" ${i === selIdx ? "selected" : ""}>${esc(pr.protocolType)} — ${esc(pr.doseVolume)} · ${esc(pr.time)}</option>`).join("")}</select>
       </div>
+      ${d.customizing ? `
+      <div class="form-grid" id="pp-custom">
+        <div class="field"><label for="pc-dosevol">Dose (volume)</label><input class="input" id="pc-dosevol" data-pk="doseVolume" value="${esc(d.protocol.doseVolume || "")}"></div>
+        <div class="field"><label for="pc-doseamt">Dose (amount)</label><input class="input" id="pc-doseamt" data-pk="doseAmount" value="${esc(d.protocol.doseAmount || "")}"></div>
+        <div class="field"><label for="pc-strength">Strength / concentration</label><input class="input" id="pc-strength" data-pk="strength" value="${esc(d.protocol.strength || "")}"></div>
+        <div class="field"><label for="pc-duration">Vial lasts / duration</label><input class="input" id="pc-duration" data-pk="duration" value="${esc(d.protocol.duration || "")}"></div>
+        <div class="field"><label for="pc-time">Timing</label><input class="input" id="pc-time" data-pk="time" value="${esc(d.protocol.time || "")}"></div>
+        <div class="field"><label for="pc-cycle">Cycle</label><input class="input" id="pc-cycle" data-pk="cycle" value="${esc(d.protocol.cycle || "")}"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px">
+        <button class="btn btn-secondary btn-sm" id="pp-save-custom" type="button">${icon("check", 15)} Save as my protocol</button>
+        <button class="btn btn-ghost btn-sm" id="pp-cancel-custom" type="button">Reset to standard</button>
+      </div>
+      <p class="hint">Edits apply to this consultation. "Save as my protocol" also stores it in your Program library for future use.</p>` : `
       <div class="metric-strip">
         <div class="metric"><b>${esc(d.protocol.strength)}</b>Strength</div>
         <div class="metric"><b>${esc(d.protocol.doseAmount || d.protocol.doseVolume)}</b>Dose</div>
         <div class="metric"><b>${esc(d.protocol.duration)}</b>Vial lasts</div>
         <div class="metric"><b>${esc(d.protocol.cycle)}</b>Cycle</div>
       </div>
-      <p class="hint">${esc(d.protocol.summary)}</p>`;
+      <p class="hint">${esc(d.protocol.summary)}</p>
+      <button class="btn btn-ghost btn-sm" id="pp-customize" type="button">${icon("edit", 15)} Customize protocol</button>`}`;
+
       det.querySelector("#pp-proto").addEventListener("change", (e) => {
         d.protocol = protos[Number(e.target.value)];
+        d.protocolBase = d.protocol;
+        d.customizing = false;
         applyProtocolTo(d);
         wizStepProgram();
       });
+
+      const custBtn = det.querySelector("#pp-customize");
+      if (custBtn) custBtn.addEventListener("click", () => {
+        d.protocolBase = protos.includes(d.protocol) ? d.protocol : (protos[selIdx >= 0 ? selIdx : 0]);
+        d.protocol = { ...d.protocol, protocolType: d.protocol.protocolType.replace(/ \(customized\)$/, "") + " (customized)" };
+        d.customizing = true;
+        wizStepProgram();
+      });
+
+      if (d.customizing) {
+        // Plain-text edits mutate the cloned protocol in place (no re-render,
+        // so focus is preserved); derived draft fields refresh on each input.
+        det.querySelectorAll("#pp-custom [data-pk]").forEach((inp) => inp.addEventListener("input", () => {
+          d.protocol[inp.dataset.pk] = inp.value;
+          d.protocol.summary = `${d.medication} ${d.protocol.doseVolume || d.protocol.doseAmount || ""} — ${d.protocol.time || ""}`.trim();
+          applyProtocolTo(d);
+        }));
+        det.querySelector("#pp-cancel-custom").addEventListener("click", () => {
+          d.protocol = d.protocolBase || protos[0];
+          d.customizing = false;
+          applyProtocolTo(d);
+          wizStepProgram();
+        });
+        det.querySelector("#pp-save-custom").addEventListener("click", async () => {
+          const name = prompt("Save this customized protocol as:", `${d.medication} — my protocol`);
+          if (!name) return;
+          await api("POST", "/api/templates", {
+            name: name.trim(), category: "peptide",
+            config: { medication: d.medication, protocols: [{ ...d.protocol, protocolType: "Saved Custom Protocol" }] },
+          });
+          S.templates = await api("GET", "/api/templates");
+          toast("Customized protocol saved to your Program library");
+          wizStepProgram();
+        });
+      }
     }
   }
 
@@ -1687,6 +1822,7 @@ function intakeText(id) {
   const parts = [];
   if (Array.isArray(a[id])) parts.push(...a[id].filter((x) => x !== "Other"));
   if (a[id + "__other"]) parts.push(a[id + "__other"]);
+  if (a[id + "__severity"]) parts.push(`severity: ${a[id + "__severity"]}`);
   if (a[id + "__notes"]) parts.push(a[id + "__notes"]);
   return parts.join(", ");
 }
@@ -1812,7 +1948,7 @@ function wizStepReview() {
   const createdAt = new Date().toISOString().slice(0, 10);
   const fakePlans = w.cart.map((c) => ({
     title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
-    medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
+    category: c.category, medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
     phases: c.phases.filter((p) => p.label || p.dose), instructions: c.instructions, warnings: c.warnings,
     diet: c.category === "glp1" ? w.diet : {}, blood_test: c.bloodTest, supplements: w.supplements,
     created_at: createdAt, next_followup: nextFollowup,
@@ -1872,7 +2008,7 @@ function wizStepReview() {
       let patientId = w.existingId, newPin = null;
       if (!patientId) {
         const created = await api("POST", "/api/patients", {
-          name: w.patient.name, mobile: w.patient.mobile, email: w.patient.email, title: w.patient.title,
+          name: w.patient.name, mobile: w.patient.mobile, email: w.patient.email, nationalId: w.patient.nationalId, title: w.patient.title,
           age: Number(w.patient.age) || null, gender: w.patient.gender,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           activityLevel: w.patient.activityLevel, chronicIllnesses: w.patient.chronicIllnesses,
@@ -1882,7 +2018,7 @@ function wizStepReview() {
         newPin = created.pin;
       } else {
         await api("PATCH", `/api/patients/${patientId}`, {
-          email: w.patient.email, chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
+          email: w.patient.email, nationalId: w.patient.nationalId, chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
           allergies: w.patient.allergies, intake: w.patient.intake,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,

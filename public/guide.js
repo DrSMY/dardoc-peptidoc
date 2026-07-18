@@ -2,6 +2,39 @@
 // buildGuide(plan, patient, doctorName) → HTML string (self-contained, print-friendly).
 "use strict";
 
+// Light markdown-ish → HTML for the master-document guide windows:
+// escapes everything, then restores **bold**, linkifies URLs, keeps line breaks.
+function guideProse(text) {
+  let h = esc(String(text || ""));
+  h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/(https?:\/\/[^\s<]+)/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  return h.replace(/\n/g, "<br>");
+}
+
+// The standard DarDoc guide windows for this medication+route (from
+// public/patient-guides.js, generated off the master guides document).
+// Skipped silently when the page didn't load the content or the
+// medication has no standard guide (e.g. fully custom programs).
+function standardGuideSections(plan) {
+  if (typeof guideContentFor !== "function") return "";
+  const content = guideContentFor(plan.medication, plan.route);
+  if (!content) return "";
+  const windows = content.sections.map((s) => `
+    <section class="g-sec">
+      <h3><span class="g-emoji">${esc(s.emoji || "•")}</span> ${esc(s.head)}</h3>
+      <div class="g-prose">${guideProse(s.body)}</div>
+    </section>`).join("");
+  const general = plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length ? `
+    <section class="g-sec">
+      <h3><span class="g-emoji">ℹ️</span> ${esc(PEPTIDE_GENERAL_GUIDE[0].head)}</h3>
+      <div class="g-prose">${guideProse(PEPTIDE_GENERAL_GUIDE[0].body)}</div>
+    </section>` : "";
+  return `
+    <hr class="g-divider">
+    <div class="g-std-head">Your complete medication guide</div>
+    ${windows}${general}`;
+}
+
 function buildGuide(plan, patient, doctorName) {
   const diet = plan.diet || {};
   const phases = plan.phases || [];
@@ -105,6 +138,8 @@ function buildGuide(plan, patient, doctorName) {
 
     ${bloodTest}
 
+    ${standardGuideSections(plan)}
+
     <section class="g-sec">
       <h3>${icon("calendar", 18)} Follow-up</h3>
       <div class="g-callout g-teal">
@@ -158,6 +193,10 @@ const GUIDE_CSS = `
 .g-teal { background: var(--brand-soft); color: var(--brand-strong); }
 .g-teal svg { color: var(--brand); }
 .g-foot { padding: 14px 22px 20px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--border); margin-top: 8px; }
+.g-divider { border: none; border-top: 1.5px dashed var(--border-strong); margin: 20px 22px 4px; }
+.g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
+.g-emoji { font-size: 16px; }
+.g-prose a { color: var(--primary); word-break: break-all; }
 @media print {
   body * { visibility: hidden; }
   .guide, .guide * { visibility: visible; }

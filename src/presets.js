@@ -159,7 +159,9 @@ const PEPTIDE_PROTOCOLS = {
     { strength: "10 mg in 15 ml bottle", doseAmount: "", doseVolume: "1-2 pumps each nostril", time: "As needed before sexual activity, up to 2-3x/day. May combine with oxytocin", protocolType: "Alternative Protocol", route: "Intranasal spray", duration: "~30-50 uses", cycle: "On demand", summary: "PT-141 nasal spray, 1-2 pumps as needed" },
   ],
   "GHK-Cu": [
-    { strength: "10 mg/ml in 5 ml vial", doseAmount: "1-2 mg", doseVolume: "0.1-0.2 ml (10-20 units)", time: "Daily for 6 weeks", protocolType: "Standard Protocol", route: "Subcutaneous injection", duration: "25-50 Days", cycle: "6 weeks on, 4-6 weeks off", summary: "GHK-Cu injection daily for 6-week cycle" },
+    { strength: "10 mg/ml in 5 ml vial", doseAmount: "1 mg", doseVolume: "0.1 ml (10 units)", time: "Daily for 6 weeks", protocolType: "Initial Protocol", route: "Subcutaneous injection", duration: "50 Days", cycle: "6 weeks on, 4-6 weeks off", summary: "GHK-Cu 0.1 ml (10 units) daily — initial dose, vial lasts 50 days" },
+    { strength: "10 mg/ml in 5 ml vial", doseAmount: "1.5 mg", doseVolume: "0.15 ml (15 units)", time: "Daily for 6 weeks", protocolType: "Suggested Protocol", route: "Subcutaneous injection", duration: "33 Days", cycle: "6 weeks on, 4-6 weeks off", summary: "GHK-Cu 0.15 ml (15 units) daily — suggested dose, vial lasts 33 days" },
+    { strength: "10 mg/ml in 5 ml vial", doseAmount: "2 mg", doseVolume: "0.2 ml (20 units)", time: "Daily for 6 weeks", protocolType: "Experienced Protocol", route: "Subcutaneous injection", duration: "25 Days", cycle: "6 weeks on, 4-6 weeks off", summary: "GHK-Cu 0.2 ml (20 units) daily — experienced dose, vial lasts 25 days" },
   ],
   "GHK-Cu Facial Serum": [
     { strength: "0.3% serum (HY 2% & Dexpanthenol 0.5%)", doseAmount: "", doseVolume: "Apply thin layer", time: "Daily at night", protocolType: "Skincare Protocol", route: "Topical serum", duration: "Continuous", cycle: "Ongoing", summary: "GHK-Cu facial serum applied nightly" },
@@ -214,6 +216,15 @@ const PEPTIDE_PROTOCOLS = {
 // ── Suggested peptides by primary health goal — source of truth: DarDoc
 // "Benefit Matrix" sheet (Longevity & Fitness Peptides Program).
 const HEALTH_GOAL_PEPTIDES = {
+  // "Weight loss" routes to the GLP-1 program — the suggestions here are the
+  // GLP-1 medications to refer, not peptides (rendered with a GLP-1 badge).
+  "Weight loss": [
+    { name: "Wegovy", priority: "Primary" },
+    { name: "Mounjaro", priority: "Primary" },
+    { name: "Wegovy Pill", priority: "Primary" },
+    { name: "Rybelsus", priority: "Primary" },
+    { name: "Foundayo", priority: "Primary" },
+  ],
   "Healthy aging & longevity": [
     { name: "Epitalon", priority: "Primary" },
     { name: "BPC-157", priority: "Secondary" },
@@ -929,7 +940,7 @@ const INTAKE_QUESTIONS = [
   { id: "is_pregnant", section: "Clinical", question: "Currently pregnant?", type: "select", options: ["No", "Yes"], conditionalOn: { questionId: "gender", value: "Female" }, required: true },
   { id: "is_breastfeeding", section: "Clinical", question: "Currently breastfeeding?", type: "select", options: ["No", "Yes"], conditionalOn: { questionId: "gender", value: "Female" }, required: true },
   { id: "cancer_history", section: "Clinical", question: "Have you or a close family member ever been diagnosed with cancer or any tumor/growth?", type: "select", options: ["No", "Yes - myself", "Yes - a family member", "Yes - both myself and a family member"], hasNotes: true },
-  { id: "previous_glp1", section: "Clinical", question: "Previous history of GLP-1 medication use?", type: "select", options: ["No", "Yes"], hasNotes: true },
+  { id: "previous_glp1", section: "Clinical", question: "Previous history of GLP-1/peptide medication use?", type: "select", options: ["No", "Yes"], hasNotes: true },
 
   // Primary Health Objectives — "Weight loss" is added ahead of the 5
   // officially-documented goals to route into the GLP-1 workflow; the last
