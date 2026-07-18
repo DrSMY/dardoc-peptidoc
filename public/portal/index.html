@@ -63,6 +63,18 @@
   .phase-seg.done { background: rgba(255,255,255,.9); }
   .phase-meta { display: flex; justify-content: space-between; font-size: 11.5px; opacity: .85; margin-top: 6px; }
 
+  /* interactive phase-progress illustration (radial % ring) */
+  .phase-illus { display: flex; align-items: center; gap: 16px; border-radius: var(--r-lg); padding: 18px 20px; color: #fff; margin-bottom: 16px; box-shadow: var(--shadow-md); }
+  .phase-illus-ring { flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(23,32,15,.25)); }
+  .phase-illus-body { flex: 1; min-width: 0; }
+  @media (max-width: 380px) { .phase-illus { flex-direction: column; align-items: stretch; text-align: center; } .phase-illus-ring { align-self: center; } }
+
+  /* per-medication row on the home screen's "Your medications" list */
+  .med-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--border); }
+  .med-row:first-child { border-top: none; }
+  .med-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .med-row-actions .btn { padding: 8px; min-height: 36px; }
+
   .qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
   .qa {
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px;

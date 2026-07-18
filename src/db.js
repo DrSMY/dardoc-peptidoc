@@ -159,6 +159,9 @@ addColumn("patients", "email", "TEXT DEFAULT ''");                // optional �
 addColumn("plans", "clinical_suggestion", "TEXT DEFAULT ''");     // auto-generated EMR record
 addColumn("plans", "supplements", "TEXT DEFAULT ''");             // optional supplements list
 addColumn("plans", "quantity", "INTEGER DEFAULT 1");              // pens/units dispensed for this program
+addColumn("plans", "needs_refill", "INTEGER DEFAULT 0");          // patient flagged "finished my injection" — doctor should reorder
+addColumn("plans", "refill_requested_at", "TEXT");
+addColumn("plans", "first_dose_at", "TEXT");                      // cached from the first dose_logs row — drives the active-window calc
 addColumn("templates", "is_customized", "INTEGER NOT NULL DEFAULT 0"); // edited via super admin panel
 
 // ── password / pin hashing (scrypt) ─────────────────────────────

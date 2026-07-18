@@ -92,6 +92,7 @@ const NAV = [
   { hash: "#/consult", label: "New consultation", ico: "plus" },
   { hash: "#/patients", label: "Patients", ico: "users" },
   { hash: "#/activity", label: "Recent activity", ico: "activity" },
+  { hash: "#/messages", label: "Messages", ico: "message" },
   { hash: "#/templates", label: "Program library", ico: "layers" },
   { hash: "#/kb", label: "Knowledge Base", ico: "book" },
   { hash: "#/settings", label: "Settings", ico: "settings" },
@@ -149,6 +150,7 @@ function route() {
   if (h.startsWith("#/consult")) return viewConsult();
   if (h.startsWith("#/templates")) return viewTemplates();
   if (h.startsWith("#/activity")) return viewActivity();
+  if (h.startsWith("#/messages")) return viewInbox();
   if (h.startsWith("#/kb")) return viewKb();
   if (h.startsWith("#/settings")) return viewSettings();
   return viewDashboard();
@@ -204,6 +206,28 @@ async function viewDashboard() {
       </div>
 
       <div class="card">
+        <div class="card-title" style="padding:18px 18px 0">${icon("syringe", 19)} Refill requests
+          ${d.refillRequests.length ? `<span class="badge badge-amber">${d.refillRequests.length} pending</span>` : `<span class="badge badge-green">None pending</span>`}
+        </div>
+        <div id="refill-box">
+        ${d.refillRequests.length ? d.refillRequests.map((r) => `
+          <div class="alert-item" data-rid="${r.id}">
+            <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
+            <div class="alert-body">
+              <div class="alert-name">${esc(r.patient_name)}</div>
+              <div class="alert-sym">Finished ${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}</div>
+              <div class="alert-meta">${timeAgo(r.refill_requested_at)}</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+              <a class="btn btn-secondary btn-sm" href="#/patient/${r.patient_id}">Open</a>
+              <button class="btn btn-ghost btn-sm" data-refilled="${r.id}">Mark refilled</button>
+            </div>
+          </div>`).join("") : `
+          <div class="empty">${icon("checkCircle", 34)}<div class="empty-title">No pending refills</div><p>When a patient reports finishing a medication, it will appear here.</p></div>`}
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title" style="padding:18px 18px 0">${icon("activity", 19)} Recent patient activity</div>
         ${d.recent.length ? d.recent.map((r) => `
           <a class="pt-row" href="#/patient/${r.patient_id}">
@@ -238,11 +262,40 @@ async function viewDashboard() {
     toast("Alert marked as reviewed");
     viewDashboard();
   }));
+  view().querySelectorAll("[data-refilled]").forEach((b) => b.addEventListener("click", async () => {
+    await api("PATCH", `/api/plans/${b.dataset.refilled}`, { needsRefill: 0 });
+    toast("Marked as refilled");
+    viewDashboard();
+  }));
 
   renderPracticeStats(d);
 }
 
-// ── recent activity (dedicated page — dashboard keeps its 20-row slice) ──
+// ── messages inbox (every patient thread, most recent first) ─────
+async function viewInbox() {
+  view().innerHTML = `<div class="skel" style="height:300px"></div>`;
+  const rows = await api("GET", "/api/messages/inbox");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>Messages</h1><div class="sub">Every patient conversation, most recent first</div></div>
+  </div>
+  <div class="card">
+    ${rows.length ? rows.map((r) => `
+      <div class="pt-row" data-open="${r.patient_id}">
+        <div class="avatar">${esc(initials(r.patient_name))}</div>
+        <div class="pt-info">
+          <div class="pt-name">${esc(r.patient_name)} ${r.unread ? `<span class="badge badge-red">${r.unread} new</span>` : ""}</div>
+          <div class="pt-meta">${r.last_sender === "doctor" ? "You: " : ""}${esc((r.last_body || "").slice(0, 70))}${(r.last_body || "").length > 70 ? "…" : ""}</div>
+        </div>
+        <div class="pt-side">${timeAgo(r.last_at)}</div>
+      </div>`).join("") : `<div class="empty">${icon("message", 34)}<div class="empty-title">No conversations yet</div><p>Messages between you and your patients will show up here.</p></div>`}
+  </div>`;
+  view().querySelectorAll("[data-open]").forEach((row) => row.addEventListener("click", () => {
+    S.detailTab = "messages";
+    location.hash = `#/patient/${row.dataset.open}`;
+  }));
+}
+
 async function viewActivity() {
   view().innerHTML = `<div class="skel" style="height:300px"></div>`;
   const rows = await api("GET", "/api/activity");
@@ -533,13 +586,14 @@ async function viewPatient(id) {
                   <div style="font-weight:700;font-family:var(--font-head);font-size:14.5px">${esc(pl.title)}
                     <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
                   </div>
-                  <div style="font-size:13px;color:var(--muted)">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}${pl.quantity > 1 ? " × " + pl.quantity : ""} · ${esc(pl.frequency)} · started ${esc(fmtDate(pl.created_at))}</div>
+                  <div style="font-size:13px;color:var(--muted)">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}${pl.quantity > 1 ? " × " + pl.quantity : ""} · ${esc(pl.frequency)} · started ${esc(fmtDate(pl.created_at))}${pl.needs_refill ? ' · <span class="badge badge-amber">refill requested</span>' : ""}</div>
                 </div>
-                ${pl.status === "active" ? `
                 <div style="display:flex;gap:6px">
+                  <button class="btn btn-ghost btn-sm" data-open-guide="${pl.id}">${icon("book", 15)} Guide</button>
+                  ${pl.status === "active" ? `
                   <button class="btn btn-ghost btn-sm" data-edit-dose="${pl.id}">${icon("edit", 15)} Dose</button>
-                  <button class="btn btn-ghost btn-sm" data-stop="${pl.id}">Stop</button>
-                </div>` : ""}
+                  <button class="btn btn-ghost btn-sm" data-stop="${pl.id}">Stop</button>` : ""}
+                </div>
               </div>`).join("") : `<div class="empty">${icon("layers", 30)}<p>No programs yet. Start a consultation to publish one.</p></div>`}
           </div>
         </div>
@@ -598,6 +652,12 @@ async function viewPatient(id) {
         const pl = plans.find((x) => x.id === Number(b.dataset.editDose));
         editDoseModal(pl, () => viewPatient(id));
       }));
+      box.querySelectorAll("[data-open-guide]").forEach((b) => b.addEventListener("click", () => {
+        S.guidePlanId = Number(b.dataset.openGuide);
+        S.detailTab = "guide";
+        view().querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x.dataset.tab === "guide"));
+        paintTab();
+      }));
     }
 
     if (S.detailTab === "guide") {
@@ -605,14 +665,19 @@ async function viewPatient(id) {
       const active = plans.filter((pl) => pl.status === "active");
       const guidePlans = active.length ? active : (plans[0] ? [plans[0]] : []);
       const primaryPl = guidePlans.find((pl) => pl.category === "glp1") || guidePlans[0];
+      const activeId = S.guidePlanId && guidePlans.some((pl) => pl.id === S.guidePlanId) ? S.guidePlanId : (primaryPl && primaryPl.id);
+      const renderOne = (pl) => buildGuide(pl, p, S.user.name);
       box.innerHTML = guidePlans.length ? `
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send via WhatsApp</button>
         </div>
-        <div id="guide-box">${buildComboGuide(guidePlans, p, S.user.name)}</div>`
+        ${guidePickerHTML(guidePlans, activeId)}
+        <div id="g-active-guide">${renderOne(guidePlans.find((pl) => pl.id === activeId))}</div>`
         : `<div class="empty">${icon("file", 34)}<div class="empty-title">No guide yet</div><p>Publish a program from a consultation and the patient guide will appear here.</p></div>`;
       if (guidePlans.length) {
+        wireGuidePicker(box, guidePlans, renderOne, activeId);
+        box.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
         document.getElementById("btn-print").addEventListener("click", () => window.print());
         document.getElementById("btn-wa").addEventListener("click", () => {
           const link = `${location.origin}/portal`;

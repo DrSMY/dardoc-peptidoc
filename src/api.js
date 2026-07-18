@@ -337,6 +337,11 @@ route("GET", "/api/dashboard", (req, res) => {
     WHERE c.flagged = 1 AND c.reviewed = 0
     ORDER BY c.created_at DESC LIMIT 30`).all()
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
+  const refillRequests = db.prepare(`
+    SELECT pl.id, pl.medication, pl.dose, pl.refill_requested_at, p.id AS patient_id, p.name AS patient_name, p.mobile
+    FROM plans pl JOIN patients p ON p.id = pl.patient_id
+    WHERE pl.needs_refill = 1
+    ORDER BY pl.refill_requested_at DESC LIMIT 30`).all();
   const dueFollowups = db.prepare(`
     SELECT pl.id, pl.title, pl.medication, pl.next_followup, p.id AS patient_id, p.name AS patient_name, p.mobile
     FROM plans pl JOIN patients p ON p.id = pl.patient_id
@@ -367,9 +372,24 @@ route("GET", "/api/dashboard", (req, res) => {
     WHERE created_at > datetime('now','-14 days')`).all();
 
   json(res, 200, {
-    activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent,
+    activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent, refillRequests,
     prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans,
   });
+});
+
+// ── doctor: full messages inbox (every patient thread, most recent first) ──
+route("GET", "/api/messages/inbox", (req, res) => {
+  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const rows = db.prepare(`
+    SELECT p.id AS patient_id, p.name AS patient_name, p.mobile,
+      (SELECT body FROM messages m WHERE m.patient_id = p.id ORDER BY m.created_at DESC LIMIT 1) AS last_body,
+      (SELECT sender FROM messages m WHERE m.patient_id = p.id ORDER BY m.created_at DESC LIMIT 1) AS last_sender,
+      (SELECT created_at FROM messages m WHERE m.patient_id = p.id ORDER BY m.created_at DESC LIMIT 1) AS last_at,
+      (SELECT COUNT(*) FROM messages m WHERE m.patient_id = p.id AND m.sender = 'patient' AND m.read_at IS NULL) AS unread
+    FROM patients p
+    WHERE p.archived = 0 AND EXISTS (SELECT 1 FROM messages m WHERE m.patient_id = p.id)
+    ORDER BY last_at DESC`).all();
+  json(res, 200, rows);
 });
 
 // Full recent-activity feed (dose logs + check-ins), for the dedicated
@@ -499,7 +519,8 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
   if (!plan) return json(res, 404, { error: "Plan not found." });
   const fields = { status: "status", title: "title", medication: "medication", dose: "dose", quantity: "quantity", route: "route",
     frequency: "frequency", instructions: "instructions", warnings: "warnings", bloodTest: "blood_test",
-    clinicalNote: "clinical_note", nextFollowup: "next_followup", followupDays: "followup_days" };
+    clinicalNote: "clinical_note", nextFollowup: "next_followup", followupDays: "followup_days",
+    needsRefill: "needs_refill" };
   const sets = [], vals = [];
   for (const [k, col] of Object.entries(fields)) {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }
@@ -576,6 +597,20 @@ route("POST", "/api/portal/doses", async (req, res, _p, body) => {
   const takenAt = body.takenAt || new Date().toISOString();
   db.prepare("INSERT INTO dose_logs (patient_id, plan_id, taken_at, dose, site, notes) VALUES (?,?,?,?,?,?)")
     .run(patient.id, plan ? plan.id : null, takenAt, body.dose || (plan ? plan.dose : ""), body.site || "", body.notes || "");
+  if (plan && !plan.first_dose_at) {
+    db.prepare("UPDATE plans SET first_dose_at = ? WHERE id = ?").run(takenAt, plan.id);
+  }
+  json(res, 200, { ok: true });
+});
+
+// Patient reports a medication vial/pen as finished — flags the doctor to
+// arrange a refill rather than silently letting the program lapse.
+route("POST", "/api/portal/plans/:id/finished", (req, res, p) => {
+  const patient = getPatient(req);
+  if (!patient) return json(res, 401, { error: "Not signed in." });
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ?").get(p.id, patient.id);
+  if (!plan) return json(res, 404, { error: "Program not found." });
+  db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
   json(res, 200, { ok: true });
 });
 

@@ -11,28 +11,62 @@ function guideProse(text) {
   return h.replace(/\n/g, "<br>");
 }
 
+// A collapsible <details> block — used throughout the guide so the patient
+// sees short headers to tap open, instead of one long wall of text.
+function accordion(icoName, title, bodyHtml, open) {
+  return `<details class="g-acc" ${open ? "open" : ""}>
+    <summary class="g-acc-sum">
+      <span class="g-acc-sum-l">${typeof icoName === "string" && icoName.length <= 2 ? `<span class="g-emoji">${esc(icoName)}</span>` : icon(icoName, 17)} ${esc(title)}</span>
+      ${icon("chevR", 15)}
+    </summary>
+    <div class="g-acc-body">${bodyHtml}</div>
+  </details>`;
+}
+
 // The standard DarDoc guide windows for this medication+route (from
 // public/patient-guides.js, generated off the master guides document).
 // Skipped silently when the page didn't load the content or the
-// medication has no standard guide (e.g. fully custom programs).
+// medication has no standard guide (e.g. fully custom programs). Each
+// window becomes its own collapsible accordion group rather than one long
+// scroll of text — only the first (usually "at a glance"/"how it works")
+// opens by default.
 function standardGuideSections(plan) {
   if (typeof guideContentFor !== "function") return "";
   const content = guideContentFor(plan.medication, plan.route);
   if (!content) return "";
-  const windows = content.sections.map((s) => `
-    <section class="g-sec">
-      <h3><span class="g-emoji">${esc(s.emoji || "•")}</span> ${esc(s.head)}</h3>
-      <div class="g-prose">${guideProse(s.body)}</div>
-    </section>`).join("");
-  const general = plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length ? `
-    <section class="g-sec">
-      <h3><span class="g-emoji">ℹ️</span> ${esc(PEPTIDE_GENERAL_GUIDE[0].head)}</h3>
-      <div class="g-prose">${guideProse(PEPTIDE_GENERAL_GUIDE[0].body)}</div>
-    </section>` : "";
+  const windows = content.sections.map((s, i) => accordion(s.emoji || "•", s.head, `<div class="g-prose">${guideProse(s.body)}</div>`, i === 0)).join("");
+  const general = plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length
+    ? accordion("ℹ️", PEPTIDE_GENERAL_GUIDE[0].head, `<div class="g-prose">${guideProse(PEPTIDE_GENERAL_GUIDE[0].body)}</div>`, false) : "";
   return `
     <hr class="g-divider">
     <div class="g-std-head">Your complete medication guide</div>
-    ${windows}${general}`;
+    <div class="g-acc-group">${windows}${general}</div>`;
+}
+
+// A chip per prescribed medication — tap one to switch which medication's
+// full guide is shown below. Used on both the patient portal's Guide tab
+// and the doctor's per-patient Guide tab.
+function guidePickerHTML(plans, activeId) {
+  if (plans.length <= 1) return "";
+  return `<div class="g-picker">
+    ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}">${icon(routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
+  </div>`;
+}
+
+// Wires the picker chips: clicking one re-renders `container` with that
+// plan's full guide. `renderGuideFor(plan)` should return the guide HTML.
+function wireGuidePicker(container, plans, renderGuideFor, activeId) {
+  const picker = container.querySelector(".g-picker");
+  if (!picker) return;
+  picker.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => {
+    const id = Number(b.dataset.gpick);
+    const plan = plans.find((p) => p.id === id);
+    if (!plan) return;
+    const box = container.querySelector("#g-active-guide");
+    box.innerHTML = renderGuideFor(plan);
+    picker.querySelectorAll("[data-gpick]").forEach((x) => x.classList.toggle("on", Number(x.dataset.gpick) === id));
+    window.scrollTo({ top: box.offsetTop - 12, behavior: "smooth" });
+  }));
 }
 
 // Combines every active program into one guide. GLP-1 is always the focus
@@ -156,31 +190,17 @@ function buildGuide(plan, patient, doctorName) {
       </div>
     </section>` : ""}
 
-    ${plan.instructions ? `
     <section class="g-sec">
-      <h3>${icon("info", 18)} Instructions from your doctor</h3>
-      <div class="g-prose">${esc(plan.instructions).replace(/\n/g, "<br>")}</div>
-    </section>` : ""}
+      <div class="g-acc-group">
+        ${plan.instructions ? accordion("info", "Instructions from your doctor", `<div class="g-prose">${esc(plan.instructions).replace(/\n/g, "<br>")}</div>`, true) : ""}
 
-    ${dietItems.length ? `
-    <section class="g-sec">
-      <h3>${icon("utensils", 18)} Nutrition targets</h3>
-      <div class="g-facts">
-        ${dietItems.map((d) => `<div class="g-fact"><div class="g-fact-lbl">${esc(d.label)}</div><div class="g-fact-val">${esc(d.val)}</div></div>`).join("")}
+        ${dietItems.length ? accordion("utensils", "Nutrition targets", `<div class="g-facts" style="margin-bottom:0">${dietItems.map((d) => `<div class="g-fact"><div class="g-fact-lbl">${esc(d.label)}</div><div class="g-fact-val">${esc(d.val)}</div></div>`).join("")}</div>`, false) : ""}
+
+        ${plan.supplements ? accordion("pill", "Supplements", `<div class="g-prose">${esc(plan.supplements).replace(/\n/g, "<br>")}</div>`, false) : ""}
+
+        ${plan.warnings ? accordion("alert", "When to contact your doctor", `<div class="g-callout g-red" style="margin:0">${icon("alert", 18)}<div>${esc(plan.warnings).replace(/\n/g, "<br>")}</div></div>`, true) : ""}
       </div>
-    </section>` : ""}
-
-    ${plan.supplements ? `
-    <section class="g-sec">
-      <h3>${icon("pill", 18)} Supplements</h3>
-      <div class="g-prose">${esc(plan.supplements).replace(/\n/g, "<br>")}</div>
-    </section>` : ""}
-
-    ${plan.warnings ? `
-    <section class="g-sec">
-      <h3>${icon("alert", 18)} When to contact your doctor</h3>
-      <div class="g-callout g-red">${icon("alert", 18)}<div>${esc(plan.warnings).replace(/\n/g, "<br>")}</div></div>
-    </section>` : ""}
+    </section>
 
     ${bloodTest}
 
@@ -260,6 +280,40 @@ const GUIDE_CSS = `
 .g-other-meta { font-size: 12.5px; color: var(--muted); margin: 3px 0 4px; }
 .g-other-block { margin-top: 8px; font-size: 13.5px; }
 .g-other-block b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); margin-bottom: 3px; }
+
+/* collapsible accordion groups — keeps the guide from reading as one wall of text */
+.g-acc-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.g-acc { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); overflow: hidden; }
+.g-acc[open] { background: var(--surface); box-shadow: var(--inset-top-highlight); }
+.g-acc-sum {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 13px 16px; cursor: pointer; list-style: none;
+  font-family: var(--font-head); font-weight: 700; font-size: 14px; color: var(--brand-strong);
+  transition: background .15s var(--ease);
+}
+.g-acc-sum::-webkit-details-marker { display: none; }
+.g-acc-sum:hover { background: var(--brand-soft); }
+.g-acc-sum-l { display: flex; align-items: center; gap: 9px; }
+.g-acc-sum svg:last-child { color: var(--muted); transition: transform .2s var(--ease); flex-shrink: 0; }
+.g-acc[open] .g-acc-sum svg:last-child { transform: rotate(90deg); }
+.g-acc-body { padding: 2px 16px 16px; }
+.g-acc-body .g-prose { margin-bottom: 0; }
+
+/* medication picker chips — switch which prescribed medication's guide shows */
+.g-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.g-pick-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 15px; border-radius: var(--r-full);
+  border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--muted);
+  font-family: var(--font-head); font-weight: 600; font-size: 13.5px;
+  cursor: pointer; transition: all .15s var(--ease);
+}
+.g-pick-chip:hover { border-color: var(--primary); color: var(--gold-bronze); }
+.g-pick-chip.on {
+  border-color: var(--brand); color: #fff;
+  background: linear-gradient(180deg, #34461F, var(--brand));
+  box-shadow: var(--inset-top-highlight), 0 2px 6px rgba(23,32,15,.22);
+}
 @media print {
   body * { visibility: hidden; }
   .guide, .guide * { visibility: visible; }

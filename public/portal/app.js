@@ -127,10 +127,19 @@ function paint() {
 }
 
 // ── phase engine ─────────────────────────────────────────────────
-function currentPhase() {
-  const plan = activePlan();
+// Doses logged against a specific medication (plan_id) — falls back to
+// doses with no plan_id when there's only ever been one active plan, so
+// existing single-medication patients keep working unchanged.
+function dosesForPlan(planId) {
+  const tagged = S.data.doses.filter((d) => d.plan_id === planId);
+  if (tagged.length) return tagged;
+  return S.data.doses.filter((d) => !d.plan_id);
+}
+
+function currentPhase(plan) {
+  plan = plan || activePlan();
   if (!plan) return null;
-  const lastDose = S.data.doses[0];
+  const lastDose = dosesForPlan(plan.id)[0];
   if (!lastDose) return null;
   const cycleHours = frequencyToHours(plan.frequency);
   const phases = cycleHours <= 24 ? S.me.presets.phasesDaily : S.me.presets.phasesWeekly;
@@ -142,7 +151,7 @@ function currentPhase() {
 }
 
 function nextDoseText(plan) {
-  const lastDose = S.data.doses[0];
+  const lastDose = dosesForPlan(plan.id)[0];
   if (!lastDose) return "Log your first dose to start tracking";
   const cycleHours = frequencyToHours(plan.frequency);
   if (String(plan.frequency).includes("needed")) return "Take only when needed, as instructed";
@@ -154,13 +163,73 @@ function nextDoseText(plan) {
   return `Next dose in ${days ? days + "d " : ""}${hrs}h — ${next.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}`;
 }
 
+// Rough estimated % of the medication still active in the body — a simple
+// illustrative model (fast absorption ramp, then first-order decay using
+// the medication's half-life if known), not a clinical PK calculation.
+function estimatedLevelPct(plan, ph) {
+  if (!ph) return 0;
+  const hl = plan.half_life_hours || ph.cycleHours * 0.6;
+  const rampHours = Math.min(6, ph.cycleHours * 0.05) || 1;
+  if (ph.hoursSince <= rampHours) return Math.round(92 * (ph.hoursSince / rampHours));
+  const decayH = ph.hoursSince - rampHours;
+  return Math.max(4, Math.round(92 * Math.pow(0.5, decayH / hl)));
+}
+
+// Interactive radial-progress illustration for the home screen: a ring
+// showing the estimated % of medication still active, the current phase
+// name/description, and a week-of-cycle caption.
+function phaseIllustrationHTML(plan, ph) {
+  const routeIco = routeIcon(plan.route);
+  if (!ph) {
+    return `
+    <div class="phase-illus" style="background:linear-gradient(135deg, var(--brand), var(--primary))">
+      <div class="phase-illus-ring">
+        <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="No dose logged yet">
+          <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/>
+          <g transform="translate(70,70)">${icon(routeIco, 34)}</g>
+        </svg>
+      </div>
+      <div class="phase-illus-body">
+        <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
+        <div class="phase-name">Ready to start</div>
+        <div class="phase-desc">Log your first dose and this illustration will track your cycle and estimated levels.</div>
+      </div>
+    </div>`;
+  }
+  const pct = estimatedLevelPct(plan, ph);
+  const R = 60, C = 2 * Math.PI * R;
+  const offset = C * (1 - pct / 100);
+  const weekOf = ph.cycleHours > 24 ? `Day ${Math.floor(ph.h / 24) + 1} of ${Math.round(ph.cycleHours / 24)}` : `Hour ${Math.floor(ph.h)} of ${ph.cycleHours}`;
+  return `
+  <div class="phase-illus" style="background:linear-gradient(135deg, ${ph.phase.color}, ${ph.phase.color}CC)">
+    <div class="phase-illus-ring">
+      <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="${pct}% of ${esc(plan.medication)} estimated still active">
+        <circle cx="70" cy="70" r="${R}" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="12"/>
+        <circle cx="70" cy="70" r="${R}" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round"
+          stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
+          transform="rotate(-90 70 70)" style="transition: stroke-dashoffset .6s var(--ease)"/>
+        <text x="70" y="65" text-anchor="middle" font-size="26" font-weight="800" fill="#fff" font-family="var(--font-head)">${pct}%</text>
+        <text x="70" y="84" text-anchor="middle" font-size="10.5" fill="rgba(255,255,255,.85)">in system</text>
+      </svg>
+    </div>
+    <div class="phase-illus-body">
+      <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${weekOf}</div>
+      <div class="phase-name">${esc(ph.phase.name)}</div>
+      <div class="phase-desc">${esc(ph.phase.desc)}</div>
+      <div class="phase-track">${ph.phases.map((_, i) => `<div class="phase-seg ${i <= ph.idx ? "done" : ""}"></div>`).join("")}</div>
+      <div class="phase-meta"><span>${esc(nextDoseText(plan))}</span></div>
+    </div>
+  </div>`;
+}
+
 // ── home ─────────────────────────────────────────────────────────
 function paintHome(v) {
   const p = S.me.patient;
-  const plan = activePlan();
+  const active = S.me.plans.filter((pl) => pl.status === "active");
+  const primary = active.find((pl) => pl.category === "glp1") || active[0] || null;
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
-  const ph = currentPhase();
+  const ph = primary ? currentPhase(primary) : null;
   const weights = S.data.checkins.filter((c) => c.weight_kg != null);
   const lastCheckin = S.data.checkins[0];
 
@@ -170,37 +239,29 @@ function paintHome(v) {
     <div class="sub">${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</div>
   </div>
 
-  ${!plan ? `
+  ${!primary ? `
   <div class="list-card card-pad empty">${icon("file", 34)}
     <div class="empty-title">No treatment plan yet</div>
     <p>Your doctor hasn't published a guide for you yet. It will appear here as soon as it's ready.</p>
-  </div>` : ph ? `
-  <div class="phase-card" style="background:linear-gradient(135deg, ${ph.phase.color}, ${ph.phase.color}CC)">
-    <div class="phase-lbl">Current phase · ${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""}</div>
-    <div class="phase-name">${esc(ph.phase.name)}</div>
-    <div class="phase-desc">${esc(ph.phase.desc)}</div>
-    <div class="phase-track">${ph.phases.map((_, i) => `<div class="phase-seg ${i <= ph.idx ? "done" : ""}"></div>`).join("")}</div>
-    <div class="phase-meta"><span>${esc(nextDoseText(plan))}</span></div>
-  </div>` : `
-  <div class="phase-card" style="background:linear-gradient(135deg, var(--brand), var(--primary))">
-    <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
-    <div class="phase-name">Ready to start</div>
-    <div class="phase-desc">Log your first dose and this card will track where you are in each cycle.</div>
-  </div>`}
+  </div>` : phaseIllustrationHTML(primary, ph)}
 
   <div class="qa-grid">
-    <button class="qa" id="qa-dose"><span class="qa-ico" style="background:var(--primary-soft);color:var(--primary)">${icon(plan ? routeIcon(plan.route) : "syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Nothing logged yet"}</span></button>
+    <button class="qa" id="qa-dose"><span class="qa-ico" style="background:var(--primary-soft);color:var(--primary)">${icon(primary ? routeIcon(primary.route) : "syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Nothing logged yet"}</span></button>
     <button class="qa" id="qa-checkin"><span class="qa-ico" style="background:var(--accent-soft);color:var(--accent)">${icon("clipboard", 20)}</span><b>Daily check-in</b><span>${lastCheckin ? "Last: " + fmtDate(lastCheckin.date) : "Tell us how you feel"}</span></button>
-    <button class="qa" id="qa-guide"><span class="qa-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("book", 20)}</span><b>My guide</b><span>${plan ? esc(plan.medication) : "Not published yet"}</span></button>
+    <button class="qa" id="qa-guide"><span class="qa-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("book", 20)}</span><b>My guide</b><span>${active.length ? active.length + " medication" + (active.length > 1 ? "s" : "") : "Not published yet"}</span></button>
     <button class="qa" id="qa-msg"><span class="qa-ico" style="background:var(--violet-soft);color:var(--violet)">${icon("message", 20)}</span><b>Message doctor</b><span>${esc(S.me.doctorName)}</span></button>
   </div>
 
-  ${plan ? howToCardHTML(plan) : ""}
+  ${active.length ? `
+  <div class="list-card">
+    <div class="list-head"><h3>${icon("layers", 18)} Your medications</h3><span class="badge badge-teal">${active.length}</span></div>
+    ${active.map((pl) => medRowHTML(pl)).join("")}
+  </div>` : ""}
 
-  ${plan && plan.next_followup ? `
+  ${primary && primary.next_followup ? `
   <div class="list-card card-pad" style="display:flex;gap:12px;align-items:center">
     <span class="qa-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("calendar", 20)}</span>
-    <div><b style="font-family:var(--font-head);font-size:14.5px">Follow-up due ${esc(fmtDate(plan.next_followup))}</b>
+    <div><b style="font-family:var(--font-head);font-size:14.5px">Follow-up due ${esc(fmtDate(primary.next_followup))}</b>
     <div style="font-size:12.5px;color:var(--muted)">Your doctor will review your dose and progress.</div></div>
   </div>` : ""}
 
@@ -210,36 +271,49 @@ function paintHome(v) {
     <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#283618", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
-  const howBtn = v.querySelector("#howto-guide");
-  if (howBtn) howBtn.addEventListener("click", () => { S.tab = "guide"; paint(); });
-  v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; paint(); });
+  v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; S.logPlanId = primary ? primary.id : null; paint(); });
   v.querySelector("#qa-checkin").addEventListener("click", () => { S.tab = "log"; S.logMode = "checkin"; paint(); });
   v.querySelector("#qa-guide").addEventListener("click", () => { S.tab = "guide"; paint(); });
   v.querySelector("#qa-msg").addEventListener("click", () => { S.tab = "messages"; paint(); });
+
+  v.querySelectorAll("[data-med-guide]").forEach((b) => b.addEventListener("click", () => {
+    S.guidePlanId = Number(b.dataset.medGuide); S.tab = "guide"; paint();
+  }));
+  v.querySelectorAll("[data-med-log]").forEach((b) => b.addEventListener("click", () => {
+    S.logPlanId = Number(b.dataset.medLog); S.tab = "log"; S.logMode = "dose"; paint();
+  }));
+  v.querySelectorAll("[data-med-finish]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm(`Tell ${S.me.doctorName} you've finished this medication and need a refill?`)) return;
+    await api("POST", `/api/portal/plans/${b.dataset.medFinish}/finished`, {});
+    S.me = await api("GET", "/api/portal/me");
+    toast("Your doctor has been notified to arrange a refill.");
+    paint();
+  }));
 }
 
-// "Your dose & how to take it" card — the prescribed dose plus the
-// HOW TO INJECT / TAKE / USE window from the standard medication guide.
-function howToCardHTML(plan) {
-  const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
-  const how = content && content.sections.find((s) => /^HOW TO /i.test(s.head));
+// One row per active medication on the home screen — dose/frequency at a
+// glance, plus quick links to that medication's own guide, its own dose
+// log, and a "finished this medication" flag for the doctor to reorder.
+function medRowHTML(pl) {
   return `
-  <div class="list-card">
-    <div class="list-head"><h3>${icon(routeIcon(plan.route), 18)} Your dose &amp; how to take it</h3></div>
-    <div class="card-pad" style="padding-top:6px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:${how ? "12px" : "0"}">
-        ${plan.dose ? `<span class="badge badge-teal" style="font-size:13px;padding:6px 12px">${esc(plan.dose)}</span>` : ""}
-        <span class="badge badge-gray" style="font-size:13px;padding:6px 12px">${esc(plan.frequency)}</span>
-        ${plan.quantity && plan.quantity > 1 ? `<span class="badge badge-gray" style="font-size:13px;padding:6px 12px">× ${esc(plan.quantity)}</span>` : ""}
-      </div>
-      ${how ? `
-      <div style="font-size:13.5px;line-height:1.6">${guideProse(how.body)}</div>
-      <button class="btn btn-secondary btn-sm" id="howto-guide" style="margin-top:12px">${icon("book", 15)} Open my full guide</button>` : ""}
+  <div class="med-row">
+    <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon(routeIcon(pl.route), 16)}</div>
+    <div class="pt-info">
+      <div class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</div>
+      <div class="pt-meta">${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</div>
+    </div>
+    <div class="med-row-actions">
+      <button type="button" class="btn btn-ghost btn-sm" data-med-guide="${pl.id}" aria-label="Open ${esc(pl.medication)} guide">${icon("book", 14)}</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-med-log="${pl.id}" aria-label="Log a dose of ${esc(pl.medication)}">${icon(routeIcon(pl.route), 14)}</button>
+      ${!pl.needs_refill ? `<button type="button" class="btn btn-ghost btn-sm" data-med-finish="${pl.id}" aria-label="Report ${esc(pl.medication)} finished">${icon("checkCircle", 14)}</button>` : ""}
     </div>
   </div>`;
 }
 
 // ── guide ────────────────────────────────────────────────────────
+// Every active medication is its own full guide, selectable via a chip
+// picker — "Also on your program" summaries were replaced by this so a
+// patient can open any prescribed medication's complete guide on its own.
 function paintGuide(v) {
   injectGuideCss();
   const active = S.me.plans.filter((p) => p.status === "active");
@@ -248,12 +322,16 @@ function paintGuide(v) {
     v.innerHTML = `<div class="list-card card-pad empty">${icon("book", 34)}<div class="empty-title">No guide yet</div><p>Your personalised treatment guide will appear here once your doctor publishes it.</p></div>`;
     return;
   }
+  const primary = plans.find((p) => p.category === "glp1") || plans[0];
+  const activeId = S.guidePlanId && plans.some((p) => p.id === S.guidePlanId) ? S.guidePlanId : primary.id;
   const others = S.me.plans.filter((x) => !plans.includes(x));
+  const renderOne = (plan) => buildGuide(plan, S.me.patient, S.me.doctorName);
   v.innerHTML = `
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Print / Save PDF</button>
   </div>
-  ${buildComboGuide(plans, S.me.patient, S.me.doctorName)}
+  ${guidePickerHTML(plans, activeId)}
+  <div id="g-active-guide">${renderOne(plans.find((p) => p.id === activeId))}</div>
   ${others.length ? `
   <div class="list-card" style="margin-top:16px">
     <div class="list-head"><h3>${icon("layers", 18)} Previous programs</h3></div>
@@ -264,12 +342,15 @@ function paintGuide(v) {
         <div style="color:var(--muted);font-size:12.5px">Started ${esc(fmtDate(o.created_at))}</div>
       </div>`).join("")}
   </div>` : ""}`;
+  wireGuidePicker(v, plans, renderOne, activeId);
+  v.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
   v.querySelector("#g-print").addEventListener("click", () => window.print());
 }
 
 // ── log (dose + check-in) ────────────────────────────────────────
 function paintLog(v) {
-  const plan = activePlan();
+  const active = S.me.plans.filter((pl) => pl.status === "active");
+  const plan = active.find((pl) => pl.id === S.logPlanId) || active.find((pl) => pl.category === "glp1") || active[0] || null;
   const mode = S.logMode || "dose";
   const sites = ["Abdomen L", "Abdomen R", "Thigh L", "Thigh R", "Arm L", "Arm R"];
   const now = new Date();
@@ -288,9 +369,18 @@ function paintLog(v) {
   const body = v.querySelector("#log-body");
 
   if (mode === "dose") {
+    // Different medications can be logged on the same day, so when more
+    // than one is active the patient picks which one this entry is for.
+    const medPicker = active.length > 1 ? `
+      <div class="field"><label>Which medication?</label>
+        <div class="chip-row" id="ds-med-picker">
+          ${active.map((pl) => `<button type="button" class="chip ${plan && pl.id === plan.id ? "on" : ""}" data-medpick="${pl.id}">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}</button>`).join("")}
+        </div>
+      </div>` : "";
     body.innerHTML = `
     <form class="list-card card-pad" id="dose-form">
-      ${plan ? `<div class="metric-strip" style="margin-top:0"><div class="metric"><b>${esc(plan.medication)}</b>${esc(plan.dose ? plan.dose + " · " : "")}${esc(plan.frequency)}</div></div>` : ""}
+      ${medPicker}
+      ${plan && active.length <= 1 ? `<div class="metric-strip" style="margin-top:0"><div class="metric"><b>${esc(plan.medication)}</b>${esc(plan.dose ? plan.dose + " · " : "")}${esc(plan.frequency)}</div></div>` : ""}
       <div class="field"><label for="ds-when">When</label><input class="input" id="ds-when" type="datetime-local" value="${localDT}" max="${localDT}"></div>
       <div class="field"><label for="ds-dose">Dose</label><input class="input" id="ds-dose" value="${esc(plan ? plan.dose : "")}" placeholder="e.g. 2.5mg"></div>
       ${plan && plan.route === "injection" ? `
@@ -304,13 +394,20 @@ function paintLog(v) {
     ${S.data.doses.length ? `
     <div class="list-card">
       <div class="list-head"><h3>${icon("clock", 18)} Recent doses</h3></div>
-      ${S.data.doses.slice(0, 5).map((d) => `
+      ${S.data.doses.slice(0, 5).map((d) => {
+        const medName = (S.me.plans.find((pl) => pl.id === d.plan_id) || {}).medication;
+        return `
         <div style="padding:11px 16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13.5px">
-          <span><b>${esc(d.dose || "Dose")}</b>${d.site ? ` · ${esc(d.site)}` : ""}</span>
+          <span>${medName ? `<b>${esc(medName)}</b> ` : ""}${esc(d.dose || "Dose")}${d.site ? ` · ${esc(d.site)}` : ""}</span>
           <span style="color:var(--muted)">${esc(fmtDate(d.taken_at, true))}</span>
-        </div>`).join("")}
+        </div>`;
+      }).join("")}
     </div>` : ""}`;
 
+    body.querySelectorAll("[data-medpick]").forEach((b) => b.addEventListener("click", () => {
+      S.logPlanId = Number(b.dataset.medpick);
+      paintLog(v);
+    }));
     let site = "";
     body.querySelectorAll("[data-site]").forEach((b) => b.addEventListener("click", () => {
       body.querySelectorAll("[data-site]").forEach((x) => x.classList.remove("on"));
@@ -323,13 +420,14 @@ function paintLog(v) {
       btn.classList.add("loading");
       try {
         await api("POST", "/api/portal/doses", {
+          planId: plan ? plan.id : undefined,
           takenAt: new Date(body.querySelector("#ds-when").value).toISOString(),
           dose: body.querySelector("#ds-dose").value,
           site,
           notes: body.querySelector("#ds-notes").value,
         });
         S.data = await api("GET", "/api/portal/data");
-        toast("Dose saved — nice work!");
+        toast(`${plan ? plan.medication + " dose" : "Dose"} saved — nice work!`);
         S.tab = "home";
         paint();
       } catch (ex) { toast(ex.message, "bad"); }
