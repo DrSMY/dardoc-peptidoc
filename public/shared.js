@@ -97,27 +97,38 @@ function routeIcon(route) {
 // used where a plain single-color icon feels too thin (patient portal
 // medication rows, phase card). Not a photo of any real product; drawn
 // locally so nothing is fetched or downloaded from a third party.
-// Real product photos (sourced from DarDoc's own site, with permission,
-// for the medications DarDoc actually retails/photographs). Peptides are
-// compounded in generic unlabelled vials with no official product photo,
-// so they keep the drawn illustration below.
+// Real product photos (manufacturer/pharmacy photos of the exact branded
+// product) for the medications that have one. Peptides are compounded in
+// generic unlabelled vials with no official brand photo, so they use the
+// shared PEPTIDE_VIAL_PHOTO below instead.
 const MED_PHOTOS = {
   "Wegovy": "/med-images/wegovy-pen.jpg",
   "Wegovy Pill": "/med-images/wegovy-pill.jpg",
   "Mounjaro": "/med-images/mounjaro-pen.jpg",
 };
+const PEPTIDE_VIAL_PHOTO = "/med-images/peptide-vial.png";
 
 // Real photo when we have one for this exact medication, else null.
-function medPhoto(medication) {
-  return MED_PHOTOS[medication] || null;
+// `category` (a plan's "peptide"/"glp1"/"custom" field) decides the vial
+// fallback — passing it is optional but recommended wherever a plan/category
+// is available, since it doesn't depend on any preset list being loaded.
+function medPhoto(medication, category) {
+  if (MED_PHOTOS[medication]) return MED_PHOTOS[medication];
+  if (category === "peptide") return PEPTIDE_VIAL_PHOTO;
+  if (typeof S !== "undefined" && S && S.presets && S.presets.peptideInfo && S.presets.peptideInfo[medication]) {
+    return PEPTIDE_VIAL_PHOTO;
+  }
+  return null;
 }
 
 // <img> or illustration for a medication card — prefers the real product
 // photo, falls back to the drawn illustration for the same route.
-function medVisualHTML(medication, route, size = 48) {
-  const photo = medPhoto(medication);
+function medVisualHTML(medication, route, size = 48, category) {
+  const photo = medPhoto(medication, category);
   if (photo) {
-    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:cover;border-radius:${Math.round(size * 0.22)}px;background:#0B0B0B">`;
+    const fit = photo === PEPTIDE_VIAL_PHOTO ? "contain" : "cover";
+    const bg = photo === PEPTIDE_VIAL_PHOTO ? "#F5F3EA" : "#0B0B0B";
+    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:${fit};border-radius:${Math.round(size * 0.22)}px;background:${bg}">`;
   }
   return productIllustration(route, size);
 }
