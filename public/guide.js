@@ -165,16 +165,19 @@ function buildGuide(plan, patient, doctorName) {
         <h2>${esc(patient.title ? patient.title + " " : "")}${esc(patient.name)}</h2>
         <div class="g-doc">by ${esc(doctorName || "your doctor")}</div>
       </div>
-      <div class="g-med-pill">${icon(routeIco, 18)} ${esc(plan.medication)}${plan.dose ? ` · ${esc(plan.dose)}` : ""}</div>
+      <div class="g-med-pill">${(() => {
+        const photo = typeof medPhoto === "function" ? medPhoto(plan.medication, plan.category) : null;
+        return photo ? `<img src="${photo}" alt="" class="g-med-pill-photo">` : icon(routeIco, 18);
+      })()} ${esc(plan.medication)}${plan.dose ? ` · ${esc(plan.dose)}` : ""}</div>
     </section>
 
-    <section class="g-sec">
+    <section class="g-sec g-sec-program">
       <h3>${icon("clipboard", 18)} Your program</h3>
       ${(() => {
         const photo = typeof medPhoto === "function" ? medPhoto(plan.medication, plan.category) : null;
         if (!photo) return "";
         const vial = typeof PEPTIDE_VIAL_PHOTO !== "undefined" && photo === PEPTIDE_VIAL_PHOTO;
-        return `<img src="${photo}" alt="${esc(plan.medication)}" class="g-med-photo${vial ? " g-med-photo-vial" : ""}">`;
+        return `<img src="${photo}" alt="${esc(plan.medication)}" class="g-med-photo-overlay${vial ? " g-med-photo-vial" : ""}">`;
       })()}
       <div class="g-facts">
         <div class="g-fact"><div class="g-fact-lbl">Medication</div><div class="g-fact-val">${esc(plan.medication)}</div></div>
@@ -251,11 +254,24 @@ const GUIDE_CSS = `
 .g-hello { font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
 .g-patient h2 { font-size: 24px; margin: 2px 0; }
 .g-doc { color: var(--muted); font-size: 14px; }
-.g-med-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-family: var(--font-head); padding: 10px 18px; border-radius: var(--r-full); font-size: 15px; }
+.g-med-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-family: var(--font-head); padding: 8px 18px 8px 8px; border-radius: var(--r-full); font-size: 15px; }
+.g-med-pill-photo { width: 30px; height: 30px; border-radius: 50%; object-fit: contain; background: #F0EEE2; padding: 3px; box-sizing: border-box; flex-shrink: 0; box-shadow: var(--inset-top-highlight); }
 .g-sec { padding: 20px 22px 4px; }
 .g-sec h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--brand); margin-bottom: 12px; }
-.g-med-photo { display: block; max-width: 220px; width: 100%; height: auto; border-radius: var(--r-md); background: #0B0B0B; margin-bottom: 14px; box-shadow: var(--shadow-sm); }
-.g-med-photo-vial { background: #F5F3EA; padding: 10px; max-width: 160px; }
+.g-sec-program { position: relative; }
+/* Small real-product photo, overlaid on the card's top-right corner so it
+   sits beside the medication name/facts without ever covering that text —
+   the facts grid gets top clearance so it never renders underneath it. */
+.g-med-photo-overlay {
+  position: absolute; top: 18px; right: 22px; width: 78px; height: 78px;
+  object-fit: contain; border-radius: var(--r-md); background: #F0EEE2;
+  padding: 8px; box-sizing: border-box; box-shadow: var(--shadow-sm); z-index: 1;
+}
+.g-sec-program .g-facts { padding-top: 92px; }
+@media (max-width: 420px) {
+  .g-med-photo-overlay { width: 60px; height: 60px; top: 14px; right: 16px; padding: 6px; }
+  .g-sec-program .g-facts { padding-top: 72px; }
+}
 .g-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .g-fact { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 14px; }
 .g-fact-lbl { font-size: 11.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }

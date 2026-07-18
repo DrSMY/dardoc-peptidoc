@@ -102,9 +102,9 @@ function routeIcon(route) {
 // generic unlabelled vials with no official brand photo, so they use the
 // shared PEPTIDE_VIAL_PHOTO below instead.
 const MED_PHOTOS = {
-  "Wegovy": "/med-images/wegovy-pen.jpg",
-  "Wegovy Pill": "/med-images/wegovy-pill.jpg",
-  "Mounjaro": "/med-images/mounjaro-pen.jpg",
+  "Wegovy": "/med-images/wegovy-pen.png",
+  "Wegovy Pill": "/med-images/wegovy-pill.png",
+  "Mounjaro": "/med-images/mounjaro-pen.png",
 };
 const PEPTIDE_VIAL_PHOTO = "/med-images/peptide-vial.png";
 
@@ -122,13 +122,14 @@ function medPhoto(medication, category) {
 }
 
 // <img> or illustration for a medication card — prefers the real product
-// photo, falls back to the drawn illustration for the same route.
+// photo, falls back to the drawn illustration for the same route. All real
+// photos have a genuinely transparent background, so they're shown with
+// object-fit:contain on the app's own card-tint background (no cropping,
+// no photo backdrop clashing with the surrounding UI).
 function medVisualHTML(medication, route, size = 48, category) {
   const photo = medPhoto(medication, category);
   if (photo) {
-    const fit = photo === PEPTIDE_VIAL_PHOTO ? "contain" : "cover";
-    const bg = photo === PEPTIDE_VIAL_PHOTO ? "#F5F3EA" : "#0B0B0B";
-    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:${fit};border-radius:${Math.round(size * 0.22)}px;background:${bg}">`;
+    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:contain;border-radius:${Math.round(size * 0.22)}px;background:#F0EEE2;padding:${Math.round(size * 0.08)}px;box-sizing:border-box">`;
   }
   return productIllustration(route, size);
 }
