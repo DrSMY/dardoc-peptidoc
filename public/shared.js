@@ -151,7 +151,7 @@ function timeAgo(iso) {
 // points: [{x: Date|number, y: number, label}], opts: {height, color, unit}
 function lineChart(points, opts = {}) {
   const H = opts.height || 180, W = 600, PAD = { t: 16, r: 14, b: 26, l: 40 };
-  const color = opts.color || "#4E551F";
+  const color = opts.color || "#283618";
   if (!points || points.length === 0) return "";
   const xs = points.map((p) => +new Date(p.x));
   const ys = points.map((p) => p.y);
@@ -168,14 +168,14 @@ function lineChart(points, opts = {}) {
   for (let i = 0; i <= 3; i++) {
     const yv = yMin + ((yMax - yMin) * i) / 3;
     const yy = py(yv);
-    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E7E3CD" stroke-width="1"/>`;
-    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#96927A">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
+    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E5E2D6" stroke-width="1"/>`;
+    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#8B8C78">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
   }
   // x labels: first, middle, last
   const xIdx = points.length > 2 ? [0, Math.floor(points.length / 2), points.length - 1] : points.map((_, i) => i);
   let xLabels = "";
   for (const i of [...new Set(xIdx)]) {
-    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#96927A">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
+    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#8B8C78">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
   }
   const dots = points.length <= 40
     ? points.map((p, i) => `<circle cx="${px(xs[i])}" cy="${py(p.y)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${esc(fmtDate(String(p.x)))} — ${p.y}${esc(opts.unit || "")}</title></circle>`).join("")
@@ -209,10 +209,10 @@ function stackedBarChart(buckets, series, opts = {}) {
       yCursor -= h;
       bars += `<rect class="bar-rise" style="animation-delay:${(i * 22)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yCursor.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2.5" fill="${sr.color}"><title>${esc(b.label)} — ${esc(sr.label)}: ${v}</title></rect>`;
     });
-    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#96927A">${esc(b.label)}</text>`;
+    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#8B8C78">${esc(b.label)}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "Trend chart")}">
-    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E7E3CD" stroke-width="1"/>
+    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E5E2D6" stroke-width="1"/>
     ${bars}${xLabels}
   </svg>`;
 }
@@ -235,10 +235,10 @@ function donutChart(distribution, opts = {}) {
     offset += len;
   });
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:${size}px;height:auto;display:block;margin:0 auto" role="img" aria-label="${esc(opts.aria || "Distribution chart")}">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EEEADA" stroke-width="${stroke}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EBE9DE" stroke-width="${stroke}"/>
     ${segs}
-    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#2B2A1C)">${total}</text>
-    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#96927A">total</text>
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#20231E)">${total}</text>
+    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#8B8C78">total</text>
   </svg>`;
 }
 

@@ -271,8 +271,8 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#4E551F", icon: "scale" },      // rich olive (brand)
-  peptide: { label: "Peptides", color: "#B08A28", icon: "droplet" },           // rich gold
+  glp1: { label: "GLP-1 / Weight loss", color: "#283618", icon: "scale" },      // rich olive (brand)
+  peptide: { label: "Peptides", color: "#C6A15B", icon: "droplet" },           // rich gold
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
 
@@ -362,10 +362,10 @@ function practiceStatsHTML(d) {
       <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Top prescribed medications</div>
       ${medRows.map((m) => {
         const pct = Math.round((m.n / medTotal) * 100);
-        const color = (CATEGORY_META[m.category] || {}).color || "#8AA09D";
+        const color = (CATEGORY_META[m.category] || {}).color || "#8B8C78";
         return `<div style="margin-bottom:9px">
           <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${esc(m.medication)}</span><b>${m.n} <span class="hint">(${pct}%)</span></b></div>
-          <div style="height:6px;border-radius:4px;background:#EDF2F1;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div></div>
+          <div style="height:6px;border-radius:4px;background:#ECEBE3;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div></div>
         </div>`;
       }).join("")}
     </div>` : ""}
@@ -521,7 +521,7 @@ async function viewPatient(id) {
 
           <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
-            ${weights.length > 1 ? lineChart(weights, { color: "#4E551F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
+            ${weights.length > 1 ? lineChart(weights, { color: "#283618", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
 
           <div class="card card-pad">

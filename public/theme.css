@@ -1,38 +1,56 @@
-/* DoCare design system — preventive health & wellness, olive + gold */
+/* DoCare design system — Clinical Olive & Gold: clinical trust, preventive
+   healthcare, quiet exclusivity. Deep olive carries structure & navigation;
+   refined gold is reserved for premium accents, active states and fine
+   decorative detail; warm ivory is the resting background. */
 @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  --brand: #4E551F;          /* DoCare olive (from logo, tuned for contrast) */
-  --brand-strong: #23260C;
-  --brand-soft: #EFEFDC;
-  --primary: #B08A28;        /* rich gold — secondary accent, links, focus */
-  --primary-soft: #FAF0D8;
-  --accent: #7C9A46;         /* olive-lime — success / active states */
-  --accent-soft: #EEF3E1;
-  --amber: #AD6A15;
-  --amber-soft: #FAEEDC;
-  --danger: #C0392B;
-  --danger-soft: #F8E7E3;
-  --violet: #6C4FB0;
-  --violet-soft: #EFEAF9;
-  --gold-deep: #7A5C16;      /* deep bronze-gold — super admin surfaces */
-  --gold-deep-strong: #5C4510;
+  /* ── Clinical Olive & Gold palette ─────────────────────── */
+  --deep-olive: #283618;
+  --sage: #718355;
+  --refined-gold: #C6A15B;
+  --champagne-gold: #E1C784;
+  --warm-ivory: #F8F7F2;
+  --charcoal: #20231E;
+  --olive-shadow: #17200F;   /* lighting-direction reference: darkest olive */
+  --gold-bronze: #8F6D32;    /* lighting-direction reference: dark gold shadow */
 
-  --bg: #F7F4E9;
+  --brand: var(--deep-olive);        /* dominant: nav, primary buttons, headings */
+  --brand-strong: var(--olive-shadow);
+  --brand-soft: #E7E9DD;             /* deep-olive tinted onto warm-ivory */
+  --primary: var(--refined-gold);    /* secondary accent — active states, links, focus */
+  --primary-soft: #F5EBD4;           /* champagne tinted onto warm-ivory */
+  --accent: var(--sage);             /* secondary elements — success / active */
+  --accent-soft: #EAEEE3;
+  --amber: #9C6B1F;
+  --amber-soft: #F6EAD4;
+  --danger: #B23B2E;
+  --danger-soft: #F7E5E1;
+  --violet: #6C4FB0;                 /* distinct accent reserved for the "custom" program category */
+  --violet-soft: #EFEAF9;
+  --gold-deep: var(--gold-bronze);   /* deep bronze-gold — super admin surfaces */
+  --gold-deep-strong: #6B5024;
+
+  --bg: var(--warm-ivory);
   --surface: #FFFFFF;
-  --border: #E5E1CB;
-  --border-strong: #CFC8A3;
-  --text: #2B2A1C;
-  --muted: #6C6A52;
-  --faint: #99957A;
+  --border: #E5E2D6;
+  --border-strong: #CFCAB4;
+  --text: var(--charcoal);
+  --muted: #5C5D4F;
+  --faint: #8B8C78;
 
   --font-head: 'Figtree', system-ui, sans-serif;
   --font-body: 'Noto Sans', system-ui, sans-serif;
 
   --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
-  --shadow-sm: 0 1px 2px rgba(43,42,28,.06);
-  --shadow-md: 0 2px 8px rgba(43,42,28,.08), 0 1px 2px rgba(43,42,28,.05);
-  --shadow-lg: 0 12px 32px rgba(43,42,28,.16);
+
+  /* ── Depth system — shadows tinted with deep olive, never pure black ─── */
+  --shadow-sm: 0 1px 2px rgba(23,32,15,.06), 0 1px 1px rgba(23,32,15,.04);
+  --shadow-md: 0 4px 12px rgba(40,54,24,.08), 0 16px 40px rgba(40,54,24,.12);
+  --shadow-lg: 0 10px 20px rgba(23,32,15,.16), 0 30px 70px rgba(23,32,15,.20);
+  --shadow-gold: 0 6px 18px rgba(198,161,91,.22), 0 0 32px rgba(225,199,132,.12);
+  --inset-top-highlight: inset 0 1px 0 rgba(255,255,255,.5);
+  --inset-tactile: inset 2px 2px 5px rgba(255,255,255,.20), inset -3px -3px 7px rgba(23,32,15,.14);
   --ease: cubic-bezier(.2,.7,.3,1);
 }
 
@@ -57,7 +75,7 @@ svg { display: block; flex-shrink: 0; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-/* ── buttons ─────────────────────────────────────────────── */
+/* ── buttons — tactile, deep 3D surfaces lit from the upper left ──── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 44px; padding: 10px 20px;
@@ -65,24 +83,46 @@ svg { display: block; flex-shrink: 0; }
   font-family: var(--font-head); font-weight: 600; font-size: 15px;
   transition: background .18s var(--ease), transform .12s var(--ease), box-shadow .18s var(--ease);
   text-decoration: none;
+  position: relative;
 }
-.btn:active { transform: scale(.98); }
+.btn:active { transform: scale(.98) translateY(1px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary { background: var(--brand); color: #fff; }
-.btn-primary:hover { background: var(--brand-strong); box-shadow: var(--shadow-md); }
-.btn-accent { background: var(--accent); color: #fff; }
-.btn-accent:hover { background: #116232; }
-.btn-secondary { background: var(--brand-soft); color: var(--brand); }
-.btn-secondary:hover { background: #E4E4CB; }
+.btn-primary {
+  background: linear-gradient(180deg, #34461F 0%, var(--brand) 55%, var(--brand-strong) 100%);
+  color: #fff;
+  box-shadow: var(--inset-top-highlight), 0 2px 4px rgba(23,32,15,.18), 0 8px 18px rgba(23,32,15,.22);
+}
+.btn-primary:hover { box-shadow: var(--inset-top-highlight), 0 3px 6px rgba(23,32,15,.22), 0 12px 26px rgba(23,32,15,.28); }
+.btn-primary:active { box-shadow: inset 0 2px 5px rgba(23,32,15,.35); }
+.btn-accent {
+  background: linear-gradient(180deg, #82946A 0%, var(--accent) 55%, #5C6B41 100%);
+  color: #fff;
+  box-shadow: var(--inset-top-highlight), 0 2px 4px rgba(23,32,15,.14), 0 8px 18px rgba(40,54,24,.18);
+}
+.btn-accent:hover { box-shadow: var(--inset-top-highlight), 0 3px 6px rgba(23,32,15,.18), 0 12px 24px rgba(40,54,24,.22); }
+.btn-secondary {
+  background: var(--brand-soft); color: var(--brand-strong);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--inset-top-highlight);
+}
+.btn-secondary:hover { background: #DCDFCC; border-color: var(--brand); }
 .btn-ghost { background: transparent; color: var(--muted); }
 .btn-ghost:hover { background: var(--brand-soft); color: var(--brand); }
 .btn-danger { background: var(--danger-soft); color: var(--danger); }
-.btn-danger:hover { background: #F5D7D7; }
+.btn-danger:hover { background: #F0CFC8; }
 .btn-sm { min-height: 36px; padding: 6px 14px; font-size: 13.5px; border-radius: var(--r-sm); }
 .btn-block { width: 100%; }
 .btn .spin { display: none; }
 .btn.loading .spin { display: block; }
 .btn.loading .btn-label { opacity: .6; }
+
+/* premium gold action — reserved for standout CTAs (e.g. publish/send) */
+.btn-gold {
+  background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--refined-gold) 55%, var(--gold-bronze) 100%);
+  color: var(--olive-shadow);
+  box-shadow: var(--inset-top-highlight), var(--shadow-gold);
+}
+.btn-gold:hover { box-shadow: var(--inset-top-highlight), 0 8px 22px rgba(198,161,91,.3), 0 0 40px rgba(225,199,132,.18); }
 
 .spin {
   width: 16px; height: 16px; border-radius: 50%;
@@ -91,10 +131,10 @@ svg { display: block; flex-shrink: 0; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── cards & layout ──────────────────────────────────────── */
+/* ── cards & layout — layered elevation with an upper-edge highlight ── */
 .card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-sm), var(--inset-top-highlight);
 }
 .card-pad { padding: 20px; }
 .card-title {
@@ -128,13 +168,13 @@ textarea.input { resize: vertical; min-height: 84px; }
   padding: 3px 10px; border-radius: var(--r-full);
   font-size: 12px; font-weight: 700; letter-spacing: .02em;
 }
-.badge-teal { background: var(--brand-soft); color: var(--brand); }
-.badge-cyan { background: var(--primary-soft); color: var(--primary); }
-.badge-green { background: var(--accent-soft); color: var(--accent); }
+.badge-teal { background: var(--brand-soft); color: var(--brand-strong); }
+.badge-cyan { background: var(--primary-soft); color: var(--gold-deep-strong); }
+.badge-green { background: var(--accent-soft); color: #4C5A3B; }
 .badge-amber { background: var(--amber-soft); color: var(--amber); }
 .badge-red { background: var(--danger-soft); color: var(--danger); }
 .badge-violet { background: var(--violet-soft); color: var(--violet); }
-.badge-gray { background: #EDF2F1; color: var(--muted); }
+.badge-gray { background: #ECEBE3; color: var(--muted); }
 
 .chip {
   display: inline-flex; align-items: center; justify-content: center;
@@ -142,10 +182,15 @@ textarea.input { resize: vertical; min-height: 84px; }
   border: 1.5px solid var(--border-strong); border-radius: var(--r-full);
   background: var(--surface); color: var(--muted);
   font-size: 13.5px; font-weight: 600;
+  box-shadow: var(--inset-top-highlight);
   transition: all .15s var(--ease);
 }
-.chip:hover { border-color: var(--primary); color: var(--primary); }
-.chip.on { border-color: var(--brand); background: var(--brand); color: #fff; }
+.chip:hover { border-color: var(--primary); color: var(--gold-bronze); }
+.chip.on {
+  border-color: var(--brand); color: #fff;
+  background: linear-gradient(180deg, #34461F, var(--brand));
+  box-shadow: var(--inset-top-highlight), 0 2px 6px rgba(23,32,15,.22);
+}
 .chip.on.warn { border-color: var(--amber); background: var(--amber); }
 .chip.on.bad { border-color: var(--danger); background: var(--danger); }
 
@@ -153,9 +198,11 @@ textarea.input { resize: vertical; min-height: 84px; }
 .avatar {
   display: flex; align-items: center; justify-content: center;
   width: 42px; height: 42px; border-radius: var(--r-full);
-  background: var(--brand-soft); color: var(--brand);
+  background: linear-gradient(160deg, var(--brand-soft), #DEE1CC);
+  color: var(--brand-strong);
   font-family: var(--font-head); font-weight: 700; font-size: 15px;
   flex-shrink: 0;
+  box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.1);
 }
 .divider { height: 1px; background: var(--border); margin: 16px 0; border: none; }
 
@@ -179,15 +226,17 @@ textarea.input { resize: vertical; min-height: 84px; }
 .toast.bad svg { color: #FCA5A5; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
 
-/* modal */
+/* modal — restrained glass: translucent ivory, thin champagne border */
 .modal-scrim {
   position: fixed; inset: 0; z-index: 900;
-  background: rgba(12,30,29,.5); backdrop-filter: blur(2px);
+  background: rgba(23,32,15,.5); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 16px;
   animation: fade-in .18s var(--ease);
 }
 .modal {
-  background: var(--surface); border-radius: var(--r-lg);
+  background: rgba(255,255,255,.88); backdrop-filter: blur(14px) saturate(1.05);
+  border: 1px solid rgba(225,199,132,.35);
+  border-radius: var(--r-lg);
   width: min(560px, 100%); max-height: 88vh; overflow-y: auto;
   box-shadow: var(--shadow-lg); padding: 24px;
   animation: modal-in .22s var(--ease);
@@ -209,19 +258,20 @@ textarea.input { resize: vertical; min-height: 84px; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
 .stat {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 16px 18px; box-shadow: var(--shadow-sm);
+  padding: 16px 18px; box-shadow: var(--shadow-sm), var(--inset-top-highlight);
 }
 .stat .stat-ico {
   width: 38px; height: 38px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center; margin-bottom: 10px;
+  box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.12);
 }
 .stat .stat-val { font-family: var(--font-head); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .stat .stat-lbl { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
 
 /* practice statistics (animated, interactive) */
-.pstat-tabs { display: flex; gap: 4px; background: #EDF2F1; padding: 3px; border-radius: 10px; }
+.pstat-tabs { display: flex; gap: 4px; background: var(--bg); padding: 3px; border-radius: 10px; box-shadow: var(--inset-tactile); }
 .pstat-tab { border: none; background: transparent; padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
-.pstat-tab.on { background: var(--brand); color: #fff; }
+.pstat-tab.on { background: var(--brand); color: #fff; box-shadow: var(--inset-top-highlight), 0 2px 5px rgba(23,32,15,.2); }
 .pstat-kpi { position: relative; overflow: hidden; }
 .pstat-kpi .trend-up { color: var(--accent); }
 .pstat-kpi .trend-down { color: var(--danger); }
@@ -247,7 +297,7 @@ textarea.input { resize: vertical; min-height: 84px; }
 .table-scroll { overflow-x: auto; }
 
 /* skeleton */
-.skel { border-radius: var(--r-md); background: linear-gradient(90deg, #EDEADA 25%, #F6F3E8 50%, #EDEADA 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+.skel { border-radius: var(--r-md); background: linear-gradient(90deg, #EBE9DE 25%, #F8F7F2 50%, #EBE9DE 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 /* ── entrance & polish animations ─────────────────────────── */
@@ -267,3 +317,27 @@ textarea.input { resize: vertical; min-height: 84px; }
   -webkit-background-clip: text; background-clip: text; color: transparent;
   animation: brand-shine 7s linear infinite;
 }
+
+/* ── depth utilities — glassmorphism, gold glow, raised surfaces ──── */
+/* Restrained glass panel: translucent ivory, thin champagne-gold border,
+   subtle blur. Never applied where it would reduce text legibility. */
+.glass-panel {
+  background: rgba(248,247,242,.72); backdrop-filter: blur(16px) saturate(1.1);
+  border: 1px solid rgba(225,199,132,.4);
+  box-shadow: var(--shadow-md), var(--inset-top-highlight);
+}
+/* Soft radial illumination behind a featured/premium element. */
+.gold-halo { position: relative; isolation: isolate; }
+.gold-halo::before {
+  content: ""; position: absolute; inset: -30%; z-index: -1; border-radius: inherit;
+  background: radial-gradient(closest-side, rgba(225,199,132,.28), transparent 70%);
+  pointer-events: none;
+}
+/* Gentle gold rim-light — reserved for selected premium/active elements. */
+.gold-rim { box-shadow: 0 0 0 1px rgba(225,199,132,.55), var(--shadow-gold); }
+/* Slightly raised icon badge (stat/timeline/activity icons). */
+.icon-raised {
+  box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.12);
+}
+/* Tactile inset surface — pressed/read-only inputs, code blocks. */
+.surface-inset { box-shadow: var(--inset-tactile); }

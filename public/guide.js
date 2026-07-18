@@ -204,8 +204,18 @@ function buildGuide(plan, patient, doctorName) {
 
 // Guide styles are injected once wherever the guide is shown.
 const GUIDE_CSS = `
-.guide { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
-.g-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px; background: linear-gradient(120deg, var(--brand), var(--primary)); color: #fff; }
+.guide { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-md); }
+.g-head {
+  position: relative; overflow: hidden;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px;
+  background: linear-gradient(135deg, var(--brand-strong), var(--brand) 55%, var(--gold-bronze) 130%);
+  color: #fff;
+}
+.g-head::before {
+  content: ""; position: absolute; inset: -40% -10% auto auto; width: 60%; height: 220%;
+  background: radial-gradient(closest-side, rgba(225,199,132,.22), transparent 70%);
+  pointer-events: none;
+}
 .g-brand { display: flex; gap: 12px; align-items: center; }
 .g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
 .g-brand-name { font-family: var(--font-head); font-weight: 800; font-size: 17px; }

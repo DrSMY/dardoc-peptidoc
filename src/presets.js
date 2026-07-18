@@ -188,20 +188,20 @@ const GLP1_ELIGIBILITY = {
 
 // Weekly pharmacokinetic phases shown on the patient dashboard (injectables)
 const PK_PHASES_WEEKLY = [
-  { name: "Dose Taken",    color: "#1E4C4E", range: [0, 6],     desc: "Medication administered. Absorption is beginning under the skin." },
-  { name: "Taking Effect", color: "#B98A1F", range: [6, 24],    desc: "Active absorption phase. You may begin to notice reduced hunger and appetite." },
-  { name: "Peak Action",   color: "#C96A2B", range: [24, 48],   desc: "Peak blood concentration. Maximum appetite suppression and best results window." },
-  { name: "Cruise",        color: "#2F6FAE", range: [48, 96],   desc: "Steady therapeutic level. Sustained effect — this is your sweet spot." },
+  { name: "Dose Taken",    color: "#283618", range: [0, 6],     desc: "Medication administered. Absorption is beginning under the skin." },
+  { name: "Taking Effect", color: "#8F6D32", range: [6, 24],    desc: "Active absorption phase. You may begin to notice reduced hunger and appetite." },
+  { name: "Peak Action",   color: "#A8672A", range: [24, 48],   desc: "Peak blood concentration. Maximum appetite suppression and best results window." },
+  { name: "Cruise",        color: "#4C5A3B", range: [48, 96],   desc: "Steady therapeutic level. Sustained effect — this is your sweet spot." },
   { name: "Winding Down",  color: "#6C4FB0", range: [96, 144],  desc: "Levels gradually declining. Appetite may begin to return slightly." },
-  { name: "Pre-Dose",      color: "#54706F", range: [144, 168], desc: "Lowest level of the cycle. Prepare your next dose." },
+  { name: "Pre-Dose",      color: "#4A5240", range: [144, 168], desc: "Lowest level of the cycle. Prepare your next dose." },
 ];
 
 // Daily phases (oral / daily-dosed programs)
 const PK_PHASES_DAILY = [
-  { name: "Dose Taken",  color: "#1E4C4E", range: [0, 1],   desc: "Dose taken. Absorption begins." },
-  { name: "Absorbing",   color: "#B98A1F", range: [1, 4],   desc: "Medication absorbing. Follow your intake instructions." },
-  { name: "Active",      color: "#C96A2B", range: [4, 12],  desc: "Active level building through the day." },
-  { name: "Maintaining", color: "#2F6FAE", range: [12, 24], desc: "Sustained daily level until your next dose." },
+  { name: "Dose Taken",  color: "#283618", range: [0, 1],   desc: "Dose taken. Absorption begins." },
+  { name: "Absorbing",   color: "#8F6D32", range: [1, 4],   desc: "Medication absorbing. Follow your intake instructions." },
+  { name: "Active",      color: "#A8672A", range: [4, 12],  desc: "Active level building through the day." },
+  { name: "Maintaining", color: "#4C5A3B", range: [12, 24], desc: "Sustained daily level until your next dose." },
 ];
 
 // Check-in symptom dimensions (ported from glp1-patient check-in, generalised)

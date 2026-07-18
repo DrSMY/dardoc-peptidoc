@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Doctor Dashboard — DoCare</title>
 <link rel="stylesheet" href="/theme.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23262B0F'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23C9A544' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23C9A544'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23C9A544' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23C9A544'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23283618'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23C6A15B' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23C6A15B'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23C6A15B' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23C6A15B'/></svg>">
 <style>
   /* ── app shell ─────────────────────────────────────────── */
   .shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100dvh; }
@@ -69,14 +69,14 @@
   @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
   .alert-item { display: flex; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
   .alert-item:last-child { border-bottom: none; }
-  .alert-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .alert-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--danger-soft); color: var(--danger); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.1); }
   .alert-body { flex: 1; min-width: 0; }
   .alert-name { font-weight: 700; font-size: 14.5px; font-family: var(--font-head); }
   .alert-sym { font-size: 13px; color: var(--muted); }
   .alert-meta { font-size: 12px; color: var(--faint); margin-top: 2px; }
 
   .pt-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); transition: background .12s; cursor: pointer; }
-  .pt-row:hover { background: #FCFBF6; }
+  .pt-row:hover { background: #FBFAF5; }
   .pt-row:last-child { border-bottom: none; }
   .pt-info { flex: 1; min-width: 0; }
   .pt-name { font-family: var(--font-head); font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
@@ -134,7 +134,7 @@
   .msg-time { font-size: 10.5px; opacity: .65; margin-top: 3px; }
   .timeline-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .timeline-item:last-child { border-bottom: none; }
-  .tl-ico { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .tl-ico { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.1); }
 
   .intake-sec-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-head); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--brand); margin: 20px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   .intake-sec-title:first-child { margin-top: 0; }
@@ -208,9 +208,9 @@
   .pep-tp span:last-child { color: var(--muted); line-height: 1.5; }
   .pep-sec { border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border); background: var(--bg); }
   .pep-sec p { font-size: 13.5px; line-height: 1.55; color: var(--text); margin-top: 6px; padding-left: 22px; }
-  .pep-sec.teal { border-color: #D6D8B0; background: var(--brand-soft); }
+  .pep-sec.teal { border-color: #D3D6C2; background: var(--brand-soft); }
   .pep-sec.amber { border-color: #EAD5A8; background: var(--amber-soft); }
-  .pep-sec.green { border-color: #D9E2BC; background: var(--accent-soft); }
+  .pep-sec.green { border-color: #CFD6BE; background: var(--accent-soft); }
   .pep-sec.rose, .pep-warn { border-color: #EFC9C0; background: var(--danger-soft); }
   .pep-sec.violet { border-color: #DACBF5; background: var(--violet-soft); }
   .pep-sec.sky { border-color: #EAD9A6; background: var(--primary-soft); }
