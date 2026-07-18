@@ -259,6 +259,8 @@ function seedKnowledgeBase() {
   const put = (title, category, body) => { if (!exists.get(title)) insert.run(title, category, body); };
 
   for (const [med, cfg] of Object.entries(presets.GLP1_MEDICATIONS)) {
+    const info = presets.GLP1_INFO[med] || {};
+    const block = (label, v) => (v && String(v).trim()) ? `${label}:\n${v}` : null;
     const lines = [
       `Generic: ${cfg.generic}`,
       `Route: ${cfg.route} · Frequency: ${cfg.frequency}`,
@@ -269,6 +271,13 @@ function seedKnowledgeBase() {
       ...(cfg.titration || []).map((t) => `• ${t.dose} — ${t.weeks ? `${t.weeks} week${t.weeks == 1 ? "" : "s"}` : "ongoing"}${t.note ? ` (${t.note})` : ""}`),
       "",
       cfg.administration ? `Administration:\n${cfg.administration}` : null,
+      "",
+      block("How it works", info.howItWorks),
+      block("Best use for", info.bestUseFor),
+      block("Target benefits", info.targetBenefits),
+      block("Common side effects", info.commonSideEffects),
+      block("Key blood tests", info.keyBloodTests),
+      block("Contraindications", info.contraindications),
     ].filter((l) => l !== null);
     put(`${med} (${cfg.generic})`, "GLP-1 Medications", lines.join("\n"));
   }

@@ -483,13 +483,47 @@ async function viewPatient(id) {
   function paintTab() {
     const box = document.getElementById("tab-body");
     if (S.detailTab === "overview") {
+      const intake = p.intake || {};
+      const allergySeverity = intake.allergies__severity ? ` <span class="badge badge-amber">${esc(intake.allergies__severity)}</span>` : "";
+      const goals = Array.isArray(intake.health_goals) ? intake.health_goals : [];
+
       box.innerHTML = `
       <div class="two-col">
         <div style="display:flex;flex-direction:column;gap:18px">
           <div class="card card-pad">
+            <div class="card-title">${icon("user", 19)} Patient chart</div>
+            <div class="emr-grid">
+              <div><span class="emr-lbl">Name</span><span class="emr-val">${esc(p.title ? p.title + " " : "")}${esc(p.name)}</span></div>
+              <div><span class="emr-lbl">Age</span><span class="emr-val">${p.age ? esc(p.age) + " years" : "—"}</span></div>
+              <div><span class="emr-lbl">Gender</span><span class="emr-val">${esc(p.gender || "—")}</span></div>
+              <div><span class="emr-lbl">Height</span><span class="emr-val">${p.height_cm ? esc(p.height_cm) + " cm" : "—"}</span></div>
+              <div><span class="emr-lbl">Weight</span><span class="emr-val">${weights.length ? esc(weights[weights.length - 1].y) : esc(p.start_weight_kg || "—")} kg</span></div>
+              <div><span class="emr-lbl">BMI</span><span class="emr-val">${bmi ?? "—"}${bmi ? " · " + esc(bmiCategoryClient(bmi)) : ""}</span></div>
+              <div><span class="emr-lbl">Mobile</span><span class="emr-val">+${esc(p.mobile)}</span></div>
+              ${p.national_id ? `<div><span class="emr-lbl">Emirates ID / passport</span><span class="emr-val">${esc(p.national_id)}</span></div>` : ""}
+              <div class="full"><span class="emr-lbl">Chronic illnesses</span><span class="emr-val">${esc(p.chronic_illnesses || "None reported")}</span></div>
+              <div class="full"><span class="emr-lbl">Current medications</span><span class="emr-val">${esc(p.medications || "None reported")}</span></div>
+              <div class="full"><span class="emr-lbl">Allergies</span><span class="emr-val">${esc(p.allergies || "No known drug allergies")}${allergySeverity}</span></div>
+              <div class="full"><span class="emr-lbl">Cancer / tumor history</span><span class="emr-val">${esc(intake.cancer_history || "No")}</span></div>
+              ${goals.length ? `<div class="full"><span class="emr-lbl">Health goals</span><span class="emr-val">${goals.map((g) => `<span class="badge badge-cyan">${esc(g)}</span>`).join(" ")}</span></div>` : ""}
+              ${p.notes ? `<div class="full"><span class="emr-lbl">Notes</span><span class="emr-val">${esc(p.notes)}</span></div>` : ""}
+            </div>
+          </div>
+
+          ${activePlan && activePlan.clinical_suggestion ? `
+          <div class="card card-pad">
+            <div class="card-title" style="justify-content:space-between">
+              <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
+              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy</button>
+            </div>
+            <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(activePlan.clinical_suggestion)}</pre>
+          </div>` : ""}
+
+          <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
             ${weights.length > 1 ? lineChart(weights, { color: "#4E551F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
+
           <div class="card card-pad">
             <div class="card-title">${icon("layers", 19)} Programs</div>
             ${plans.length ? plans.map((pl) => `
@@ -509,30 +543,46 @@ async function viewPatient(id) {
               </div>`).join("") : `<div class="empty">${icon("layers", 30)}<p>No programs yet. Start a consultation to publish one.</p></div>`}
           </div>
         </div>
+
         <div style="display:flex;flex-direction:column;gap:18px">
+          <div class="card card-pad">
+            <div class="card-title">${icon("activity", 19)} Recent activity</div>
+            ${chartActivityHTML(doses, checkins)}
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-title">${icon("file", 19)} Last prescriptions</div>
+            ${plans.length ? plans.slice(0, 6).map((pl) => `
+              <div class="rx-row">
+                <div>
+                  <div class="rx-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}</div>
+                  <div class="rx-meta">${esc(fmtDate(pl.created_at))}</div>
+                </div>
+                <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
+              </div>`).join("") : `<p class="hint">No prescriptions yet.</p>`}
+          </div>
+
+          <div class="card card-pad">
+            <div class="card-title">${icon("droplet", 19)} Lab tests</div>
+            ${(() => {
+              const withTests = plans.filter((pl) => pl.blood_test && pl.blood_test !== "none");
+              if (!withTests.length) return `<p class="hint">No blood tests requested for this patient.</p>`;
+              return withTests.map((pl) => `
+                <div class="rx-row">
+                  <div>
+                    <div class="rx-name">${pl.category === "glp1" ? "Weight Loss Blood Test Panel" : esc(pl.medication) + " — key blood tests"}</div>
+                    <div class="rx-meta">${esc(pl.medication)} · ${esc(fmtDate(pl.created_at))}</div>
+                  </div>
+                  <span class="badge ${pl.blood_test === "required" ? "badge-red" : "badge-amber"}">${esc(pl.blood_test)}</span>
+                </div>`).join("");
+            })()}
+          </div>
+
+          ${intakeSummaryCard(p)}
+
           <div class="card card-pad">
             <div class="card-title">${icon("clipboard", 19)} Latest check-ins</div>
             ${checkins.slice(0, 6).map((c) => checkinCard(c)).join("") || `<div class="empty">${icon("clipboard", 30)}<p>No check-ins yet.</p></div>`}
-          </div>
-          ${intakeSummaryCard(p)}
-          ${activePlan && activePlan.clinical_suggestion ? `
-          <div class="card card-pad">
-            <div class="card-title" style="justify-content:space-between">
-              <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
-              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy</button>
-            </div>
-            <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(activePlan.clinical_suggestion)}</pre>
-          </div>` : ""}
-          <div class="card card-pad">
-            <div class="card-title">${icon("info", 19)} Clinical notes</div>
-            <div style="font-size:13.5px;display:flex;flex-direction:column;gap:8px">
-              <div><b>Chronic illnesses:</b> ${esc(p.chronic_illnesses || "None recorded")}</div>
-              <div><b>Medications:</b> ${esc(p.medications || "None recorded")}</div>
-              <div><b>Allergies:</b> ${esc(p.allergies || "None recorded")}</div>
-              ${p.national_id ? `<div><b>Emirates ID / passport:</b> ${esc(p.national_id)}</div>` : ""}
-              ${p.notes ? `<div><b>Notes:</b> ${esc(p.notes)}</div>` : ""}
-              ${activePlan && activePlan.clinical_note ? `<div><b>Consultation note:</b> ${esc(activePlan.clinical_note)}</div>` : ""}
-            </div>
           </div>
         </div>
       </div>`;
@@ -552,19 +602,22 @@ async function viewPatient(id) {
 
     if (S.detailTab === "guide") {
       injectGuideCss();
-      const pl = activePlan || plans[0];
-      box.innerHTML = pl ? `
+      const active = plans.filter((pl) => pl.status === "active");
+      const guidePlans = active.length ? active : (plans[0] ? [plans[0]] : []);
+      const primaryPl = guidePlans.find((pl) => pl.category === "glp1") || guidePlans[0];
+      box.innerHTML = guidePlans.length ? `
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send via WhatsApp</button>
         </div>
-        <div id="guide-box">${buildGuide(pl, p, S.user.name)}</div>`
+        <div id="guide-box">${buildComboGuide(guidePlans, p, S.user.name)}</div>`
         : `<div class="empty">${icon("file", 34)}<div class="empty-title">No guide yet</div><p>Publish a program from a consultation and the patient guide will appear here.</p></div>`;
-      if (pl) {
+      if (guidePlans.length) {
         document.getElementById("btn-print").addEventListener("click", () => window.print());
         document.getElementById("btn-wa").addEventListener("click", () => {
           const link = `${location.origin}/portal`;
-          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${pl.medication} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, DoCare`;
+          const medSummary = guidePlans.length > 1 ? `${primaryPl.medication} and ${guidePlans.length - 1} other program${guidePlans.length > 2 ? "s" : ""}` : primaryPl.medication;
+          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${medSummary} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, DoCare`;
           window.open(waLink(p.mobile, txt), "_blank");
         });
       }
@@ -619,6 +672,27 @@ async function viewPatient(id) {
 }
 
 // Intake summary card for the patient detail — mirrors Consult-Buddy's intake read-out.
+// Merged dose-log + check-in feed for the patient chart's "Recent activity"
+// side card — same event shape as the dashboard/Recent-activity page.
+function chartActivityHTML(doses, checkins) {
+  const rows = [
+    ...doses.map((d) => ({ type: "dose", created_at: d.taken_at, detail: d.dose, flagged: false })),
+    ...checkins.map((c) => ({ type: "checkin", created_at: c.created_at, detail: c.weight_kg, flagged: c.flagged })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+  if (!rows.length) return `<div class="empty">${icon("activity", 30)}<p>No activity yet.</p></div>`;
+  return rows.map((r) => `
+    <div class="pt-row" style="cursor:default">
+      <div class="tl-ico" style="background:${r.type === "dose" ? "var(--primary-soft)" : "var(--accent-soft)"};color:${r.type === "dose" ? "var(--primary)" : "var(--accent)"}">
+        ${icon(r.type === "dose" ? "syringe" : "clipboard", 16)}
+      </div>
+      <div class="pt-info">
+        <div class="pt-name">${r.type === "dose" ? "Logged a dose" : "Checked in"} ${r.flagged ? '<span class="badge badge-red">flagged</span>' : ""}</div>
+        <div class="pt-meta">${r.type === "dose" ? esc(r.detail || "") : (r.detail ? esc(r.detail) + " kg" : "")}</div>
+      </div>
+      <div class="pt-side">${timeAgo(r.created_at)}</div>
+    </div>`).join("");
+}
+
 function intakeSummaryCard(p) {
   const intake = p.intake || {};
   const goals = Array.isArray(intake.health_goals) ? intake.health_goals : [];
@@ -1341,16 +1415,22 @@ function suggestedPeptidesHTML() {
     ${entries.length ? `
     <div class="sp-list">
       ${entries.map(([name, priority]) => `
-        <div class="sp-row">
+        <div class="sp-row ${priority === "Primary" ? "sp-primary" : "sp-secondary"}">
           <div class="sp-name"><span>${esc(name)}</span>${isGlp1(name)
             ? `<span class="badge badge-teal">GLP-1</span>`
             : `<span class="badge ${priority === "Primary" ? "badge-teal" : "badge-gray"}">${priority}</span>`}</div>
-          ${(S.presets.peptideInfo || {})[name] ? `<button type="button" class="sp-info" data-peptide="${esc(name)}" aria-label="View ${esc(name)} details">${icon("info", 14)}</button>` : ""}
+          ${peptideOrGlp1Info(name) ? `<button type="button" class="sp-info" data-peptide="${esc(name)}" aria-label="View ${esc(name)} details">${icon("info", 14)}</button>` : ""}
         </div>`).join("")}
     </div>
-    <p class="hint" style="margin-top:10px">Based on selected health goals · Tap ${icon("info", 11)} for full protocol details.</p>`
+    <p class="hint" style="margin-top:10px">Based on selected health goals · <b>Primary</b> = best fit for this goal, highlighted above · <b>Secondary</b> = also worth considering · Tap ${icon("info", 11)} for full protocol details.</p>`
     : `<p class="hint">No commonly-suggested medications for these goals — a custom program may suit best.</p>`}
   </div>`;
+}
+
+// Clinical-reference lookup shared by the suggestions panel and detail modal
+// — checks peptide info first, then GLP-1 info (both share the same shape).
+function peptideOrGlp1Info(name) {
+  return (S.presets.peptideInfo || {})[name] || (S.presets.glp1Info || {})[name];
 }
 
 function wirePeptideInfoButtons(scope) {
@@ -1361,7 +1441,7 @@ function wirePeptideInfoButtons(scope) {
 // PeptideDetailSheet: Talking Points → How It Works → Best Use For → Target
 // Benefits → Prescribing Info grid → Contraindications → side effects etc).
 function showPeptideDetail(name) {
-  const info = (S.presets.peptideInfo || {})[name];
+  const info = peptideOrGlp1Info(name);
   if (!info) return;
 
   const talkingPoints = [
@@ -1835,18 +1915,159 @@ function prefillFromIntake() {
   if (!w.patient.allergies) w.patient.allergies = intakeText("allergies");
 }
 
-// Builds one combined EMR note across every program added this
-// consultation: a full clinical paragraph for the first, a one-line
-// "Also prescribed" for each additional medication, then the doctor's
-// private note.
-function buildMultiClinicalSuggestion(patient, items, metrics, note) {
-  if (!items.length) return "";
-  const first = buildClinicalSuggestion(patient, { ...items[0], clinicalNote: "" }, metrics);
-  const rest = items.slice(1).map((it) => {
-    const routeFreq = [it.route, it.frequency].filter(Boolean).join(", ");
-    return `Also prescribed: ${it.medication}${it.dose ? " " + it.dose : ""}${routeFreq ? ` (${routeFreq})` : ""}`;
-  });
-  return [first, ...rest, note].filter(Boolean).join("\n\n");
+// Human-readable frequency phrase for the MEDICATION(S) PRESCRIBED line
+// ("weekly" → "once weekly").
+function freqPhrase(f) {
+  const t = String(f || "").toLowerCase();
+  if (t === "weekly") return "once weekly";
+  if (t === "daily") return "once daily";
+  return t || "as directed";
+}
+
+function humanRoute(route) {
+  return { injection: "subcutaneous injection", oral: "oral", nasal: "nasal spray", topical: "topical" }[route] || route || "";
+}
+
+// One line for the MEDICATION(S) PRESCRIBED section.
+function emrMedLine(it) {
+  if (it.category === "glp1") {
+    const generic = (S.templates.find((t) => t.category === "glp1" && (t.config.medication || t.name) === it.medication) || {}).config?.generic;
+    return `${it.medication}${generic ? ` (${generic})` : ""} ${it.dose || ""} ${freqPhrase(it.frequency)}`.replace(/ +/g, " ").trim();
+  }
+  if (it.category === "peptide" && it.protocol) {
+    const pr = it.protocol;
+    return `${it.medication} — ${pr.doseAmount ? pr.doseAmount + " " : ""}${pr.doseVolume ? `(${pr.doseVolume})` : ""} — ${pr.time || freqPhrase(it.frequency)}, ${humanRoute(it.route)}${pr.duration ? `, for ${pr.duration} total cycle` : ""}`.replace(/ +/g, " ").trim();
+  }
+  return `${it.medication}${it.dose ? " " + it.dose : ""} — ${freqPhrase(it.frequency)}${it.route ? ", " + humanRoute(it.route) : ""}`;
+}
+
+// Rationale + Supply lines under a peptide/custom medication line, only when
+// there's protocol data to draw them from (GLP-1 items don't get these).
+function emrMedExtra(it, goals) {
+  if (!it.protocol) return "";
+  const info = peptideOrGlp1Info(it.medication);
+  const mech = info && info.howItWorks ? info.howItWorks.split(".")[0] + "." : "";
+  const goalTxt = goals && goals.length ? goals[0] : "the patient's stated goals";
+  const pr = it.protocol;
+  return `\n   Rationale: Selected for '${goalTxt}'.${mech ? " " + mech : ""}\n   Supply: ${pr.strength || ""}${pr.doseVolume ? `, ${pr.doseVolume}/dose` : ""}${pr.duration ? ` (vial lasts ~${pr.duration})` : ""}`;
+}
+
+// Builds the full structured clinical encounter record (EMR) for every
+// program added this consultation — Date of Encounter / PATIENT /
+// CLINICAL SUMMARY / MEDICATION(S) PRESCRIBED / INVESTIGATIONS / PLAN /
+// Physician, matching DarDoc's standard consultation-note format.
+function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays) {
+  if (!items.length || !patient.name) return "";
+  const m = metrics || {};
+  const intake = patient.intake || {};
+  const salutation = patient.title || (patient.gender === "Male" ? "Mr" : patient.gender === "Female" ? "Ms" : "");
+  const Pronoun = patient.gender === "Male" ? "He" : patient.gender === "Female" ? "She" : "The patient";
+  const genderLc = (patient.gender || "").toLowerCase();
+  const hasGlp1 = items.some((i) => i.category === "glp1");
+  const others = items.filter((i) => i.category !== "glp1");
+  const goals = Array.isArray(intake.health_goals) ? intake.health_goals : [];
+
+  const conditions = patient.chronicIllnesses || (Array.isArray(intake.health_conditions) ? intake.health_conditions.join(", ") : "") || "None reported";
+  const currentMeds = patient.medications || "None reported";
+  const allergyText = patient.allergies || (intake.allergies__gate === true ? "Reported — see allergy history" : "No known drug allergies");
+  const noAllergies = allergyText === "No known drug allergies";
+  const cancerHistory = intake.cancer_history || "No";
+  const prevGlp1 = intake.previous_glp1 === "Yes";
+
+  const encounterDate = new Date();
+  const followup = new Date(encounterDate.getTime() + (followupDays || 28) * 864e5);
+
+  // ── PATIENT block ──
+  const patientBlock = [
+    "PATIENT", "",
+    `Name: ${patient.name}`,
+    patient.age ? `Age: ${patient.age} years` : null,
+    patient.gender ? `Gender: ${patient.gender}` : null,
+    patient.heightCm ? `Height: ${patient.heightCm} cm` : null,
+    patient.weightKg ? `Weight: ${patient.weightKg} kg` : null,
+    m.bmi ? `BMI: ${m.bmi} kg/m²` : null,
+    `Chronic Illnesses: ${conditions}`,
+    `Current Medications: ${currentMeds}`,
+    `Allergies: ${allergyText}`,
+    `Cancer / Tumor History: ${cancerHistory}`,
+    goals.length ? `Health Goals: ${goals.join(", ")}` : null,
+  ].filter((l) => l !== null).join("\n");
+
+  // ── CLINICAL SUMMARY ──
+  const bmiCatLc = m.bmiCat ? m.bmiCat.charAt(0).toLowerCase() + m.bmiCat.slice(1) : "";
+  let p1 = `${salutation ? salutation + ". " : ""}${patient.name} is a ${patient.age || "—"}-year-old ${genderLc}`.trim();
+  p1 += bmiCatLc ? ` with ${bmiCatLc}${m.bmi ? ` (BMI ${m.bmi} kg/m²)` : ""}` : (m.bmi ? ` (BMI ${m.bmi} kg/m²)` : "");
+  p1 += conditions === "None reported" ? " and no significant chronic illnesses." : ` and a history of ${conditions}.`;
+  if (hasGlp1) p1 += prevGlp1 ? " There is a prior history of GLP-1/peptide medication use." : " There is no prior history of GLP-1/peptide medication use.";
+  p1 += noAllergies ? ` ${Pronoun} reports no known drug allergies.` : ` Allergies: ${allergyText}.`;
+  if (others.length) p1 += ` Cancer/tumor history: ${cancerHistory.toLowerCase()}.`;
+  if (others.length && goals.length) p1 += ` Stated health goals include ${goals.join(", ").toLowerCase()}.`;
+  p1 += others.length && !hasGlp1
+    ? " Following clinical review, a personalised peptide therapy plan was formulated based on presentation, goals, and safety profile. There are no identified contraindications to the prescribed regimen."
+    : " There are no identified contraindications to GLP-1 receptor agonist therapy.";
+
+  const paras = [p1];
+
+  if (hasGlp1 && (m.target || m.proteinMin)) {
+    const bits = [];
+    if (m.target) bits.push(`a daily caloric intake target of ≤${m.target} kcal/day was recommended`);
+    if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day was set`);
+    paras.push(`Based on the current assessment, ${bits.join(", and ")}. Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed.`);
+  }
+
+  if (others.length) {
+    const mechs = others.map((it) => {
+      const info = peptideOrGlp1Info(it.medication);
+      const sentence = info && info.howItWorks ? info.howItWorks.split(".")[0] + "." : "";
+      return `${it.medication} is${others.length > 1 ? " included" : " utilized"}${sentence ? " — " + sentence : ""}`;
+    });
+    const focus = goals.length ? goals.join(" and ").toLowerCase() : "the patient's stated goals";
+    paras.push(`The therapeutic regimen focuses on ${focus}. ${mechs.join(" ")}`);
+  }
+
+  // ── MEDICATION(S) PRESCRIBED ──
+  const medHeader = items.length > 1 ? "MEDICATIONS PRESCRIBED" : "MEDICATION PRESCRIBED";
+  const medLines = items.length === 1
+    ? [emrMedLine(items[0]) + emrMedExtra(items[0], goals)]
+    : items.map((it, i) => `${i + 1}. ${emrMedLine(it)}${emrMedExtra(it, goals)}`);
+  const counsel = others.length
+    ? "The patient was counseled regarding expected benefits, common side effects, injection technique, storage, adherence, and the importance of reporting any adverse effects promptly."
+    : "The patient was counseled regarding expected benefits, common side effects, injection technique, adherence, and the importance of reporting any adverse effects promptly.";
+
+  // ── INVESTIGATIONS ──
+  const invLines = [];
+  const glp1Blood = items.find((i) => i.category === "glp1" && i.bloodTest && i.bloodTest !== "none");
+  if (glp1Blood) {
+    invLines.push(`Weight Loss Blood Test Panel: ${glp1Blood.bloodTest === "required" ? "Required" : "Recommended"}\n\nLink: https://www.dardoc.com/dubai/lab-test/weight-loss-blood-test`);
+  }
+  for (const it of others) {
+    if (it.bloodTest && it.bloodTest !== "none") {
+      const info = peptideOrGlp1Info(it.medication);
+      invLines.push(`${it.medication} — Key blood tests: ${(info && info.keyBloodTests) || "as clinically indicated"} (${it.bloodTest})`);
+    }
+  }
+  const investigations = invLines.length ? invLines.join("\n\n") : "No additional investigations required at this time.";
+
+  // ── PLAN ──
+  const planBullets = [
+    "Assess response, tolerance, and compliance at follow-up.",
+    "Consider dose titration if treatment is well tolerated.",
+    hasGlp1
+      ? "Continue monitoring weight, appetite, and any medication-related side effects."
+      : "Continue monitoring symptoms, injection-site reactions, and any medication-related side effects.",
+  ];
+  if (others.length) planBullets.push("Reinforce lifestyle modifications, nutrition, hydration, sleep, and physical activity.");
+
+  const sections = [
+    `Date of Encounter: ${fmtDMY(encounterDate)}`,
+    patientBlock,
+    `CLINICAL SUMMARY\n\n${paras.join("\n\n")}`,
+    `${medHeader}\n\n${medLines.join("\n\n")}\n\n${counsel}`,
+    `INVESTIGATIONS\n\n${investigations}`,
+    `PLAN\n\nFollow-up appointment scheduled for ${fmtDMY(followup)}.\n\n${planBullets.join("\n")}`,
+    `Physician:\n${S.user.name}\nDarDoc Healthcare`,
+  ];
+  return [sections.join("\n\n"), note].filter(Boolean).join("\n\n");
 }
 
 function wizStepClinical() {
@@ -1907,8 +2128,11 @@ function wizStepClinical() {
   const refreshEmr = () => {
     collect();
     document.getElementById("cl-emr").textContent = buildMultiClinicalSuggestion(
-      { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
-      w.cart, wizMetrics(), w.clinicalNote
+      { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
+        age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
+        chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
+        intake: w.patient.intake },
+      w.cart, wizMetrics(), w.clinicalNote, w.followupDays
     ) || "Add a medication and patient details to generate the clinical record.";
   };
   view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
@@ -1954,8 +2178,11 @@ function wizStepReview() {
     created_at: createdAt, next_followup: nextFollowup,
   }));
   const clinicalSuggestion = buildMultiClinicalSuggestion(
-    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile, chronicIllnesses: w.patient.chronicIllnesses, intake: w.patient.intake },
-    w.cart, wizMetrics(), w.clinicalNote
+    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
+      age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
+      chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
+      intake: w.patient.intake },
+    w.cart, wizMetrics(), w.clinicalNote, w.followupDays
   );
   w.clinicalSuggestion = clinicalSuggestion;
   view().innerHTML = `${wizHead()}
@@ -1965,7 +2192,7 @@ function wizStepReview() {
         <div class="card-title" style="margin:0">${icon("file", 19)} Guide preview — what the patient sees</div>
       </div>
       <div id="guide-preview" style="display:flex;flex-direction:column;gap:18px">
-        ${fakePlans.map((p) => buildGuide(p, { name: w.patient.name, title: w.patient.title }, S.user.name)).join("")}
+        ${buildComboGuide(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name)}
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">

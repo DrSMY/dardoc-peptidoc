@@ -242,17 +242,18 @@ function howToCardHTML(plan) {
 // ── guide ────────────────────────────────────────────────────────
 function paintGuide(v) {
   injectGuideCss();
-  const plan = activePlan();
-  if (!plan) {
+  const active = S.me.plans.filter((p) => p.status === "active");
+  const plans = active.length ? active : (S.me.plans[0] ? [S.me.plans[0]] : []);
+  if (!plans.length) {
     v.innerHTML = `<div class="list-card card-pad empty">${icon("book", 34)}<div class="empty-title">No guide yet</div><p>Your personalised treatment guide will appear here once your doctor publishes it.</p></div>`;
     return;
   }
-  const others = S.me.plans.filter((x) => x.id !== plan.id);
+  const others = S.me.plans.filter((x) => !plans.includes(x));
   v.innerHTML = `
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Print / Save PDF</button>
   </div>
-  ${buildGuide(plan, S.me.patient, S.me.doctorName)}
+  ${buildComboGuide(plans, S.me.patient, S.me.doctorName)}
   ${others.length ? `
   <div class="list-card" style="margin-top:16px">
     <div class="list-head"><h3>${icon("layers", 18)} Previous programs</h3></div>

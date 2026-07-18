@@ -35,6 +35,52 @@ function standardGuideSections(plan) {
     ${windows}${general}`;
 }
 
+// Combines every active program into one guide. GLP-1 is always the focus
+// when it's part of the plan — it gets the full guide (buildGuide, all
+// standard windows) — while any other active medications are summarised in
+// an "Also on your program" section with their dose, how-to-take steps and
+// what-to-expect, so the patient has everything in one place without the
+// GLP-1 story getting diluted. Falls back to buildGuide() unchanged when
+// there's only one active program (the common case).
+function buildComboGuide(plans, patient, doctorName) {
+  if (!plans || !plans.length) return "";
+  if (plans.length === 1) return buildGuide(plans[0], patient, doctorName);
+  const primary = plans.find((p) => p.category === "glp1") || plans[0];
+  const others = plans.filter((p) => p !== primary);
+  const mainHtml = buildGuide(primary, patient, doctorName);
+  if (!others.length) return mainHtml;
+  const section = `
+    <section class="g-sec">
+      <h3>${icon("layers", 18)} Also on your program</h3>
+      ${others.map(otherMedCardHTML).join("")}
+    </section>`;
+  const marker = '<footer class="g-foot">';
+  const idx = mainHtml.indexOf(marker);
+  return idx >= 0 ? mainHtml.slice(0, idx) + section + mainHtml.slice(idx) : mainHtml + section;
+}
+
+// Compact per-medication card for buildComboGuide()'s "Also on your
+// program" section: dose + frequency, what to expect (how it works), and
+// how to take it — pulled from the same standard guide content as the
+// primary medication's full windows.
+function otherMedCardHTML(plan) {
+  const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
+  const how = content && content.sections.find((s) => /^HOW TO /i.test(s.head));
+  const works = content && content.sections.find((s) => /WORKS|PROTOCOL AT A GLANCE/i.test(s.head));
+  const phases = (plan.phases || []).filter((p) => p.dose || p.label);
+  return `
+  <div class="g-other-med">
+    <div class="g-other-head">
+      <span class="g-other-name">${icon(routeIcon(plan.route), 16)} ${esc(plan.medication)}</span>
+      ${plan.dose ? `<span class="g-other-dose">${esc(plan.dose)}</span>` : ""}
+    </div>
+    <div class="g-other-meta">${esc(plan.frequency)}${plan.quantity > 1 ? ` · × ${esc(plan.quantity)}` : ""}${phases.length && phases[0].note ? ` · ${esc(phases[0].note)}` : ""}</div>
+    ${works ? `<div class="g-other-block"><b>What to expect</b><div class="g-prose">${guideProse(works.body)}</div></div>` : ""}
+    ${how ? `<div class="g-other-block"><b>How to take it</b><div class="g-prose">${guideProse(how.body)}</div></div>` : ""}
+    ${plan.instructions ? `<div class="g-other-block"><b>Instructions from your doctor</b><div class="g-prose">${guideProse(plan.instructions)}</div></div>` : ""}
+  </div>`;
+}
+
 function buildGuide(plan, patient, doctorName) {
   const diet = plan.diet || {};
   const phases = plan.phases || [];
@@ -197,6 +243,13 @@ const GUIDE_CSS = `
 .g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
 .g-emoji { font-size: 16px; }
 .g-prose a { color: var(--primary); word-break: break-all; }
+.g-other-med { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); padding: 14px 16px; margin-bottom: 12px; }
+.g-other-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; }
+.g-other-name { display: flex; align-items: center; gap: 8px; }
+.g-other-dose { background: var(--primary-soft); color: var(--primary); padding: 3px 12px; border-radius: var(--r-full); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.g-other-meta { font-size: 12.5px; color: var(--muted); margin: 3px 0 4px; }
+.g-other-block { margin-top: 8px; font-size: 13.5px; }
+.g-other-block b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); margin-bottom: 3px; }
 @media print {
   body * { visibility: hidden; }
   .guide, .guide * { visibility: visible; }

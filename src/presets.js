@@ -77,6 +77,104 @@ const GLP1_MEDICATIONS = {
   },
 };
 
+// Clinical-reference fields for the GLP-1 detail panel — same shape as
+// PEPTIDE_INFO so the "Suggested Medications" info button works identically
+// for both categories. Content is derived from GLP1_MEDICATIONS/
+// GLP1_ELIGIBILITY above (single source of truth for dosing/contraindications)
+// plus general GLP-1 counselling points from the UAE protocol.
+const GLP1_INFO = {
+  "Wegovy": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "A once-weekly GLP-1 receptor agonist (semaglutide) that mimics a natural gut hormone regulating appetite. Reduces appetite and cravings, increases fullness, slows stomach emptying, and supports metabolic health.",
+    targetBenefits: "Chronic weight management, appetite control, cardiometabolic risk reduction",
+    bestUseFor: "Adults with obesity (BMI ≥30) or overweight with a weight-related comorbidity (BMI ≥27)",
+    dosageInstructions: "Start 0.25mg weekly, titrate every 4 weeks to a 2.4mg maintenance dose ('start low, go slow')",
+    administrationRoute: "Subcutaneous injection",
+    strengthVolume: "Prefilled pen — 0.25/0.5/1/1.7/2.4mg doses",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+  "Mounjaro": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "A dual GIP/GLP-1 receptor agonist (tirzepatide) — activates two gut-hormone pathways for stronger appetite control and greater weight loss than GLP-1-only medications, plus improved insulin sensitivity.",
+    targetBenefits: "Chronic weight management, superior average weight loss vs. GLP-1-only agents, cardiometabolic risk reduction",
+    bestUseFor: "Adults with obesity (BMI ≥30) or overweight with a weight-related comorbidity (BMI ≥27), especially with insulin resistance",
+    dosageInstructions: "Start 2.5mg weekly, titrate every 4 weeks to 15mg maximum as tolerated",
+    administrationRoute: "Subcutaneous injection",
+    strengthVolume: "Prefilled pen — 2.5/5/7.5/10/12.5/15mg doses",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+  "Wegovy Pill": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "Oral semaglutide with an absorption enhancer (SNAC) — the same GLP-1 mechanism as injectable Wegovy in a daily tablet, for patients who prefer to avoid injections.",
+    targetBenefits: "Chronic weight management, appetite control — needle-free",
+    bestUseFor: "Adults with obesity/overweight who prefer an oral option or are needle-averse",
+    dosageInstructions: "Start 1.5mg daily, titrate every 4 weeks to 25mg — empty stomach, ≤120mL water, wait 30 min before food/drink",
+    administrationRoute: "Oral tablet",
+    strengthVolume: "1.5/4/9/25mg tablets",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+  "Foundayo": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "Orforglipron — a non-peptide oral GLP-1 receptor agonist with no food/water restrictions and no cold-chain storage, simplifying daily use versus other oral options.",
+    targetBenefits: "Chronic weight management, appetite control — no dosing restrictions",
+    bestUseFor: "Adults with obesity/overweight who prefer an oral option with a simpler dosing routine",
+    dosageInstructions: "Start 0.8mg daily, titrate every 4 weeks to 17.2mg maximum — with or without food, any time of day",
+    administrationRoute: "Oral tablet",
+    strengthVolume: "0.8/2.5/5.5/9/14.5/17.2mg tablets",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+  "Rybelsus": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "Oral semaglutide (approved for type 2 diabetes; used off-label for weight) — same GLP-1 mechanism as injectable semaglutide in tablet form.",
+    targetBenefits: "Glycemic control plus appetite reduction and weight loss (off-label indication)",
+    bestUseFor: "Adults who prefer an oral option, particularly those with type 2 diabetes/prediabetes",
+    dosageInstructions: "Start 3mg daily, titrate every 4 weeks to 14mg maximum — empty stomach, ≤120mL water, wait ≥30 min before food/drink/other meds",
+    administrationRoute: "Oral tablet",
+    strengthVolume: "3/7/14mg tablets",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+  "Ozempic": {
+    categories: ["GLP-1", "Weight Loss"],
+    howItWorks: "Injectable semaglutide (approved for type 2 diabetes; used off-label for weight) — same GLP-1 mechanism as Wegovy at diabetes-labelled doses.",
+    targetBenefits: "Glycemic control plus appetite reduction and weight loss (off-label indication)",
+    bestUseFor: "Adults with type 2 diabetes/prediabetes also seeking weight management",
+    dosageInstructions: "Start 0.25mg weekly, titrate every 4 weeks to 2mg maximum approved diabetes dose",
+    administrationRoute: "Subcutaneous injection",
+    strengthVolume: "Prefilled pen — 0.25/0.5/1/2mg doses",
+    treatmentDuration: "Ongoing — reassessed at 3, 6 and 12 months",
+    contraindications: "Personal/family history of medullary thyroid carcinoma, MEN2, pregnancy, breastfeeding, history of pancreatitis",
+    commonSideEffects: "Nausea, vomiting, diarrhea, constipation, heartburn — usually settle within 2–4 weeks of a dose change",
+    keyBloodTests: "Fasting glucose & HbA1c, lipid profile, liver function, kidney function (eGFR), thyroid function",
+    recommendedSupplements: "Protein supplementation as needed to hit daily target; consider a multivitamin during rapid weight loss",
+    possibleCombinations: "Not combined with other GLP-1/GIP agonists",
+  },
+};
+
 // Eligibility / safety reference for GLP-1 therapy (UAE protocol §3, §6.8).
 const GLP1_ELIGIBILITY = {
   adultBmi: "BMI ≥30 kg/m² (obesity), or ≥27 kg/m² with at least one weight-related comorbidity",
@@ -1002,6 +1100,7 @@ function weightLossCalories(tdee) {
 
 module.exports = {
   GLP1_MEDICATIONS,
+  GLP1_INFO,
   GLP1_ELIGIBILITY,
   PK_PHASES_WEEKLY,
   PK_PHASES_DAILY,

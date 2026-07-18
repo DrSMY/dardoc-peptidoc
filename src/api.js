@@ -178,6 +178,7 @@ route("GET", "/api/presets", (req, res) => {
     weightLossGoals: presets.WEIGHT_LOSS_GOALS,
     healthGoalPeptides: dbHealthGoalPeptides(),
     peptideInfo: dbPeptideInfo(),
+    glp1Info: presets.GLP1_INFO,
     goalDescriptions: presets.GOAL_DESCRIPTIONS,
     glp1Eligibility: presets.GLP1_ELIGIBILITY,
   });
