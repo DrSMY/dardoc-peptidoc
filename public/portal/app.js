@@ -175,9 +175,45 @@ function estimatedLevelPct(plan, ph) {
   return Math.max(4, Math.round(92 * Math.pow(0.5, decayH / hl)));
 }
 
+// Phase list + scaling for a plan's dose cycle (works before the first
+// dose too, when currentPhase() returns null).
+function phasesFor(plan) {
+  const cycleHours = frequencyToHours(plan.frequency);
+  const daily = cycleHours <= 24;
+  const phases = daily ? S.me.presets.phasesDaily : S.me.presets.phasesWeekly;
+  return { phases, cycleHours, daily, scale: cycleHours / (daily ? 24 : 168) };
+}
+
+// Interactive, colorful day-by-day phase strip: one tappable chip per day
+// of the cycle (or per phase for daily meds), tinted with that phase's
+// color. Days already elapsed are solid; today pulses with a ring. Tapping
+// a chip previews that day's phase in the card's title/description.
+function phaseStripHTML(plan, ph) {
+  const { phases, cycleHours, daily, scale } = phasesFor(plan);
+  const elapsed = ph ? ph.h : -1;
+  const phaseAt = (hr) => phases.find((p) => hr >= p.range[0] * scale && hr < p.range[1] * scale) || phases[phases.length - 1];
+  let chips = "";
+  if (!daily) {
+    const days = Math.max(1, Math.round(cycleHours / 24));
+    for (let d = 0; d < days; d++) {
+      const pz = phaseAt((d + 0.5) * 24);
+      const done = elapsed >= (d + 1) * 24;
+      const now = elapsed >= d * 24 && elapsed < (d + 1) * 24;
+      chips += `<button type="button" class="phase-day${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color}" data-phidx="${phases.indexOf(pz)}" aria-label="Day ${d + 1}: ${esc(pz.name)}">${d + 1}</button>`;
+    }
+  } else {
+    phases.forEach((pz, idx) => {
+      const done = elapsed >= pz.range[1] * scale;
+      const now = elapsed >= pz.range[0] * scale && elapsed < pz.range[1] * scale;
+      chips += `<button type="button" class="phase-day seg${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color};flex:${Math.max(1, pz.range[1] - pz.range[0])}" data-phidx="${idx}" aria-label="${esc(pz.name)}"></button>`;
+    });
+  }
+  return `<div class="phase-days" role="group" aria-label="Phases of your dose cycle">${chips}</div>`;
+}
+
 // Hero status card for the home screen — white card on the dark olive
 // band with the medication label, current phase (or "Ready to start"),
-// the real product photo top-right, and a cycle progress bar.
+// the real product photo top-right, and the interactive phase strip.
 function phaseIllustrationHTML(plan, ph) {
   const photo = medPhoto(plan.medication, plan.category);
   const visual = photo
@@ -187,30 +223,52 @@ function phaseIllustrationHTML(plan, ph) {
   if (!ph) {
     const weekly = frequencyToHours(plan.frequency) > 24;
     return `
-    <div class="hero-card" role="img" aria-label="${esc(plan.medication)} — no dose logged yet">
+    <div class="hero-card">
       <div class="hero-lbl">${lbl}</div>
-      <h2 class="hero-title">Ready to start</h2>
-      <p class="hero-desc">Log your first dose and this card will track where you are in each cycle.</p>
+      <h2 class="hero-title" id="hero-ph-name">Ready to start</h2>
+      <p class="hero-desc" id="hero-ph-desc">Log your first dose and this card will track where you are in each cycle. Tap a day below to preview each phase.</p>
       ${visual}
-      <div class="hero-bar"><span style="width:6%"></span></div>
+      ${phaseStripHTML(plan, null)}
       <div class="hero-meta"><span>${weekly ? "Week 0 of 4" : "Day 0 of 7"}</span><span>0%</span></div>
     </div>`;
   }
   const pct = estimatedLevelPct(plan, ph);
-  const cyclePct = Math.min(100, Math.round((ph.h / ph.cycleHours) * 100));
   const dayOf = ph.cycleHours > 24
     ? `Day ${Math.floor(ph.h / 24) + 1} of ${Math.round(ph.cycleHours / 24)}`
     : `Hour ${Math.floor(ph.h)} of ${ph.cycleHours}`;
   return `
   <div class="hero-card">
     <div class="hero-lbl">${lbl}</div>
-    <h2 class="hero-title">${esc(ph.phase.name)}</h2>
-    <p class="hero-desc">${esc(ph.phase.desc)}</p>
+    <h2 class="hero-title" id="hero-ph-name" style="color:${ph.phase.color}">${esc(ph.phase.name)}</h2>
+    <p class="hero-desc" id="hero-ph-desc">${esc(ph.phase.desc)}</p>
     ${visual}
-    <div class="hero-bar" role="img" aria-label="${cyclePct}% through the current cycle; ${pct}% of ${esc(plan.medication)} estimated still active"><span style="width:${Math.max(4, cyclePct)}%"></span></div>
+    ${phaseStripHTML(plan, ph)}
     <div class="hero-meta"><span>${dayOf}</span><span>${pct}% in system</span></div>
     <div class="hero-next">${esc(nextDoseText(plan))}</div>
   </div>`;
+}
+
+// Tap a day chip → preview that phase's name/description in the card;
+// tapping the highlighted "today" chip returns to the live phase.
+function wirePhaseStrip(v, plan, ph) {
+  const { phases } = phasesFor(plan);
+  const name = v.querySelector("#hero-ph-name");
+  const desc = v.querySelector("#hero-ph-desc");
+  if (!name || !desc) return;
+  const live = { name: name.textContent, desc: desc.textContent, color: name.style.color };
+  v.querySelectorAll(".phase-day").forEach((b) => b.addEventListener("click", () => {
+    const isNow = b.classList.contains("now");
+    v.querySelectorAll(".phase-day").forEach((x) => x.classList.toggle("sel", x === b && !isNow));
+    if (isNow) {
+      name.textContent = live.name; name.style.color = live.color; desc.textContent = live.desc;
+      return;
+    }
+    const pz = phases[Number(b.dataset.phidx)];
+    if (!pz) return;
+    name.textContent = pz.name;
+    name.style.color = pz.color;
+    desc.textContent = pz.desc;
+  }));
 }
 
 // ── home ─────────────────────────────────────────────────────────
@@ -276,6 +334,8 @@ function paintHome(v) {
     <div class="list-head"><h3>${icon("trend", 18)} Weight trend</h3><span class="badge ${weights[0].weight_kg <= weights[weights.length - 1].weight_kg ? "badge-green" : "badge-amber"}">${(weights[0].weight_kg - weights[weights.length - 1].weight_kg).toFixed(1)} kg</span></div>
     <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#283618", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
+
+  if (primary) wirePhaseStrip(v, primary, ph);
 
   const fullGuide = v.querySelector("#dose-fullguide");
   if (fullGuide) fullGuide.addEventListener("click", () => { S.guidePlanId = primary.id; S.tab = "guide"; paint(); });

@@ -36,9 +36,26 @@
   .hero-title { font-family: var(--font-head); font-size: 25px; font-weight: 800; margin: 6px 0; color: var(--text); }
   .hero-desc { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; }
   .hero-photo { position: absolute; top: 12px; right: 8px; width: 118px; height: 122px; object-fit: contain; pointer-events: none; }
-  .hero-bar { height: 8px; border-radius: 4px; background: var(--bg); margin-top: 18px; overflow: hidden; }
-  .hero-bar > span { display: block; height: 100%; border-radius: 4px; background: var(--brand); transition: width .6s var(--ease); }
-  .hero-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  /* interactive per-day phase strip — each chip tinted by its phase color */
+  .phase-days { display: flex; gap: 5px; margin-top: 18px; }
+  .phase-day {
+    flex: 1; min-width: 0; height: 36px; border: none; border-radius: 11px; padding: 0;
+    font-family: var(--font-head); font-weight: 800; font-size: 12.5px;
+    color: var(--pc); background: color-mix(in srgb, var(--pc) 14%, #fff);
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 28%, #fff);
+    transition: transform .13s var(--ease), box-shadow .16s var(--ease);
+    cursor: pointer;
+  }
+  .phase-day.done { background: var(--pc); color: #fff; opacity: .82; box-shadow: none; }
+  .phase-day.now {
+    background: var(--pc); color: #fff; opacity: 1;
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4.5px var(--pc), 0 3px 8px color-mix(in srgb, var(--pc) 40%, transparent);
+    transform: scale(1.07);
+  }
+  .phase-day.sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--refined-gold, #C6A15B); transform: scale(1.05); }
+  .phase-day:active { transform: scale(.92); }
+  .phase-day.seg { height: 18px; border-radius: 9px; }
+  .hero-meta { display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
   .hero-next { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
   .qa-grid.qa-overlap { margin-top: -64px; position: relative; z-index: 1; }
 
@@ -134,9 +151,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare3"></script>
-<script src="/patient-guides.js?v=docare3"></script>
-<script src="/guide.js?v=docare3"></script>
-<script src="/portal/app.js?v=docare3"></script>
+<script src="/shared.js?v=docare4"></script>
+<script src="/patient-guides.js?v=docare4"></script>
+<script src="/guide.js?v=docare4"></script>
+<script src="/portal/app.js?v=docare4"></script>
 </body>
 </html>
