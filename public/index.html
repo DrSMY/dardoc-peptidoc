@@ -68,7 +68,11 @@
   .land { position: relative; z-index: 1; min-height: 100dvh; display: flex; flex-direction: column; color: #F5F0DF; opacity: 1; transition: opacity .5s var(--ease); }
 
   .land-nav { display: flex; align-items: center; justify-content: space-between; padding: 16px clamp(16px, 5vw, 48px); }
-  .land-nav .nav-logo { height: 40px; width: auto; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
+  .land-nav .nav-logo { height: 40px; width: auto; display: block; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
+  .logo-btn { background: none; border: none; padding: 4px; cursor: pointer; border-radius: 12px; transition: transform .15s var(--ease); }
+  .logo-btn:hover { transform: scale(1.04); }
+  .logo-btn:active { transform: scale(.96); }
+  .logo-btn:focus-visible { outline: 3px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
   .btn-glass {
     display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
     padding: 11px 20px; border: 1px solid var(--glass-border); border-radius: 999px;
@@ -148,7 +152,11 @@
 
 <div class="land">
   <nav class="land-nav">
-    <img class="nav-logo" src="/brand/docare-gold-sm.png" alt="DoCare">
+    <button class="logo-btn" id="replay-intro" type="button" aria-label="Replay intro video">
+      <button class="logo-btn" id="logo-replay" type="button" aria-label="Replay intro video" title="Replay intro">
+      <img class="nav-logo" src="/brand/docare-gold-sm.png" alt="DoCare">
+    </button>
+    </button>
     <a class="btn-glass" href="/doctor">Doctor sign in</a>
   </nav>
 
@@ -224,6 +232,17 @@
     }
     document.addEventListener("visibilitychange", resumeBg);
     vid.addEventListener("pause", () => { if (done) setTimeout(resumeBg, 150); });
+
+    // The corner logo replays the intro from the top — an explicit user
+    // gesture, so play() is always allowed here.
+    document.getElementById("logo-replay").addEventListener("click", () => {
+      done = false;
+      vid.loop = false;
+      document.body.classList.remove("mode-bg", "no-video");
+      document.body.classList.add("mode-intro");
+      try { vid.currentTime = 0; } catch (e) {}
+      vid.play().catch(() => toBackground());
+    });
 
     if (reduced) { toBackground(); return; }
     vid.play().catch(() => {
