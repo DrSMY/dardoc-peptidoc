@@ -212,15 +212,18 @@
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") toBackground(); });
 
     // Browsers pause offscreen/hidden videos and don't resume them — keep
-    // the background loop alive when the tab becomes visible again.
+    // the background loop alive across tab switches. Only ever resume a
+    // video that was genuinely playing before (never start a never-played
+    // video on interaction — a tap on the logo must not "replay the intro").
+    let played = false;
+    vid.addEventListener("playing", () => { played = true; });
     function resumeBg() {
-      if (done && !reduced && !document.hidden && !document.body.classList.contains("no-video")) {
+      if (done && played && !reduced && !document.hidden && !document.body.classList.contains("no-video")) {
         vid.play().catch(() => {});
       }
     }
     document.addEventListener("visibilitychange", resumeBg);
     vid.addEventListener("pause", () => { if (done) setTimeout(resumeBg, 150); });
-    document.addEventListener("pointerdown", resumeBg, { passive: true });
 
     if (reduced) { toBackground(); return; }
     vid.play().catch(() => {
