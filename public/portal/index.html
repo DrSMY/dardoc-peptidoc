@@ -10,17 +10,50 @@
   body { background: var(--bg); }
   .p-app { max-width: 560px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
   .p-top {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 14px 18px calc(14px);
-    background: linear-gradient(120deg, var(--brand), var(--primary)); color: #fff;
-    border-radius: 0 0 22px 22px;
+    display: grid; grid-template-columns: 44px 1fr 44px; align-items: center;
+    padding: 14px 16px 10px;
+    background: var(--brand); color: #fff;
   }
-  .p-top .brand-line { display: flex; align-items: center; gap: 10px; }
-  .p-top .brand-mark { width: 38px; height: 38px; border-radius: 11px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
-  .p-top .t-name { font-family: var(--font-head); font-weight: 800; font-size: 15px; line-height: 1.15; }
-  .p-top .t-sub { font-size: 11.5px; opacity: .75; }
+  .p-top .t-logo { justify-self: center; height: 34px; width: auto; }
   .p-top .icon-btn { color: #fff; }
   .p-top .icon-btn:hover { background: rgba(255,255,255,.12); }
+
+  /* dark olive band behind the home greeting + hero card */
+  .home-band { margin: -18px -16px 0; padding: 8px 20px 84px; background: var(--brand); border-radius: 0 0 26px 26px; }
+  .home-band.no-plan { padding-bottom: 26px; }
+  .hello-dark { display: flex; align-items: center; gap: 13px; color: #fff; margin: 8px 0 20px; }
+  .avatar-circ {
+    width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-head); font-weight: 800; font-size: 16px; letter-spacing: .02em;
+  }
+  .hello-dark h1 { font-size: 21px; color: #fff; }
+  .hello-dark .sub { font-size: 13px; color: rgba(255,255,255,.68); margin-top: 1px; }
+
+  /* hero card — medication status on the dark band */
+  .hero-card { position: relative; background: var(--surface); border-radius: 20px; padding: 18px 18px 16px; box-shadow: var(--shadow-md); }
+  .hero-lbl { font-size: 11.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--brand); padding-right: 116px; }
+  .hero-title { font-family: var(--font-head); font-size: 25px; font-weight: 800; margin: 6px 0; color: var(--text); }
+  .hero-desc { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; }
+  .hero-photo { position: absolute; top: 12px; right: 8px; width: 118px; height: 122px; object-fit: contain; pointer-events: none; }
+  .hero-bar { height: 8px; border-radius: 4px; background: var(--bg); margin-top: 18px; overflow: hidden; }
+  .hero-bar > span { display: block; height: 100%; border-radius: 4px; background: var(--brand); transition: width .6s var(--ease); }
+  .hero-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .hero-next { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+  .qa-grid.qa-overlap { margin-top: -64px; position: relative; z-index: 1; }
+
+  /* "Your dose & how to take it" card */
+  .dose-card { position: relative; }
+  .dose-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .dose-head b { font-family: var(--font-head); font-size: 15.5px; }
+  .dose-head .qa-ico { width: 38px; height: 38px; }
+  .dose-chips { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .chip-solid, .chip-soft { border-radius: var(--r-full); padding: 5px 14px; font-weight: 700; font-size: 13px; font-family: var(--font-head); }
+  .chip-solid { background: var(--brand); color: #fff; }
+  .chip-soft { background: var(--brand-soft); color: var(--brand); }
+  .dose-text { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; margin-bottom: 10px; }
+  .dose-photo { position: absolute; top: 14px; right: 10px; width: 100px; height: 124px; object-fit: contain; pointer-events: none; }
+  .linklike-p { background: none; border: none; color: var(--brand); font-weight: 700; font-family: var(--font-head); font-size: 13.5px; display: inline-flex; align-items: center; gap: 5px; padding: 0; }
 
   .p-view { flex: 1; padding: 18px 16px calc(86px + env(safe-area-inset-bottom)); }
 
@@ -50,25 +83,6 @@
   }
   .p-nav .nav-log:active .log-fab { transform: scale(.93); }
 
-  .hello { margin: 6px 2px 16px; }
-  .hello h1 { font-size: 22px; }
-  .hello .sub { color: var(--muted); font-size: 13.5px; }
-
-  .phase-card { border-radius: var(--r-lg); padding: 20px; color: #fff; margin-bottom: 16px; box-shadow: var(--shadow-md); }
-  .phase-lbl { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; opacity: .85; }
-  .phase-name { font-family: var(--font-head); font-size: 24px; font-weight: 800; margin: 4px 0 6px; }
-  .phase-desc { font-size: 13.5px; opacity: .92; line-height: 1.5; }
-  .phase-track { display: flex; gap: 4px; margin-top: 14px; }
-  .phase-seg { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.25); }
-  .phase-seg.done { background: rgba(255,255,255,.9); }
-  .phase-meta { display: flex; justify-content: space-between; font-size: 11.5px; opacity: .85; margin-top: 6px; }
-
-  /* interactive phase-progress illustration (radial % ring) */
-  .phase-illus { display: flex; align-items: center; gap: 16px; border-radius: var(--r-lg); padding: 18px 20px; color: #fff; margin-bottom: 16px; box-shadow: var(--shadow-md); }
-  .phase-illus-ring { flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(23,32,15,.25)); }
-  .phase-illus-body { flex: 1; min-width: 0; }
-  @media (max-width: 380px) { .phase-illus { flex-direction: column; align-items: stretch; text-align: center; } .phase-illus-ring { align-self: center; } }
-
   /* per-medication row on the home screen's "Your medications" list */
   .med-row { border-top: 1px solid var(--border); }
   .med-row:first-child { border-top: none; }
@@ -90,9 +104,9 @@
     transition: transform .13s var(--ease), box-shadow .15s var(--ease);
   }
   .qa:active { transform: scale(.97); }
-  .qa-ico { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.1); }
-  .qa b { font-family: var(--font-head); font-size: 14.5px; }
-  .qa span { font-size: 12px; color: var(--muted); }
+  .qa-ico { width: 46px; height: 46px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); display: flex; align-items: center; justify-content: center; box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.08); }
+  .qa b { font-family: var(--font-head); font-size: 15px; }
+  .qa span { font-size: 12.5px; color: var(--muted); }
 
   .list-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); margin-bottom: 16px; }
   .list-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 16px 0; }
@@ -120,9 +134,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js"></script>
-<script src="/patient-guides.js"></script>
-<script src="/guide.js"></script>
-<script src="/portal/app.js"></script>
+<script src="/shared.js?v=docare3"></script>
+<script src="/patient-guides.js?v=docare3"></script>
+<script src="/guide.js?v=docare3"></script>
+<script src="/portal/app.js?v=docare3"></script>
 </body>
 </html>

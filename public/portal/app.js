@@ -89,14 +89,9 @@ function renderShell() {
   app.innerHTML = `
   <div class="p-app">
     <header class="p-top">
-      <div class="brand-line">
-        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:36px;width:auto">
-        <div>
-          <div class="t-name">My Treatment Portal</div>
-          <div class="t-sub">with ${esc(S.me.doctorName)} · DoCare</div>
-        </div>
-      </div>
       <button class="icon-btn" id="p-logout" aria-label="Sign out">${icon("logout", 20)}</button>
+      <img class="t-logo" src="/brand/docare-gold-sm.png" alt="DoCare — My Treatment Portal">
+      <button class="icon-btn" id="p-bell" aria-label="Messages">${icon("bell", 20)}</button>
     </header>
     <main class="p-view" id="p-view"></main>
     <nav class="p-nav" aria-label="Main">
@@ -109,6 +104,10 @@ function renderShell() {
     S.tab = b.dataset.tab;
     paint();
   }));
+  document.getElementById("p-bell").addEventListener("click", () => {
+    S.tab = "messages";
+    paint();
+  });
   document.getElementById("p-logout").addEventListener("click", async () => {
     await api("POST", "/api/portal/logout");
     S.me = null;
@@ -176,49 +175,41 @@ function estimatedLevelPct(plan, ph) {
   return Math.max(4, Math.round(92 * Math.pow(0.5, decayH / hl)));
 }
 
-// Interactive radial-progress illustration for the home screen: a ring
-// showing the estimated % of medication still active, the current phase
-// name/description, and a week-of-cycle caption.
+// Hero status card for the home screen — white card on the dark olive
+// band with the medication label, current phase (or "Ready to start"),
+// the real product photo top-right, and a cycle progress bar.
 function phaseIllustrationHTML(plan, ph) {
+  const photo = medPhoto(plan.medication, plan.category);
+  const visual = photo
+    ? `<img class="hero-photo" src="${photo}" alt="">`
+    : `<span class="hero-photo" style="display:flex;align-items:center;justify-content:center">${productIllustration(plan.route, 84)}</span>`;
+  const lbl = `${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} • ${esc(plan.frequency)}`;
   if (!ph) {
+    const weekly = frequencyToHours(plan.frequency) > 24;
     return `
-    <div class="phase-illus" style="background:linear-gradient(135deg, var(--brand), var(--primary))">
-      <div class="phase-illus-ring" style="position:relative;width:140px;height:140px">
-        <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="No dose logged yet">
-          <circle cx="70" cy="70" r="60" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="12"/>
-        </svg>
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff;border-radius:50%;width:96px;height:96px;margin:auto">${medPhoto(plan.medication, plan.category) ? `<img src="${medPhoto(plan.medication, plan.category)}" alt="${esc(plan.medication)}" style="width:100%;height:100%;object-fit:contain">` : productIllustration(plan.route, 60)}</div>
-      </div>
-      <div class="phase-illus-body">
-        <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${esc(plan.frequency)}</div>
-        <div class="phase-name">Ready to start</div>
-        <div class="phase-desc">Log your first dose and this illustration will track your cycle and estimated levels.</div>
-      </div>
+    <div class="hero-card" role="img" aria-label="${esc(plan.medication)} — no dose logged yet">
+      <div class="hero-lbl">${lbl}</div>
+      <h2 class="hero-title">Ready to start</h2>
+      <p class="hero-desc">Log your first dose and this card will track where you are in each cycle.</p>
+      ${visual}
+      <div class="hero-bar"><span style="width:6%"></span></div>
+      <div class="hero-meta"><span>${weekly ? "Week 0 of 4" : "Day 0 of 7"}</span><span>0%</span></div>
     </div>`;
   }
   const pct = estimatedLevelPct(plan, ph);
-  const R = 60, C = 2 * Math.PI * R;
-  const offset = C * (1 - pct / 100);
-  const weekOf = ph.cycleHours > 24 ? `Day ${Math.floor(ph.h / 24) + 1} of ${Math.round(ph.cycleHours / 24)}` : `Hour ${Math.floor(ph.h)} of ${ph.cycleHours}`;
+  const cyclePct = Math.min(100, Math.round((ph.h / ph.cycleHours) * 100));
+  const dayOf = ph.cycleHours > 24
+    ? `Day ${Math.floor(ph.h / 24) + 1} of ${Math.round(ph.cycleHours / 24)}`
+    : `Hour ${Math.floor(ph.h)} of ${ph.cycleHours}`;
   return `
-  <div class="phase-illus" style="background:linear-gradient(135deg, ${ph.phase.color}, ${ph.phase.color}CC)">
-    <div class="phase-illus-ring">
-      <svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="${pct}% of ${esc(plan.medication)} estimated still active">
-        <circle cx="70" cy="70" r="${R}" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="12"/>
-        <circle cx="70" cy="70" r="${R}" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round"
-          stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
-          transform="rotate(-90 70 70)" style="transition: stroke-dashoffset .6s var(--ease)"/>
-        <text x="70" y="65" text-anchor="middle" font-size="26" font-weight="800" fill="#fff" font-family="var(--font-head)">${pct}%</text>
-        <text x="70" y="84" text-anchor="middle" font-size="10.5" fill="rgba(255,255,255,.85)">in system</text>
-      </svg>
-    </div>
-    <div class="phase-illus-body">
-      <div class="phase-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} · ${weekOf}</div>
-      <div class="phase-name">${esc(ph.phase.name)}</div>
-      <div class="phase-desc">${esc(ph.phase.desc)}</div>
-      <div class="phase-track">${ph.phases.map((_, i) => `<div class="phase-seg ${i <= ph.idx ? "done" : ""}"></div>`).join("")}</div>
-      <div class="phase-meta"><span>${esc(nextDoseText(plan))}</span></div>
-    </div>
+  <div class="hero-card">
+    <div class="hero-lbl">${lbl}</div>
+    <h2 class="hero-title">${esc(ph.phase.name)}</h2>
+    <p class="hero-desc">${esc(ph.phase.desc)}</p>
+    ${visual}
+    <div class="hero-bar" role="img" aria-label="${cyclePct}% through the current cycle; ${pct}% of ${esc(plan.medication)} estimated still active"><span style="width:${Math.max(4, cyclePct)}%"></span></div>
+    <div class="hero-meta"><span>${dayOf}</span><span>${pct}% in system</span></div>
+    <div class="hero-next">${esc(nextDoseText(plan))}</div>
   </div>`;
 }
 
@@ -234,23 +225,38 @@ function paintHome(v) {
   const lastCheckin = S.data.checkins[0];
 
   v.innerHTML = `
-  <div class="hello">
-    <h1>${greet}, ${esc(p.title ? p.title + " " : "")}${esc(p.name.split(" ")[0])}</h1>
-    <div class="sub">${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</div>
+  <div class="home-band${primary ? "" : " no-plan"}">
+    <div class="hello-dark">
+      <span class="avatar-circ">${esc(initials(p.name))}</span>
+      <div>
+        <h1>${greet}, ${esc(p.title ? p.title + " " : "")}${esc(p.name.split(" ")[0])}</h1>
+        <div class="sub">${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+      </div>
+    </div>
+    ${primary ? phaseIllustrationHTML(primary, ph) : ""}
   </div>
 
   ${!primary ? `
-  <div class="list-card card-pad empty">${icon("file", 34)}
+  <div class="list-card card-pad empty" style="margin-top:16px">${icon("file", 34)}
     <div class="empty-title">No treatment plan yet</div>
     <p>Your doctor hasn't published a guide for you yet. It will appear here as soon as it's ready.</p>
-  </div>` : phaseIllustrationHTML(primary, ph)}
+  </div>` : ""}
 
-  <div class="qa-grid">
-    <button class="qa" id="qa-dose"><span class="qa-ico" style="background:var(--primary-soft);color:var(--primary)">${icon(primary ? routeIcon(primary.route) : "syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Nothing logged yet"}</span></button>
-    <button class="qa" id="qa-checkin"><span class="qa-ico" style="background:var(--accent-soft);color:var(--accent)">${icon("clipboard", 20)}</span><b>Daily check-in</b><span>${lastCheckin ? "Last: " + fmtDate(lastCheckin.date) : "Tell us how you feel"}</span></button>
-    <button class="qa" id="qa-guide"><span class="qa-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("book", 20)}</span><b>My guide</b><span>${active.length ? active.length + " medication" + (active.length > 1 ? "s" : "") : "Not published yet"}</span></button>
-    <button class="qa" id="qa-msg"><span class="qa-ico" style="background:var(--violet-soft);color:var(--violet)">${icon("message", 20)}</span><b>Message doctor</b><span>${esc(S.me.doctorName)}</span></button>
+  <div class="qa-grid${primary ? " qa-overlap" : ""}" style="${primary ? "" : "margin-top:16px"}">
+    <button class="qa" id="qa-dose"><span class="qa-ico">${icon(primary ? routeIcon(primary.route) : "syringe", 20)}</span><b>Log dose</b><span>${S.data.doses.length ? "Last: " + timeAgo(S.data.doses[0].taken_at) : "Record your injection"}</span></button>
+    <button class="qa" id="qa-checkin"><span class="qa-ico">${icon("clipboard", 20)}</span><b>Daily check-in</b><span>${lastCheckin ? "Last: " + fmtDate(lastCheckin.date) : "Tell us how you feel"}</span></button>
+    <button class="qa" id="qa-guide"><span class="qa-ico">${icon("book", 20)}</span><b>My guide</b><span>${primary ? "Learn about " + esc(primary.medication) : "Not published yet"}</span></button>
+    <button class="qa" id="qa-msg"><span class="qa-ico">${icon("message", 20)}</span><b>Message doctor</b><span>Chat with ${esc(S.me.doctorName)}</span></button>
   </div>
+
+  ${primary ? `
+  <div class="list-card card-pad dose-card">
+    <div class="dose-head"><span class="qa-ico">${icon(routeIcon(primary.route), 18)}</span><b>Your dose &amp; how to take it</b></div>
+    <div class="dose-chips">${primary.dose ? `<span class="chip-solid">${esc(primary.dose)}</span>` : ""}<span class="chip-soft">${esc(primary.frequency)}</span></div>
+    <p class="dose-text">${esc(howToLine(primary))}</p>
+    <button class="linklike-p" id="dose-fullguide">View full guide ${icon("chevR", 14)}</button>
+    ${medPhoto(primary.medication, primary.category) ? `<img class="dose-photo" src="${medPhoto(primary.medication, primary.category)}" alt="">` : ""}
+  </div>` : ""}
 
   ${active.length ? `
   <div class="list-card">
@@ -271,6 +277,9 @@ function paintHome(v) {
     <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#283618", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
+  const fullGuide = v.querySelector("#dose-fullguide");
+  if (fullGuide) fullGuide.addEventListener("click", () => { S.guidePlanId = primary.id; S.tab = "guide"; paint(); });
+
   v.querySelector("#qa-dose").addEventListener("click", () => { S.tab = "log"; S.logMode = "dose"; S.logPlanId = primary ? primary.id : null; paint(); });
   v.querySelector("#qa-checkin").addEventListener("click", () => { S.tab = "log"; S.logMode = "checkin"; paint(); });
   v.querySelector("#qa-guide").addEventListener("click", () => { S.tab = "guide"; paint(); });
@@ -289,6 +298,21 @@ function paintHome(v) {
     toast("Your doctor has been notified to arrange a refill.");
     paint();
   }));
+}
+
+// Short plain-language how-to line for the dose card, built from the
+// medication's route and frequency (the full detail lives in the guide).
+function howToLine(pl) {
+  const r = routeIcon(pl.route);
+  const f = String(pl.frequency || "").toLowerCase();
+  const when = f.includes("week") ? "once weekly on the same day. You can choose any time of day"
+    : (f.includes("daily") || f.includes("day")) ? "once daily, at around the same time each day"
+    : `as prescribed (${pl.frequency})`;
+  if (r === "syringe") return `Inject ${when}.`;
+  if (r === "pill" || r === "capsule") return `Take by mouth ${when}.`;
+  if (r === "spray") return `Use the nasal spray ${when}.`;
+  if (r === "cream") return `Apply ${when}.`;
+  return `Take ${when}.`;
 }
 
 // One row per active medication on the home screen — dose/frequency at a
