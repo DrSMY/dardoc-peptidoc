@@ -246,6 +246,7 @@ const GUIDE_CSS = `
   pointer-events: none;
 }
 .g-brand { display: flex; gap: 12px; align-items: center; }
+.g-brand img { filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
 .g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
 .g-brand-name { font-family: var(--font-head); font-weight: 800; font-size: 17px; }
 .g-brand-sub { font-size: 12.5px; opacity: .8; }
