@@ -8,68 +8,215 @@
 <link rel="stylesheet" href="/theme.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23283618'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23C6A15B' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23C6A15B'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23C6A15B' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23C6A15B'/></svg>">
 <style>
-  .land { min-height: 100dvh; display: flex; flex-direction: column; }
-  .land-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(16px, 5vw, 48px); }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .brand-mark { width: 44px; height: 44px; border-radius: 13px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; }
-  .brand-name { font-family: var(--font-head); font-weight: 800; font-size: 18px; line-height: 1.1; }
-  .brand-tag { font-size: 12px; color: var(--muted); }
-  .hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px clamp(16px, 5vw, 48px) 56px; animation: view-in .5s var(--ease); }
-  .hero-badge { margin-bottom: 18px; }
-  .hero h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; max-width: 720px; letter-spacing: -.02em; }
-  .hero h1 em { font-style: normal; color: var(--primary); }
-  .hero p { margin: 16px auto 28px; max-width: 560px; color: var(--muted); font-size: clamp(15px, 2vw, 17.5px); }
-  .patient-note { margin: 18px auto 0; font-size: 13px; color: var(--faint); }
-  .patient-note a { color: var(--faint); text-decoration: underline; }
-  .patient-note a:hover { color: var(--muted); }
-  .feats { display: flex; gap: clamp(16px, 4vw, 40px); flex-wrap: wrap; justify-content: center; margin-top: 52px; }
-  .feat { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); font-weight: 600; }
-  .feat svg { color: var(--accent); }
-  .land-foot { text-align: center; padding: 20px; font-size: 12.5px; color: var(--faint); }
+  :root {
+    --glass-bg: rgba(255, 255, 255, .10);
+    --glass-border: rgba(225, 199, 132, .32);
+    --scrim-1: rgba(23, 32, 15, .58);
+    --scrim-2: rgba(23, 32, 15, .82);
+  }
+  html, body { height: 100%; }
+  body { background: #1C2412; overflow-x: hidden; }
+
+  /* ── video layer (one element, two modes) ─────────────────────── */
+  .vid-wrap {
+    position: fixed; inset: 0; z-index: 0; overflow: hidden;
+    background:
+      radial-gradient(60% 50% at 18% 12%, rgba(198, 161, 91, .16), transparent 60%),
+      radial-gradient(55% 45% at 85% 88%, rgba(113, 131, 85, .20), transparent 65%),
+      linear-gradient(160deg, #283618, #1C2412 70%);
+  }
+  .vid-wrap video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transition: filter .6s var(--ease), transform .6s var(--ease), opacity .6s var(--ease);
+  }
+  body.no-video .vid-wrap video { display: none; }
+
+  /* intro mode: video front and center, everything else hidden */
+  body.mode-intro { overflow: hidden; }
+  body.mode-intro .land { opacity: 0; pointer-events: none; }
+  body.mode-intro .vid-wrap { z-index: 50; }
+  @media (min-width: 768px) {
+    /* portrait clip on a wide screen: letterbox it elegantly on the olive glow */
+    body.mode-intro .vid-wrap video { object-fit: contain; }
+  }
+
+  /* background mode: video recedes behind a scrim, blurred on wide screens */
+  body.mode-bg .vid-wrap::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg, var(--scrim-1), var(--scrim-2));
+  }
+  @media (min-width: 768px) {
+    body.mode-bg .vid-wrap video { filter: blur(16px) brightness(.9); transform: scale(1.08); }
+  }
+
+  .skip-btn {
+    position: fixed; z-index: 60;
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(28px + env(safe-area-inset-bottom));
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 26px; min-height: 48px; border: 1px solid var(--glass-border); border-radius: 999px;
+    background: rgba(23, 32, 15, .38); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    color: #F5F0DF; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; letter-spacing: .02em;
+    cursor: pointer; transition: background .18s var(--ease), transform .15s var(--ease);
+  }
+  .skip-btn:hover { background: rgba(23, 32, 15, .58); }
+  .skip-btn:active { transform: translateX(-50%) scale(.96); }
+  .skip-btn:focus-visible { outline: 3px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
+  body.mode-bg .skip-btn { display: none; }
+
+  /* ── glass content ────────────────────────────────────────────── */
+  .land { position: relative; z-index: 1; min-height: 100dvh; display: flex; flex-direction: column; color: #F5F0DF; opacity: 1; transition: opacity .5s var(--ease); }
+
+  .land-nav { display: flex; align-items: center; justify-content: space-between; padding: 16px clamp(16px, 5vw, 48px); }
+  .land-nav .nav-logo { height: 40px; width: auto; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
+  .btn-glass {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+    padding: 11px 20px; border: 1px solid var(--glass-border); border-radius: 999px;
+    background: var(--glass-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    color: #F5F0DF; font-family: var(--font-head); font-weight: 700; font-size: 14px;
+    cursor: pointer; text-decoration: none; transition: background .18s var(--ease), transform .15s var(--ease);
+  }
+  .btn-glass:hover { background: rgba(255, 255, 255, .17); text-decoration: none; color: #fff; }
+  .btn-glass:active { transform: scale(.97); }
+  .btn-glass:focus-visible { outline: 3px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
+
+  .hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px clamp(16px, 5vw, 48px) 48px; }
+  .hero-card {
+    width: min(620px, 100%);
+    text-align: center;
+    padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px);
+    border-radius: 28px; border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(22px) saturate(1.25); -webkit-backdrop-filter: blur(22px) saturate(1.25);
+    box-shadow: 0 18px 50px rgba(10, 14, 6, .45), inset 0 1px 0 rgba(255, 255, 255, .22);
+  }
+  .hero-logo { height: clamp(56px, 9vw, 82px); width: auto; margin-bottom: 6px; filter: drop-shadow(0 3px 8px rgba(0,0,0,.55)) drop-shadow(0 0 18px rgba(225,199,132,.30)); }
+  .hero-tagline { font-size: 11.5px; letter-spacing: .3em; text-transform: uppercase; color: var(--champagne-gold, #E1C784); font-weight: 700; margin-bottom: 20px; }
+  .hero h1 { font-size: clamp(26px, 4.2vw, 38px); font-weight: 800; letter-spacing: -.02em; color: #FDFBF3; line-height: 1.18; }
+  .hero h1 em { font-style: normal; color: var(--champagne-gold, #E1C784); }
+  .hero p { margin: 14px auto 26px; max-width: 460px; color: rgba(245, 240, 223, .82); font-size: clamp(14.5px, 1.8vw, 16.5px); line-height: 1.6; }
+
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn-gold-cta {
+    display: inline-flex; align-items: center; gap: 10px; min-height: 50px;
+    padding: 14px 28px; border: none; border-radius: 999px; cursor: pointer; text-decoration: none;
+    background: linear-gradient(160deg, #E1C784, #C6A15B 60%, #A9853F);
+    color: #20231E; font-family: var(--font-head); font-weight: 800; font-size: 15.5px;
+    box-shadow: 0 8px 22px rgba(198, 161, 91, .35), inset 0 1px 0 rgba(255, 255, 255, .5);
+    transition: transform .15s var(--ease), box-shadow .2s var(--ease);
+  }
+  .btn-gold-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(198, 161, 91, .45), inset 0 1px 0 rgba(255,255,255,.5); text-decoration: none; color: #20231E; }
+  .btn-gold-cta:active { transform: scale(.97); }
+  .btn-gold-cta:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+  .patient-note { margin-top: 18px; font-size: 13px; color: rgba(245, 240, 223, .68); }
+  .patient-note a { color: var(--champagne-gold, #E1C784); text-decoration: underline; }
+
+  .feats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 30px; padding: 0 clamp(16px, 5vw, 48px); }
+  .feat {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
+    padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(225, 199, 132, .22);
+    background: rgba(255, 255, 255, .07); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    font-size: 13px; color: rgba(245, 240, 223, .88); font-weight: 600;
+  }
+  .feat svg { color: var(--champagne-gold, #E1C784); }
+
+  .land-foot { text-align: center; padding: 26px 20px calc(18px + env(safe-area-inset-bottom)); font-size: 12.5px; color: rgba(245, 240, 223, .5); }
+
+  /* content entrance once the intro hands over */
+  body.mode-bg .land > * { animation: land-in .55s var(--ease) both; }
+  body.mode-bg .land-nav { animation-delay: .05s; }
+  body.mode-bg .hero { animation-delay: .15s; }
+  body.mode-bg .feats { animation-delay: .28s; }
+  body.mode-bg .land-foot { animation-delay: .36s; }
+  @keyframes land-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.mode-bg .land > * { animation: none; }
+    .vid-wrap video { transition: none; }
+  }
 </style>
 </head>
-<body>
+<body class="mode-intro">
+
+<div class="vid-wrap" aria-hidden="true">
+  <video id="intro-vid" muted playsinline autoplay preload="auto" src="/brand/docare-intro.mp4"></video>
+</div>
+<button class="skip-btn" id="skip-intro" type="button">Skip intro <span id="ico-skip"></span></button>
+
 <div class="land">
   <nav class="land-nav">
-    <div class="brand">
-      <div>
-        <img src="/brand/docare-olive-sm.png" alt="DoCare" style="height:52px;width:auto">
-        <div class="brand-tag" style="letter-spacing:.14em;text-transform:uppercase;font-size:10.5px;margin-top:3px;text-align:center">Limitless Care</div>
-      </div>
-    </div>
-    <a class="btn btn-ghost btn-sm" href="/doctor">Doctor sign in</a>
+    <img class="nav-logo" src="/brand/docare-gold-sm.png" alt="DoCare">
+    <a class="btn-glass" href="/doctor">Doctor sign in</a>
   </nav>
 
   <main class="hero">
-    <span class="badge badge-cyan hero-badge">Limitless Care</span>
-    <h1>From consultation to <em>personalised guide</em> to daily follow-up.</h1>
-    <p>Run the consultation and publish a personal treatment guide. Your patient follows it, logs doses and side effects — and you see it all, live.</p>
-
-    <a class="btn btn-primary" style="padding:14px 28px;font-size:16px;gap:10px" href="/doctor">
-      <span id="ico-doc"></span> Open the doctor dashboard <span id="chev1"></span>
-    </a>
-
-    <p class="patient-note">Patients: use the secure portal link your doctor sent you. Lost it? <a href="/portal">Open the patient portal</a>.</p>
+    <div class="hero-card">
+      <img class="hero-logo" src="/brand/docare-gold.png" alt="DoCare — Doc · Care">
+      <div class="hero-tagline">Limitless Care</div>
+      <h1>From consultation to <em>personalised guide</em> to daily follow-up.</h1>
+      <p>Run the consultation and publish a personal treatment guide. Your patient follows it, logs doses and side effects — and you see it all, live.</p>
+      <div class="cta-row">
+        <a class="btn-gold-cta" href="/doctor"><span id="ico-doc"></span> Doctor dashboard</a>
+        <a class="btn-glass" href="/portal"><span id="ico-pat"></span> Patient portal</a>
+      </div>
+      <p class="patient-note">Patients: sign in with the mobile number &amp; PIN your doctor sent you.</p>
+    </div>
 
     <div class="feats">
       <div class="feat"><span id="f1"></span> Personalised treatment guides</div>
-      <div class="feat"><span id="f2"></span> Side-effect alerts for your doctor</div>
-      <div class="feat"><span id="f3"></span> Progress &amp; weight tracking</div>
+      <div class="feat"><span id="f2"></span> Side-effect alerts</div>
+      <div class="feat"><span id="f3"></span> Progress tracking</div>
       <div class="feat"><span id="f4"></span> Secure PIN access</div>
     </div>
   </main>
 
   <footer class="land-foot">© <span id="yr"></span> DoCare — Limitless Care. Clinical decision support &amp; patient follow-up. Not a substitute for emergency care.</footer>
 </div>
+
 <script src="/shared.js"></script>
 <script>
-  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 20);
-  document.getElementById("chev1").innerHTML = icon("chevR", 18);
-  document.getElementById("f1").innerHTML = icon("file", 17);
-  document.getElementById("f2").innerHTML = icon("bell", 17);
-  document.getElementById("f3").innerHTML = icon("trend", 17);
-  document.getElementById("f4").innerHTML = icon("shield", 17);
+  document.getElementById("ico-skip").innerHTML = icon("chevR", 16);
+  document.getElementById("ico-doc").innerHTML = icon("stethoscope", 18);
+  document.getElementById("ico-pat").innerHTML = icon("user", 17);
+  document.getElementById("f1").innerHTML = icon("file", 15);
+  document.getElementById("f2").innerHTML = icon("bell", 15);
+  document.getElementById("f3").innerHTML = icon("trend", 15);
+  document.getElementById("f4").innerHTML = icon("shield", 15);
   document.getElementById("yr").textContent = new Date().getFullYear();
+
+  // Intro video → background video handover.
+  (function () {
+    const vid = document.getElementById("intro-vid");
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let done = false;
+
+    function toBackground() {
+      if (done) return;
+      done = true;
+      document.body.classList.remove("mode-intro");
+      document.body.classList.add("mode-bg");
+      vid.loop = true;
+      if (reduced) {
+        vid.pause();
+      } else if (!document.body.classList.contains("no-video")) {
+        vid.play().catch(() => {});
+      }
+    }
+
+    vid.addEventListener("ended", toBackground);
+    vid.addEventListener("error", () => { document.body.classList.add("no-video"); toBackground(); });
+    document.getElementById("skip-intro").addEventListener("click", toBackground);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") toBackground(); });
+
+    if (reduced) { toBackground(); return; }
+    vid.play().catch(() => { /* autoplay blocked → just show the page */ toBackground(); });
+    // If the video hasn't produced a frame shortly after load (missing file,
+    // very slow network), don't hold visitors hostage on a black screen.
+    setTimeout(() => { if (vid.readyState < 2) { if (!vid.error) document.body.classList.add("no-video"); toBackground(); } }, 4500);
+  })();
 </script>
 </body>
 </html>
