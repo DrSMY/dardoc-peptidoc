@@ -63,6 +63,8 @@
   .skip-btn:active { transform: translateX(-50%) scale(.96); }
   .skip-btn:focus-visible { outline: 3px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
   body.mode-bg .skip-btn { display: none; }
+  .unmute-btn { bottom: calc(92px + env(safe-area-inset-bottom)); }
+  .unmute-btn[hidden] { display: none; }
 
   /* ── glass content ────────────────────────────────────────────── */
   .land { position: relative; z-index: 1; min-height: 100dvh; display: flex; flex-direction: column; color: #F5F0DF; opacity: 1; transition: opacity .5s var(--ease); }
@@ -149,6 +151,10 @@
   <video id="intro-vid" muted playsinline autoplay preload="auto" src="/brand/docare-intro.mp4"></video>
 </div>
 <button class="skip-btn" id="skip-intro" type="button">Skip intro <span id="ico-skip"></span></button>
+<button class="skip-btn unmute-btn" id="unmute-intro" type="button" hidden>
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+  Tap for sound
+</button>
 
 <div class="land">
   <nav class="land-nav">
@@ -201,9 +207,13 @@
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let done = false;
 
+    const unmuteBtn = document.getElementById("unmute-intro");
+
     function toBackground() {
       if (done) return;
       done = true;
+      vid.muted = true; // the looping backdrop stays silent
+      unmuteBtn.hidden = true;
       document.body.classList.remove("mode-intro");
       document.body.classList.add("mode-bg");
       vid.loop = true;
@@ -238,6 +248,8 @@
     document.getElementById("logo-replay").addEventListener("click", () => {
       done = false;
       vid.loop = false;
+      vid.muted = false; // replay is a user gesture — sound is allowed
+      unmuteBtn.hidden = true;
       document.body.classList.remove("mode-bg", "no-video");
       document.body.classList.add("mode-intro");
       try { vid.currentTime = 0; } catch (e) {}
@@ -245,13 +257,25 @@
     });
 
     if (reduced) { toBackground(); return; }
+    // Try to open with sound; browsers usually refuse unmuted autoplay
+    // without a prior gesture, so fall back to muted playback and offer
+    // a "Tap for sound" pill (a tap is a gesture, so unmuting then works).
+    unmuteBtn.addEventListener("click", () => {
+      vid.muted = false;
+      unmuteBtn.hidden = true;
+      if (vid.paused && !done) vid.play().catch(() => {});
+    });
+    vid.muted = false;
     vid.play().catch(() => {
-      // Autoplay refused (opened in a background tab, power-saving mode…).
-      // Retry when the page becomes visible; if it still won't start
-      // shortly, don't hold the visitor — show the page.
-      const retry = () => { if (!done) vid.play().catch(() => {}); };
-      document.addEventListener("visibilitychange", retry, { once: true });
-      setTimeout(() => { if (!done && vid.paused) toBackground(); }, 3000);
+      vid.muted = true;
+      vid.play().then(() => { if (!done) unmuteBtn.hidden = false; }).catch(() => {
+        // Even muted autoplay refused (background tab, power-saving mode…).
+        // Retry when the page becomes visible; if it still won't start
+        // shortly, don't hold the visitor — show the page.
+        const retry = () => { if (!done) vid.play().catch(() => {}); };
+        document.addEventListener("visibilitychange", retry, { once: true });
+        setTimeout(() => { if (!done && vid.paused) toBackground(); }, 3000);
+      });
     });
     // If the video hasn't produced a frame shortly after load (missing file,
     // very slow network), don't hold visitors hostage on a black screen.
