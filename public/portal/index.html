@@ -36,25 +36,44 @@
   .hero-title { font-family: var(--font-head); font-size: 25px; font-weight: 800; margin: 6px 0; color: var(--text); }
   .hero-desc { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; }
   .hero-photo { position: absolute; top: 12px; right: 8px; width: 118px; height: 122px; object-fit: contain; pointer-events: none; }
-  /* interactive per-day phase strip — each chip tinted by its phase color */
-  .phase-days { display: flex; gap: 5px; margin-top: 18px; }
+  /* interactive phase journey — colored dots on a filling track */
+  .phase-journey { position: relative; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding: 6px 0; }
+  .pj-track {
+    position: absolute; left: 17px; right: 17px; top: 50%; height: 4px;
+    transform: translateY(-50%); background: var(--bg); border-radius: 2px; overflow: hidden;
+  }
+  .pj-track > span { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #283618, #1F7A68); transition: width .6s var(--ease); }
   .phase-day {
-    flex: 1; min-width: 0; height: 36px; border: none; border-radius: 11px; padding: 0;
+    position: relative; z-index: 1; width: 34px; height: 34px; border-radius: 50%; border: none; padding: 0;
     font-family: var(--font-head); font-weight: 800; font-size: 12.5px;
-    color: var(--pc); background: color-mix(in srgb, var(--pc) 14%, #fff);
-    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 28%, #fff);
-    transition: transform .13s var(--ease), box-shadow .16s var(--ease);
+    color: var(--pc); background: var(--surface);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pc) 45%, #fff);
     cursor: pointer;
+    transition: transform .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease), color .16s var(--ease);
   }
-  .phase-day.done { background: var(--pc); color: #fff; opacity: .82; box-shadow: none; }
+  .phase-day::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+  .phase-day.done { background: var(--pc); color: #fff; box-shadow: none; }
   .phase-day.now {
-    background: var(--pc); color: #fff; opacity: 1;
-    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4.5px var(--pc), 0 3px 8px color-mix(in srgb, var(--pc) 40%, transparent);
-    transform: scale(1.07);
+    background: var(--pc); color: #fff; transform: scale(1.16);
+    box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--pc);
+    animation: pjPulse 2.4s var(--ease) infinite;
   }
-  .phase-day.sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--refined-gold, #C6A15B); transform: scale(1.05); }
-  .phase-day:active { transform: scale(.92); }
-  .phase-day.seg { height: 18px; border-radius: 9px; }
+  .phase-day.sel { transform: scale(1.12); box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--refined-gold, #C6A15B); }
+  .phase-day:active { transform: scale(.9); }
+  .phase-day.mini { width: 22px; height: 22px; }
+  @keyframes pjPulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--pc); }
+    50% { box-shadow: 0 0 0 3px var(--surface), 0 0 0 9px color-mix(in srgb, var(--pc) 40%, transparent); }
+  }
+  /* medication photos gently float in place */
+  .hero-photo, .dose-photo { animation: medFloat 3.8s ease-in-out infinite; }
+  @keyframes medFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-7px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-photo, .dose-photo, .phase-day.now, .pj-track > span { animation: none; transition: none; }
+  }
   .hero-meta { display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
   .hero-next { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
   .qa-grid.qa-overlap { margin-top: -64px; position: relative; z-index: 1; }
@@ -151,9 +170,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare4"></script>
-<script src="/patient-guides.js?v=docare4"></script>
-<script src="/guide.js?v=docare4"></script>
-<script src="/portal/app.js?v=docare4"></script>
+<script src="/shared.js?v=docare5"></script>
+<script src="/patient-guides.js?v=docare5"></script>
+<script src="/guide.js?v=docare5"></script>
+<script src="/portal/app.js?v=docare5"></script>
 </body>
 </html>

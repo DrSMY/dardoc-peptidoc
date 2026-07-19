@@ -184,31 +184,37 @@ function phasesFor(plan) {
   return { phases, cycleHours, daily, scale: cycleHours / (daily ? 24 : 168) };
 }
 
-// Interactive, colorful day-by-day phase strip: one tappable chip per day
-// of the cycle (or per phase for daily meds), tinted with that phase's
-// color. Days already elapsed are solid; today pulses with a ring. Tapping
-// a chip previews that day's phase in the card's title/description.
+// Interactive phase journey: one tappable dot per day of the cycle (or
+// per phase for daily meds) on a connecting track that fills as the cycle
+// progresses. Each dot takes its phase's color; elapsed days are solid,
+// today pulses gently. Tapping a dot previews that day's phase in the
+// card's title/description.
 function phaseStripHTML(plan, ph) {
   const { phases, cycleHours, daily, scale } = phasesFor(plan);
   const elapsed = ph ? ph.h : -1;
+  const fillPct = ph ? Math.min(100, (ph.h / cycleHours) * 100) : 0;
   const phaseAt = (hr) => phases.find((p) => hr >= p.range[0] * scale && hr < p.range[1] * scale) || phases[phases.length - 1];
-  let chips = "";
+  let dots = "";
   if (!daily) {
     const days = Math.max(1, Math.round(cycleHours / 24));
     for (let d = 0; d < days; d++) {
       const pz = phaseAt((d + 0.5) * 24);
       const done = elapsed >= (d + 1) * 24;
       const now = elapsed >= d * 24 && elapsed < (d + 1) * 24;
-      chips += `<button type="button" class="phase-day${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color}" data-phidx="${phases.indexOf(pz)}" aria-label="Day ${d + 1}: ${esc(pz.name)}">${d + 1}</button>`;
+      dots += `<button type="button" class="phase-day${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color}" data-phidx="${phases.indexOf(pz)}" aria-label="Day ${d + 1}: ${esc(pz.name)}">${d + 1}</button>`;
     }
   } else {
     phases.forEach((pz, idx) => {
       const done = elapsed >= pz.range[1] * scale;
       const now = elapsed >= pz.range[0] * scale && elapsed < pz.range[1] * scale;
-      chips += `<button type="button" class="phase-day seg${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color};flex:${Math.max(1, pz.range[1] - pz.range[0])}" data-phidx="${idx}" aria-label="${esc(pz.name)}"></button>`;
+      dots += `<button type="button" class="phase-day mini${done ? " done" : ""}${now ? " now" : ""}" style="--pc:${pz.color}" data-phidx="${idx}" aria-label="${esc(pz.name)}"></button>`;
     });
   }
-  return `<div class="phase-days" role="group" aria-label="Phases of your dose cycle">${chips}</div>`;
+  return `
+  <div class="phase-journey" role="group" aria-label="Phases of your dose cycle">
+    <div class="pj-track" aria-hidden="true"><span style="width:${fillPct.toFixed(1)}%"></span></div>
+    ${dots}
+  </div>`;
 }
 
 // Hero status card for the home screen — white card on the dark olive
