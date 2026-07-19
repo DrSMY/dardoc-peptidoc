@@ -211,8 +211,26 @@
     document.getElementById("skip-intro").addEventListener("click", toBackground);
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") toBackground(); });
 
+    // Browsers pause offscreen/hidden videos and don't resume them — keep
+    // the background loop alive when the tab becomes visible again.
+    function resumeBg() {
+      if (done && !reduced && !document.hidden && !document.body.classList.contains("no-video")) {
+        vid.play().catch(() => {});
+      }
+    }
+    document.addEventListener("visibilitychange", resumeBg);
+    vid.addEventListener("pause", () => { if (done) setTimeout(resumeBg, 150); });
+    document.addEventListener("pointerdown", resumeBg, { passive: true });
+
     if (reduced) { toBackground(); return; }
-    vid.play().catch(() => { /* autoplay blocked → just show the page */ toBackground(); });
+    vid.play().catch(() => {
+      // Autoplay refused (opened in a background tab, power-saving mode…).
+      // Retry when the page becomes visible; if it still won't start
+      // shortly, don't hold the visitor — show the page.
+      const retry = () => { if (!done) vid.play().catch(() => {}); };
+      document.addEventListener("visibilitychange", retry, { once: true });
+      setTimeout(() => { if (!done && vid.paused) toBackground(); }, 3000);
+    });
     // If the video hasn't produced a frame shortly after load (missing file,
     // very slow network), don't hold visitors hostage on a black screen.
     setTimeout(() => { if (vid.readyState < 2) { if (!vid.error) document.body.classList.add("no-video"); toBackground(); } }, 4500);

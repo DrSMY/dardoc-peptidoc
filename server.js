@@ -19,6 +19,8 @@ const MIME = {
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
   ".woff2": "font/woff2",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
 };
 
 // Pretty routes → SPA entry points
