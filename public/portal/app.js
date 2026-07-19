@@ -25,6 +25,59 @@ function activePlan() {
   return S.me.plans.find((p) => p.status === "active") || S.me.plans[0] || null;
 }
 
+// ── patient welcome animation ────────────────────────────────────
+// Plays the brand animation with sound after a successful login (and
+// when the header logo is tapped — both are user gestures, so audio is
+// permitted). The video's own ending is replaced by a DoCare logo
+// conclusion card that fades over the final moments.
+function playLoginAnimation() {
+  if (document.querySelector(".login-anim")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "login-anim";
+  wrap.innerHTML = `
+    <video src="/brand/patient-login.mp4" playsinline preload="auto"></video>
+    <div class="la-endcard" aria-hidden="true">
+      <img src="/brand/docare-gold.png" alt="">
+      <span>Limitless Care</span>
+    </div>
+    <button type="button" class="la-skip">Skip ${icon("chevR", 15)}</button>`;
+  document.body.appendChild(wrap);
+  const vid = wrap.querySelector("video");
+  let closed = false;
+
+  function close() {
+    if (closed) return;
+    closed = true;
+    vid.pause();
+    wrap.classList.add("closing");
+    setTimeout(() => wrap.remove(), 500);
+  }
+
+  // Swap the video's own ending for the logo conclusion: the end card
+  // fades in over the last second, holds, then the overlay closes.
+  vid.addEventListener("timeupdate", () => {
+    if (vid.duration && vid.duration - vid.currentTime <= 1.1) {
+      wrap.classList.add("ending");
+    }
+  });
+  vid.addEventListener("ended", () => {
+    wrap.classList.add("ending");
+    setTimeout(close, 1400);
+  });
+  vid.addEventListener("error", close);
+  wrap.querySelector(".la-skip").addEventListener("click", close);
+
+  vid.muted = false;
+  vid.volume = 1;
+  vid.play().catch(() => {
+    // Sound refused outside a fresh gesture — fall back to muted playback.
+    vid.muted = true;
+    vid.play().catch(close);
+  });
+  // Never trap the patient if the video stalls before its first frame.
+  setTimeout(() => { if (!closed && vid.readyState < 2 && !vid.error) close(); }, 6000);
+}
+
 // ── login ────────────────────────────────────────────────────────
 function renderLogin() {
   document.title = "Sign in — My Portal";
@@ -65,6 +118,7 @@ function renderLogin() {
         mobile: document.getElementById("pl-mob").value,
         pin: document.getElementById("pl-pin").value,
       });
+      playLoginAnimation();
       await boot();
     } catch (ex) {
       err.textContent = ex.message;
@@ -90,7 +144,9 @@ function renderShell() {
   <div class="p-app">
     <header class="p-top">
       <button class="icon-btn" id="p-logout" aria-label="Sign out">${icon("logout", 20)}</button>
-      <img class="t-logo" src="/brand/docare-gold-sm.png" alt="DoCare — My Treatment Portal">
+      <button class="t-logo-btn" id="p-logo" aria-label="Play the DoCare welcome animation" title="Play welcome animation">
+        <img class="t-logo" src="/brand/docare-gold-sm.png" alt="DoCare — My Treatment Portal">
+      </button>
       <button class="icon-btn" id="p-bell" aria-label="Messages">${icon("bell", 20)}</button>
     </header>
     <main class="p-view" id="p-view"></main>
@@ -104,6 +160,7 @@ function renderShell() {
     S.tab = b.dataset.tab;
     paint();
   }));
+  document.getElementById("p-logo").addEventListener("click", playLoginAnimation);
   document.getElementById("p-bell").addEventListener("click", () => {
     S.tab = "messages";
     paint();

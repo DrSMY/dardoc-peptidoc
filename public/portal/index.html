@@ -14,8 +14,11 @@
     padding: 14px 16px 10px;
     background: var(--brand); color: #fff;
   }
+  .p-top .t-logo-btn { justify-self: center; background: none; border: none; padding: 4px; cursor: pointer; border-radius: 10px; }
+  .p-top .t-logo-btn:active { transform: scale(.95); }
+  .p-top .t-logo-btn:focus-visible { outline: 2.5px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
   .p-top .t-logo {
-    justify-self: center; height: 34px; width: auto;
+    display: block; height: 34px; width: auto;
     filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28));
   }
   .p-top .icon-btn { color: #fff; }
@@ -165,6 +168,38 @@
   .sym-lbl { font-size: 12.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 7px; }
   .sym-opts { display: flex; gap: 7px; flex-wrap: wrap; }
 
+  /* patient welcome animation overlay (plays with sound after login,
+     or when the header logo is tapped) */
+  .login-anim {
+    position: fixed; inset: 0; z-index: 500;
+    background:
+      radial-gradient(60% 50% at 18% 12%, rgba(198, 161, 91, .16), transparent 60%),
+      radial-gradient(55% 45% at 85% 88%, rgba(113, 131, 85, .20), transparent 65%),
+      linear-gradient(160deg, #283618, #1C2412 70%);
+    opacity: 1; transition: opacity .45s var(--ease);
+  }
+  .login-anim.closing { opacity: 0; pointer-events: none; }
+  .login-anim video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  @media (min-width: 768px) { .login-anim video { object-fit: contain; } }
+  .la-skip {
+    position: absolute; z-index: 2; left: 50%; transform: translateX(-50%);
+    bottom: calc(26px + env(safe-area-inset-bottom));
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 24px; min-height: 46px; border: 1px solid rgba(225, 199, 132, .35); border-radius: 999px;
+    background: rgba(23, 32, 15, .4); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: #F5F0DF; font-family: var(--font-head); font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .la-skip:active { transform: translateX(-50%) scale(.95); }
+  .la-endcard {
+    position: absolute; inset: 0; z-index: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: linear-gradient(160deg, #283618, #1C2412 75%);
+    opacity: 0; pointer-events: none; transition: opacity .6s var(--ease);
+  }
+  .login-anim.ending .la-endcard { opacity: 1; }
+  .la-endcard img { width: min(320px, 70vw); height: auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.55)) drop-shadow(0 0 22px rgba(225,199,132,.32)); }
+  .la-endcard span { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: var(--champagne-gold, #E1C784); font-weight: 700; }
+
   .login-hero { text-align: center; padding: 46px 20px 26px; }
   .login-hero .brand-mark { width: 62px; height: 62px; border-radius: 18px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
   .login-hero h1 { font-size: 23px; }
@@ -173,9 +208,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare6"></script>
-<script src="/patient-guides.js?v=docare6"></script>
-<script src="/guide.js?v=docare6"></script>
-<script src="/portal/app.js?v=docare6"></script>
+<script src="/shared.js?v=docare7"></script>
+<script src="/patient-guides.js?v=docare7"></script>
+<script src="/guide.js?v=docare7"></script>
+<script src="/portal/app.js?v=docare7"></script>
 </body>
 </html>
