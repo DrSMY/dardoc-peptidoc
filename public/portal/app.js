@@ -176,11 +176,26 @@ function paint() {
   app.querySelectorAll(".p-nav [data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.tab));
   const v = document.getElementById("p-view");
   window.scrollTo(0, 0);
-  if (S.tab === "home") return paintHome(v);
-  if (S.tab === "guide") return paintGuide(v);
-  if (S.tab === "log") return paintLog(v);
-  if (S.tab === "progress") return paintProgress(v);
-  if (S.tab === "messages") return paintMessages(v);
+  if (S.tab === "home") paintHome(v);
+  else if (S.tab === "guide") paintGuide(v);
+  else if (S.tab === "log") paintLog(v);
+  else if (S.tab === "progress") paintProgress(v);
+  else if (S.tab === "messages") paintMessages(v);
+  animateView(v);
+}
+
+// Staggered entrance for the freshly-rendered tab content — each top-level
+// block fades and lifts into place, giving tab switches a sense of motion.
+// Skipped entirely under prefers-reduced-motion.
+function animateView(v) {
+  if (!v || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const kids = Array.from(v.children);
+  kids.forEach((el, i) => {
+    el.style.animation = "none";
+    void el.offsetWidth;               // restart the animation on every paint
+    el.style.animation = `pv-in .44s var(--ease) both`;
+    el.style.animationDelay = Math.min(i * 55, 320) + "ms";
+  });
 }
 
 // ── phase engine ─────────────────────────────────────────────────
@@ -481,15 +496,35 @@ function paintGuide(v) {
   const primary = plans.find((p) => p.category === "glp1") || plans[0];
   const activeId = S.guidePlanId && plans.some((p) => p.id === S.guidePlanId) ? S.guidePlanId : primary.id;
   const others = S.me.plans.filter((x) => !plans.includes(x));
-  const renderOne = (plan) => buildGuide(plan, S.me.patient, S.me.doctorName);
+  const renderOne = (plan) => buildGuide(plan, S.me.patient, S.me.doctorName, { portal: true });
+
+  // Home-style header: dark olive band with a hero card for the selected
+  // medication — same visual language as the Home tab.
+  const heroFor = (plan) => `
+    <div class="hero-card">
+      <div class="hero-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} • ${esc(plan.frequency)}</div>
+      <h2 class="hero-title">Your treatment guide</h2>
+      <p class="hero-desc">${esc(howToLine(plan))}</p>
+      ${medPhoto(plan.medication, plan.category) ? `<img class="hero-photo" src="${medPhoto(plan.medication, plan.category)}" alt="">` : ""}
+      <div class="dose-chips" style="margin-top:16px;margin-bottom:0">
+        ${plan.dose ? `<span class="chip-solid">${esc(plan.dose)}</span>` : ""}
+        <span class="chip-soft">${esc(plan.frequency)}</span>
+        ${plan.blood_test && plan.blood_test !== "none" ? `<span class="chip-soft">${icon("droplet", 13)} Blood test ${esc(plan.blood_test)}</span>` : ""}
+      </div>
+    </div>`;
+
   v.innerHTML = `
-  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-    <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Print / Save PDF</button>
+  <div class="home-band" id="g-hero-band">${heroFor(plans.find((p) => p.id === activeId))}</div>
+
+  <div class="g-toolbar">
+    <div class="g-picker-wrap">${guidePickerHTML(plans, activeId)}</div>
+    <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Save PDF</button>
   </div>
-  ${guidePickerHTML(plans, activeId)}
+
   <div id="g-active-guide">${renderOne(plans.find((p) => p.id === activeId))}</div>
+
   ${others.length ? `
-  <div class="list-card" style="margin-top:16px">
+  <div class="list-card" style="margin-top:4px">
     <div class="list-head"><h3>${icon("layers", 18)} Previous programs</h3></div>
     ${others.map((o) => `
       <div style="padding:12px 16px;border-top:1px solid var(--border);font-size:13.5px">
@@ -498,7 +533,11 @@ function paintGuide(v) {
         <div style="color:var(--muted);font-size:12.5px">Started ${esc(fmtDate(o.created_at))}</div>
       </div>`).join("")}
   </div>` : ""}`;
-  wireGuidePicker(v, plans, renderOne, activeId);
+
+  // Keep the hero band in sync when a different medication is picked.
+  const band = v.querySelector("#g-hero-band");
+  const renderWithHero = (plan) => { band.innerHTML = heroFor(plan); return renderOne(plan); };
+  wireGuidePicker(v, plans, renderWithHero, activeId);
   v.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
   v.querySelector("#g-print").addEventListener("click", () => window.print());
 }

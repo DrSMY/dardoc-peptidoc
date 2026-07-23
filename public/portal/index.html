@@ -99,6 +99,16 @@
 
   .p-view { flex: 1; padding: 18px 16px calc(86px + env(safe-area-inset-bottom)); }
 
+  /* staggered tab-content entrance (JS sets per-child delay in animateView) */
+  @keyframes pv-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+  .p-nav button { transition: color .2s var(--ease); }
+  .p-nav button svg { transition: transform .2s var(--ease); }
+  .p-nav button.on svg { transform: translateY(-2px) scale(1.06); }
+  @media (prefers-reduced-motion: reduce) {
+    .p-view > * { animation: none !important; }
+    .p-nav button svg, .p-nav button.on svg { transition: none; transform: none; }
+  }
+
   .p-nav {
     position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
     width: min(560px, 100%); z-index: 100;
@@ -208,9 +218,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare7"></script>
-<script src="/patient-guides.js?v=docare7"></script>
-<script src="/guide.js?v=docare7"></script>
-<script src="/portal/app.js?v=docare7"></script>
+<script src="/shared.js?v=docare9"></script>
+<script src="/patient-guides.js?v=docare9"></script>
+<script src="/guide.js?v=docare9"></script>
+<script src="/portal/app.js?v=docare9"></script>
 </body>
 </html>

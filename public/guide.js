@@ -115,7 +115,10 @@ function otherMedCardHTML(plan) {
   </div>`;
 }
 
-function buildGuide(plan, patient, doctorName) {
+function buildGuide(plan, patient, doctorName, opts) {
+  // opts.portal — render as an in-app page (no print letterhead / footer),
+  // so the portal Guide tab can lead with a home-style hero header instead.
+  const portal = opts && opts.portal;
   const diet = plan.diet || {};
   const phases = plan.phases || [];
   const routeLabel = {
@@ -148,7 +151,8 @@ function buildGuide(plan, patient, doctorName) {
       </div>` : "";
 
   return `
-  <div class="guide">
+  <div class="guide${portal ? " guide-portal" : ""}">
+    ${portal ? "" : `
     <header class="g-head">
       <div class="g-brand">
         <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:48px;width:auto">
@@ -169,7 +173,7 @@ function buildGuide(plan, patient, doctorName) {
         const photo = typeof medPhoto === "function" ? medPhoto(plan.medication, plan.category) : null;
         return photo ? `<img src="${photo}" alt="" class="g-med-pill-photo">` : icon(routeIco, 18);
       })()} ${esc(plan.medication)}${plan.dose ? ` · ${esc(plan.dose)}` : ""}</div>
-    </section>
+    </section>`}
 
     <section class="g-sec g-sec-program">
       <h3>${icon("clipboard", 18)} Your program</h3>
@@ -224,10 +228,11 @@ function buildGuide(plan, patient, doctorName) {
       </div>
     </section>
 
+    ${portal ? "" : `
     <footer class="g-foot">
       This guide was prepared personally for ${esc(patient.name)} and is not general medical advice.
       If you feel seriously unwell, seek urgent medical care immediately.
-    </footer>
+    </footer>`}
   </div>`;
 }
 
@@ -344,6 +349,23 @@ const GUIDE_CSS = `
   .guide, .guide * { visibility: visible; }
   .guide { position: absolute; inset: 0; border: none; }
 }
+
+/* ── portal (in-app) guide — matches the Home tab's card language ── */
+.guide-portal { background: transparent; border: none; box-shadow: none; overflow: visible; }
+.guide-portal .g-sec {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm); margin-bottom: 14px; padding: 18px 18px 6px;
+}
+.guide-portal .g-sec > h3 { margin-bottom: 14px; }
+.guide-portal .g-sec-program .g-med-photo-overlay { display: none; }   /* photo already in the hero */
+.guide-portal .g-sec-program .g-facts { padding-top: 0; }
+.guide-portal .g-acc-group { margin: 0 -18px; }
+.guide-portal .g-acc { border-radius: 0; }
+.g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+.g-toolbar .btn { flex-shrink: 0; }
+.g-picker-wrap { flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.g-picker-wrap::-webkit-scrollbar { display: none; }
+.g-picker-wrap .g-picker { flex-wrap: nowrap; width: max-content; margin: 0; }
 `;
 
 function injectGuideCss() {
