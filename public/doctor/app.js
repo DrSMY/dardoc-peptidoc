@@ -462,10 +462,17 @@ async function viewPatients() {
     <input class="input" id="pt-search" type="search" placeholder="Search by name or mobile…">
   </div>
   <div class="card" id="pt-list"></div>`;
+  const CAP = 60;
   const paint = (q = "") => {
-    const list = S.patients.filter((p) =>
+    const all = S.patients.filter((p) =>
       !q || p.name.toLowerCase().includes(q) || String(p.mobile).includes(q.replace(/\D/g, "") || " "));
-    document.getElementById("pt-list").innerHTML = list.length ? list.map((p) => `
+    // With hundreds of records, render a capped slice unless searching, so the
+    // page stays snappy — the search box reaches every patient.
+    const list = q ? all : all.slice(0, CAP);
+    const moreNote = !q && all.length > CAP
+      ? `<div class="hint" style="padding:12px 16px">${icon("search", 13)} Showing ${CAP} of ${all.length} patients — search by name or mobile to find any record.</div>`
+      : "";
+    document.getElementById("pt-list").innerHTML = (list.length ? list.map((p) => `
       <a class="pt-row" href="#/patient/${p.id}">
         <div class="avatar">${esc(initials(p.name))}</div>
         <div class="pt-info">
@@ -476,7 +483,7 @@ async function viewPatients() {
           <div class="pt-meta">+${esc(p.mobile)}${p.current_plan ? ` · ${esc(p.current_plan)}` : " · no active program"}${p.last_weight ? ` · ${esc(p.last_weight)} kg` : ""}</div>
         </div>
         <div class="pt-side">${p.active_plans ? `<span class="badge badge-green">active</span><br>` : `<span class="badge badge-gray">inactive</span><br>`}<span style="font-size:11.5px">${p.last_activity ? "seen " + timeAgo(p.last_activity) : "no activity"}</span></div>
-      </a>`).join("") : `<div class="empty">${icon("users", 34)}<div class="empty-title">No patients found</div><p>Start a new consultation to register your first patient.</p></div>`;
+      </a>`).join("") : `<div class="empty">${icon("users", 34)}<div class="empty-title">No patients found</div><p>${q ? "Try a different name or mobile number." : "Start a new consultation to register your first patient."}</p></div>`) + moreNote;
   };
   paint();
   document.getElementById("pt-search").addEventListener("input", (e) => paint(e.target.value.toLowerCase().trim()));

@@ -491,6 +491,67 @@ route("POST", "/api/patients/:id/pin", (req, res, p) => {
   json(res, 200, { pin });
 });
 
+// ── bulk history import (superadmin) ─────────────────────────────
+// Imports historical consultation records as patients + completed
+// ("previous history") plans — no active programs. Idempotent via
+// `replace`: only ever removes rows this importer created (intake_json
+// carries an `imported:true` marker), never real/live patients.
+route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
+  const user = requireSuperadmin(req);
+  if (!user) return json(res, 401, { error: "Not signed in as super admin." });
+  const records = Array.isArray(body.records) ? body.records : [];
+  const doctorId = user.id;
+
+  const insPatient = db.prepare(`INSERT INTO patients
+    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level,
+     chronic_illnesses, medications, allergies, notes, intake_json, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insPlan = db.prepare(`INSERT INTO plans
+    (patient_id, doctor_id, status, category, title, medication, dose, route, frequency,
+     instructions, supplements, followup_days, next_followup, blood_test, clinical_note, clinical_suggestion, created_at)
+    VALUES (?,?,'completed',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const findMobile = db.prepare("SELECT id FROM patients WHERE mobile = ?");
+
+  // node:sqlite has no .transaction() helper — use explicit BEGIN/COMMIT.
+  db.exec("BEGIN");
+  try {
+    let removed = 0;
+    if (body.replace) {
+      const imported = db.prepare("SELECT id FROM patients WHERE intake_json LIKE '%\"imported\":true%'").all();
+      const delPlans = db.prepare("DELETE FROM plans WHERE patient_id = ?");
+      const delPat = db.prepare("DELETE FROM patients WHERE id = ?");
+      for (const p of imported) { delPlans.run(p.id); delPat.run(p.id); removed++; }
+    }
+    let synth = 1, patientsAdded = 0, plansAdded = 0;
+    for (const rec of records) {
+      let mobile = normMobile(rec.mobile);
+      if (!mobile) mobile = "0000" + String(synth++).padStart(8, "0"); // clearly-synthetic key for no-phone records
+      let m = mobile, g = 0;
+      while (findMobile.get(m)) m = mobile + String(++g); // never overwrite an existing patient
+      const r = insPatient.run(doctorId, String(rec.name || "Unknown").trim() || "Unknown", m, null,
+        rec.title || "", rec.age ?? null, rec.gender || "", rec.heightCm ?? null, rec.weightKg ?? null,
+        rec.activityLevel || "", rec.chronicIllnesses || "", rec.medications || "", rec.allergies || "",
+        rec.notes || "", JSON.stringify({ imported: true, ...(rec.intake || {}) }),
+        rec.createdAt || (new Date().toISOString().slice(0, 10) + " 00:00:00"));
+      const pid = Number(r.lastInsertRowid);
+      patientsAdded++;
+      for (const pl of (rec.plans || [])) {
+        insPlan.run(pid, doctorId, pl.category || "custom",
+          String(pl.title || pl.medication || "Program").slice(0, 140), String(pl.medication || "—").slice(0, 140),
+          pl.dose || "", pl.route || "injection", pl.frequency || "",
+          pl.instructions || "", pl.supplements || "", pl.followupDays || 0, pl.nextFollowup || null,
+          pl.bloodTest || "none", pl.clinicalNote || "", pl.emr || "", pl.createdAt || rec.createdAt || null);
+        plansAdded++;
+      }
+    }
+    db.exec("COMMIT");
+    json(res, 200, { ok: true, removed, patientsAdded, plansAdded });
+  } catch (e) {
+    db.exec("ROLLBACK");
+    json(res, 500, { error: "Import failed: " + e.message });
+  }
+});
+
 // ── plans ────────────────────────────────────────────────────────
 route("POST", "/api/plans", async (req, res, _p, body) => {
   const doc = getDoctor(req);
