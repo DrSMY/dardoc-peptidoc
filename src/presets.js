@@ -1100,10 +1100,79 @@ function weightLossCalories(tdee) {
   return Math.max(1200, Math.round(tdee) - 500);
 }
 
+// ── Lab-test catalog ─────────────────────────────────────────────
+// Canonical lab tests with a patient-facing "what it checks / why".
+// `match` are lowercase fragments used to map free-text keyBloodTests
+// (from medication info) onto a canonical entry. `fasting` shows a note.
+const LAB_TEST_CATALOG = [
+  { name: "Fasting Blood Glucose", match: ["fasting glucose", "fasting blood glucose", "blood sugar"], fasting: true,
+    detail: "Measures your blood sugar after an overnight fast — a baseline check of how your body handles glucose." },
+  { name: "HbA1c", match: ["hba1c", "a1c", "glycated"], fasting: false,
+    detail: "Your average blood sugar over the last 2–3 months. Helps screen for diabetes and track metabolic response." },
+  { name: "Lipid Profile", match: ["lipid", "cholesterol"], fasting: true,
+    detail: "Cholesterol and triglycerides (fasting) — assesses cardiovascular risk before and during treatment." },
+  { name: "Liver Function (LFTs)", match: ["liver", "lft", "alt", "ast", "hepatic"], fasting: false,
+    detail: "Checks how your liver is working (ALT, AST, bilirubin) — a routine safety check on many treatments." },
+  { name: "Kidney Function (eGFR)", match: ["kidney", "renal", "egfr", "creatinine"], fasting: false,
+    detail: "Creatinine and eGFR — confirms your kidneys are healthy enough for the prescribed medication." },
+  { name: "Thyroid Function (TSH)", match: ["thyroid", "tsh", "t3", "t4"], fasting: false,
+    detail: "TSH (± T3/T4) — screens thyroid activity, which affects metabolism and weight." },
+  { name: "Complete Blood Count (CBC)", match: ["cbc", "complete blood count", "full blood count", "fbc", "haemoglob", "hemoglob"], fasting: false,
+    detail: "A general health panel of your red cells, white cells and platelets." },
+  { name: "Comprehensive Metabolic Panel", match: ["cmp", "metabolic panel", "electrolyt", "comprehensive metabolic"], fasting: true,
+    detail: "Electrolytes, glucose, kidney and liver markers in one panel — a broad metabolic safety screen." },
+  { name: "Fasting Insulin", match: ["fasting insulin", "insulin"], fasting: true,
+    detail: "Measures insulin resistance — useful in weight management, PCOS and metabolic conditions." },
+  { name: "IGF-1", match: ["igf-1", "igf1", "igf 1"], fasting: false,
+    detail: "Reflects growth-hormone axis activity — a baseline and safety marker for GH-stimulating peptides." },
+  { name: "Testosterone (Total & Free)", match: ["testosterone"], fasting: false,
+    detail: "Hormone level relevant to energy, body composition, libido and PCOS assessment." },
+  { name: "Vitamin D (25-OH)", match: ["vitamin d", "25-oh", "25 oh"], fasting: false,
+    detail: "Checks vitamin D status — commonly low and important for energy, bone and metabolic health." },
+  { name: "Sex Hormone Panel", match: ["lh", "fsh", "estradiol", "oestradiol", "prolactin", "sex hormone"], fasting: false,
+    detail: "LH, FSH, estradiol, prolactin — evaluates the reproductive-hormone axis (e.g. for Kisspeptin, PCOS)." },
+  { name: "Inflammatory Markers (CRP/ESR)", match: ["crp", "esr", "inflammat"], fasting: false,
+    detail: "Markers of inflammation in the body — useful for recovery, healing and immune protocols." },
+  { name: "HbA1c & Fasting Glucose Panel", match: ["fasting glucose & hba1c", "fasting glucose and hba1c", "glucose & hba1c"], fasting: true,
+    detail: "Combined fasting glucose and HbA1c — the core metabolic screen for GLP-1 / weight treatments." },
+];
+
+// A ready-made bundled panel DarDoc offers for weight-loss patients.
+const WEIGHT_LOSS_PANEL = {
+  name: "Weight Loss Blood Test Panel",
+  detail: "DarDoc's bundled baseline panel for weight-management patients (glucose, HbA1c, lipids, liver, kidney, thyroid).",
+  link: "https://www.dardoc.com/dubai/lab-test/weight-loss-blood-test",
+  fasting: true,
+};
+
+// ── Supplement catalog ───────────────────────────────────────────
+// Canonical supplements with a default dose and patient-facing benefit.
+const SUPPLEMENT_CATALOG = [
+  { name: "Protein supplement", match: ["protein"], dose: "to reach your daily protein target", benefit: "Preserves lean muscle while losing fat and supports tissue repair." },
+  { name: "Multivitamin", match: ["multivitamin", "multi-vitamin", "multi vitamin"], dose: "1 daily", benefit: "Covers general micronutrient needs during rapid weight loss or restricted intake." },
+  { name: "Vitamin D3", match: ["vitamin d", "d3"], dose: "2000 IU daily", benefit: "Supports bone, immune and metabolic health; commonly low." },
+  { name: "Omega-3 (EPA/DHA)", match: ["omega-3", "omega 3", "epa", "dha", "fish oil"], dose: "1–2 g daily", benefit: "Supports heart, joint and metabolic health and reduces inflammation." },
+  { name: "Magnesium Glycinate", match: ["magnesium"], dose: "300–400 mg at night", benefit: "Supports sleep, muscle function and helps with cramps and constipation." },
+  { name: "Collagen Peptides", match: ["collagen"], dose: "10–20 g daily", benefit: "Provides building blocks for tendon, ligament, skin and joint repair." },
+  { name: "Vitamin C", match: ["vitamin c", "ascorb"], dose: "500–1000 mg daily", benefit: "Supports collagen synthesis and tissue healing." },
+  { name: "Zinc", match: ["zinc"], dose: "15–30 mg daily", benefit: "Supports wound healing, immunity and hormone production." },
+  { name: "L-Carnitine", match: ["carnitine"], dose: "500–1000 mg daily", benefit: "Helps transport fat for energy; supports fat metabolism." },
+  { name: "Berberine", match: ["berberine"], dose: "500 mg 1–3× daily", benefit: "Supports blood-sugar control and metabolic health." },
+  { name: "Probiotics", match: ["probiotic"], dose: "1 daily", benefit: "Supports gut health, digestion and can ease GI side effects." },
+  { name: "L-Glutamine", match: ["glutamine"], dose: "5–10 g daily", benefit: "Supports gut-lining repair and recovery." },
+  { name: "Melatonin", match: ["melatonin"], dose: "0.3–1 mg at night", benefit: "Supports sleep onset and circadian rhythm." },
+  { name: "Glycine", match: ["glycine"], dose: "3 g at night", benefit: "Supports deeper sleep and recovery." },
+  { name: "L-Arginine / L-Citrulline", match: ["arginine", "citrulline"], dose: "as directed", benefit: "Supports blood flow and the growth-hormone response." },
+  { name: "ZMA (Zinc + Magnesium)", match: ["zma"], dose: "1 dose at night", benefit: "Supports recovery, sleep and hormone balance." },
+];
+
 module.exports = {
   GLP1_MEDICATIONS,
   GLP1_INFO,
   GLP1_ELIGIBILITY,
+  LAB_TEST_CATALOG,
+  WEIGHT_LOSS_PANEL,
+  SUPPLEMENT_CATALOG,
   PK_PHASES_WEEKLY,
   PK_PHASES_DAILY,
   SYMPTOMS,

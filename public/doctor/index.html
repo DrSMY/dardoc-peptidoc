@@ -230,6 +230,21 @@
     font-variant-numeric: tabular-nums;
   }
   img[src^="/brand/docare-gold"] { filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
+
+  /* AI labs & supplements step */
+  .ai-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 16px; }
+  .ai-head { display: flex; align-items: center; gap: 8px; font-family: var(--font-head); font-weight: 700; font-size: 15px; margin-bottom: 12px; }
+  .ai-head svg { color: var(--brand); }
+  .pick-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); cursor: pointer; transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+  .pick-item:last-child { margin-bottom: 0; }
+  .pick-item.on { border-color: var(--brand); box-shadow: var(--inset-top-highlight), 0 0 0 1px var(--brand); }
+  .pick-item input[type="checkbox"] { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; cursor: pointer; }
+  .pick-body { display: flex; flex-direction: column; gap: 3px; }
+  .pick-name { font-family: var(--font-head); font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .pick-detail { font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .ai-why { font-size: 12px; color: var(--brand); font-weight: 600; margin-top: 2px; }
+  .add-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  .add-row .input { flex: 1; min-width: 140px; }
 </style>
 </head>
 <body>

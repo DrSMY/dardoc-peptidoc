@@ -86,12 +86,17 @@ function normMobile(m) {
 
 function parsePlan(row) {
   if (!row) return null;
+  const safe = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   return {
     ...row,
     phases: JSON.parse(row.phases_json || "[]"),
     diet: JSON.parse(row.diet_json || "{}"),
+    labTests: safe(row.lab_tests_json || "[]", []),
+    suppList: safe(row.supplements_json || "[]", []),
     phases_json: undefined,
     diet_json: undefined,
+    lab_tests_json: undefined,
+    supplements_json: undefined,
   };
 }
 
@@ -181,6 +186,9 @@ route("GET", "/api/presets", (req, res) => {
     glp1Info: presets.GLP1_INFO,
     goalDescriptions: presets.GOAL_DESCRIPTIONS,
     glp1Eligibility: presets.GLP1_ELIGIBILITY,
+    labTestCatalog: presets.LAB_TEST_CATALOG,
+    weightLossPanel: presets.WEIGHT_LOSS_PANEL,
+    supplementCatalog: presets.SUPPLEMENT_CATALOG,
   });
 });
 
@@ -563,14 +571,15 @@ route("POST", "/api/plans", async (req, res, _p, body) => {
   const r = db.prepare(`INSERT INTO plans
     (patient_id, doctor_id, category, title, medication, dose, quantity, route, frequency, half_life_hours,
      phases_json, instructions, warnings, diet_json, followup_days, next_followup, blood_test, clinical_note,
-     clinical_suggestion, supplements)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?,?,?)`)
+     clinical_suggestion, supplements, lab_tests_json, supplements_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,date('now', ?),?,?,?,?,?,?)`)
     .run(body.patientId, doc.id, body.category || "custom", body.title, body.medication,
       body.dose || "", Number(body.quantity) || 1, body.route || "injection", body.frequency || "weekly", body.halfLifeHours || null,
       JSON.stringify(body.phases || []), body.instructions || "", body.warnings || "",
       JSON.stringify(body.diet || {}), followupDays, `+${followupDays} days`,
       body.bloodTest || "none", body.clinicalNote || "",
-      body.clinicalSuggestion || "", body.supplements || "");
+      body.clinicalSuggestion || "", body.supplements || "",
+      JSON.stringify(body.labTests || []), JSON.stringify(body.suppList || []));
   json(res, 200, { id: Number(r.lastInsertRowid) });
 });
 

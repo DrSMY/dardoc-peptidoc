@@ -863,7 +863,7 @@ function editDoseModal(pl, done) {
 }
 
 // ── consultation wizard ──────────────────────────────────────────
-const WIZ_STEPS = ["Intake", "Program", "Clinical", "Review & publish"];
+const WIZ_STEPS = ["Intake", "Program", "Labs & Supplements", "Clinical", "Review & publish"];
 
 // A blank "program in progress" — the Program step builds one of these at a
 // time, then "+ Add to program" pushes a copy into S.wizard.cart so a single
@@ -887,6 +887,9 @@ async function viewConsult() {
     cart: [],              // programs added so far this consultation (one entry per medication)
     draft: freshDraft("glp1"), // the program currently being configured on the Program step
     followupDays: 28, clinicalNote: "", supplements: "",
+    labTests: [],          // chosen lab tests (structured) — shown in the guide
+    suppList: [],          // chosen supplements (structured) — shown in the guide
+    labsAnalyzed: false,   // whether the AI analysis has been auto-run for the current cart
     diet: {},              // shared metabolic targets — only relevant while a glp1 program is in the cart
   };
   if (preselect) {
@@ -939,7 +942,8 @@ function paintWizard() {
   const w = S.wizard;
   if (w.step === 0) return wizStepIntake();
   if (w.step === 1) return wizStepProgram();
-  if (w.step === 2) return wizStepClinical();
+  if (w.step === 2) return wizStepLabs();
+  if (w.step === 3) return wizStepClinical();
   return wizStepReview();
 }
 
@@ -1503,6 +1507,90 @@ function suggestedPeptidesHTML() {
 // — checks peptide info first, then GLP-1 info (both share the same shape).
 function peptideOrGlp1Info(name) {
   return (S.presets.peptideInfo || {})[name] || (S.presets.glp1Info || {})[name];
+}
+
+// ── Clinical suggestion engine (deterministic, no external API) ────
+// Analyses the chosen medications + patient findings and returns
+// suggested lab tests and supplements, each with patient-facing detail.
+// Draws on each medication's keyBloodTests/recommendedSupplements plus
+// rules keyed off the patient's age, conditions and health goals.
+function analyzeClinicalExtras(cart, patient) {
+  const catalog = S.presets.labTestCatalog || [];
+  const suppCatalog = S.presets.supplementCatalog || [];
+  const labs = new Map();   // canonical name -> { name, detail, fasting, link, required, reasons:Set }
+  const supps = new Map();  // canonical name -> { name, dose, benefit, reasons:Set }
+
+  const matchLab = (fragment) => catalog.find((t) => t.match.some((m) => fragment.includes(m)));
+  const matchSupp = (fragment) => suppCatalog.find((s) => s.match.some((m) => fragment.includes(m)));
+
+  const addLab = (entry, reason, required) => {
+    if (!entry) return;
+    const cur = labs.get(entry.name) || { name: entry.name, detail: entry.detail, fasting: !!entry.fasting, link: entry.link || "", required: false, reasons: new Set() };
+    if (reason) cur.reasons.add(reason);
+    if (required) cur.required = true;
+    labs.set(entry.name, cur);
+  };
+  const addSupp = (entry, dose, reason) => {
+    if (!entry) return;
+    const cur = supps.get(entry.name) || { name: entry.name, dose: entry.dose, benefit: entry.benefit, reasons: new Set() };
+    if (dose) cur.dose = dose; // prefer the medication-specific dose text when present
+    if (reason) cur.reasons.add(reason);
+    supps.set(entry.name, cur);
+  };
+
+  const splitFrags = (text) => String(text || "").toLowerCase()
+    .split(/[,;]|·|\band\b|\+/).map((s) => s.trim()).filter(Boolean);
+
+  const hasGlp1 = cart.some((c) => c.category === "glp1");
+
+  // 1) From each prescribed medication's clinical info.
+  for (const item of cart) {
+    const info = peptideOrGlp1Info(item.medication) || {};
+    const reason = item.medication;
+    splitFrags(info.keyBloodTests).forEach((frag) => addLab(matchLab(frag), reason, item.bloodTest === "required"));
+    // supplements: keep the medication's own dose text where we can extract it
+    String(info.recommendedSupplements || "").split(/[,;]/).forEach((chunk) => {
+      const frag = chunk.toLowerCase().trim();
+      const entry = matchSupp(frag);
+      if (!entry) return;
+      const doseM = chunk.match(/\(([^)]+)\)/) || chunk.match(/(\d[\d.\s–-]*(?:mg|mcg|g|iu|ml|units)[^,;]*)/i);
+      addSupp(entry, doseM ? doseM[1].trim() : "", reason);
+    });
+  }
+
+  // 2) The bundled weight-loss panel for GLP-1 / weight patients.
+  if (hasGlp1 && S.presets.weightLossPanel) {
+    const p = S.presets.weightLossPanel;
+    addLab({ name: p.name, detail: p.detail, fasting: p.fasting, link: p.link }, "Weight-management baseline", false);
+  }
+
+  // 3) Rules from patient findings.
+  const cond = String(patient.chronicIllnesses || "").toLowerCase();
+  const goals = String((patient.intake && patient.intake.health_goals) || "").toLowerCase() + " " + String(patient.intake && patient.intake.primary_goal || "");
+  const age = Number(patient.age) || 0;
+  const byName = (n) => catalog.find((t) => t.name === n);
+  const rule = (re, labName, why, req) => { if (re.test(cond)) addLab(byName(labName), why, req); };
+  rule(/diab|dm2|dm1|\bdm\b|sugar|glucose|hba1c/, "HbA1c", "Diabetes / glucose history", false);
+  rule(/diab|dm2|insulin resist|metabolic/, "Fasting Insulin", "Metabolic / insulin-resistance history", false);
+  rule(/thyroid|hypothyroid|hyperthyroid/, "Thyroid Function (TSH)", "Thyroid history", false);
+  rule(/pcos|pcod/, "Fasting Insulin", "PCOS", false);
+  rule(/pcos|pcod/, "Sex Hormone Panel", "PCOS", false);
+  rule(/pcos|pcod/, "Testosterone (Total & Free)", "PCOS", false);
+  rule(/liver|fatty|hepat|nafld|nash/, "Liver Function (LFTs)", "Liver history", false);
+  rule(/kidney|renal|ckd/, "Kidney Function (eGFR)", "Renal history", false);
+  rule(/hypertension|blood pressure|htn|cardiac|heart/, "Comprehensive Metabolic Panel", "Cardiometabolic history", false);
+  rule(/cholesterol|dyslipid|lipid/, "Lipid Profile", "Lipid history", false);
+  rule(/anaem|anemia|fatigue|tired/, "Complete Blood Count (CBC)", "Fatigue / anaemia history", false);
+  if (age >= 40) addLab(byName("Lipid Profile"), "Age ≥ 40 — cardiometabolic screen", false);
+
+  // 4) Goal-driven supplements.
+  if (hasGlp1 || /weight|metabol|belly|fat/.test(goals) || /obes/.test(cond)) {
+    addSupp(suppCatalog.find((s) => s.name === "Protein supplement"), "", "Weight-loss muscle preservation");
+    addSupp(suppCatalog.find((s) => s.name === "Vitamin D3"), "", "Weight-loss support");
+  }
+
+  const finalize = (m) => Array.from(m.values()).map((x) => ({ ...x, reasons: Array.from(x.reasons) }));
+  return { labs: finalize(labs), supps: finalize(supps) };
 }
 
 function wirePeptideInfoButtons(scope) {
@@ -2142,6 +2230,120 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
   return [sections.join("\n\n"), note].filter(Boolean).join("\n\n");
 }
 
+// Step 3 — AI-analysed lab tests + supplements. On first entry for the
+// current cart it auto-runs analyzeClinicalExtras() to pre-select the
+// suggested items; the doctor can toggle any off, add custom ones, and
+// the chosen items flow into the guide.
+function wizStepLabs() {
+  const w = S.wizard;
+
+  // Auto-analyse once per cart composition (re-runs if the cart changed).
+  const cartKey = w.cart.map((c) => c.medication).join("|");
+  if (w.labsAnalyzed !== cartKey) {
+    const res = analyzeClinicalExtras(w.cart, w.patient);
+    // Merge: keep anything the doctor already added, pre-select suggestions.
+    const seenL = new Set(w.labTests.map((l) => l.name));
+    res.labs.forEach((l) => { if (!seenL.has(l.name)) w.labTests.push({ ...l, on: true, suggested: true }); });
+    const seenS = new Set(w.suppList.map((s) => s.name));
+    res.supps.forEach((s) => { if (!seenS.has(s.name)) w.suppList.push({ ...s, on: true, suggested: true }); });
+    w.labsAnalyzed = cartKey;
+  }
+
+  const reasonText = (r) => (r && r.length) ? `<span class="ai-why">${esc(r.join(" · "))}</span>` : "";
+  const labRow = (l, i) => `
+    <label class="pick-item ${l.on ? "on" : ""}">
+      <input type="checkbox" data-lab="${i}" ${l.on ? "checked" : ""}>
+      <span class="pick-body">
+        <span class="pick-name">${esc(l.name)}${l.fasting ? ` <span class="badge badge-gray">fasting</span>` : ""}${l.required ? ` <span class="badge badge-red">required</span>` : ` <span class="badge badge-amber">recommended</span>`}</span>
+        <span class="pick-detail">${esc(l.detail)}</span>
+        ${reasonText(l.reasons)}
+      </span>
+    </label>`;
+  const suppRow = (s, i) => `
+    <label class="pick-item ${s.on ? "on" : ""}">
+      <input type="checkbox" data-supp="${i}" ${s.on ? "checked" : ""}>
+      <span class="pick-body">
+        <span class="pick-name">${esc(s.name)}${s.dose ? ` · <span style="color:var(--muted);font-weight:600">${esc(s.dose)}</span>` : ""}</span>
+        <span class="pick-detail">${esc(s.benefit || "")}</span>
+        ${reasonText(s.reasons)}
+      </span>
+    </label>`;
+
+  const medList = w.cart.map((c) => c.medication).join(", ") || "the program";
+  const patientName = w.patient.name || "the patient";
+  view().innerHTML = `${wizHead()}
+  <div class="card card-pad" style="max-width:820px">
+    <div class="card-title">${icon("sparkles", 19)} AI clinical analysis — labs &amp; supplements</div>
+    <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings. Suggestions are pre-selected — untick anything you don&rsquo;t want, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
+
+    <div class="ai-block">
+      <div class="ai-head">${icon("droplet", 17)} Recommended lab tests <span class="badge badge-teal" id="lab-count"></span></div>
+      <div id="lab-list">${w.labTests.length ? w.labTests.map(labRow).join("") : `<p class="hint">No specific lab tests suggested — add one below if needed.</p>`}</div>
+      <div class="add-row">
+        <input class="input" id="lab-add" placeholder="Add another lab test (name)">
+        <button class="btn btn-secondary btn-sm" id="lab-add-btn" type="button">${icon("plus", 15)} Add</button>
+      </div>
+    </div>
+
+    <div class="ai-block">
+      <div class="ai-head">${icon("pill", 17)} Recommended supplements <span class="badge badge-teal" id="supp-count"></span></div>
+      <div id="supp-list">${w.suppList.length ? w.suppList.map(suppRow).join("") : `<p class="hint">No supplements suggested — add one below if needed.</p>`}</div>
+      <div class="add-row">
+        <input class="input" id="supp-add" placeholder="Supplement name">
+        <input class="input" id="supp-dose" placeholder="Dose (e.g. 2000 IU daily)" style="max-width:200px">
+        <button class="btn btn-secondary btn-sm" id="supp-add-btn" type="button">${icon("plus", 15)} Add</button>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px">
+      <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
+      <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
+    </div>
+  </div>`;
+
+  const updateCounts = () => {
+    document.getElementById("lab-count").textContent = w.labTests.filter((l) => l.on).length;
+    document.getElementById("supp-count").textContent = w.suppList.filter((s) => s.on).length;
+  };
+  updateCounts();
+
+  view().querySelectorAll("[data-lab]").forEach((cb) => cb.addEventListener("change", () => {
+    w.labTests[Number(cb.dataset.lab)].on = cb.checked;
+    cb.closest(".pick-item").classList.toggle("on", cb.checked);
+    updateCounts();
+  }));
+  view().querySelectorAll("[data-supp]").forEach((cb) => cb.addEventListener("change", () => {
+    w.suppList[Number(cb.dataset.supp)].on = cb.checked;
+    cb.closest(".pick-item").classList.toggle("on", cb.checked);
+    updateCounts();
+  }));
+
+  document.getElementById("lab-add-btn").addEventListener("click", () => {
+    const name = document.getElementById("lab-add").value.trim();
+    if (!name) return;
+    w.labTests.push({ name, detail: "As requested by your doctor.", fasting: false, required: false, reasons: ["Added by doctor"], on: true });
+    wizStepLabs();
+  });
+  document.getElementById("supp-add-btn").addEventListener("click", () => {
+    const name = document.getElementById("supp-add").value.trim();
+    if (!name) return;
+    w.suppList.push({ name, dose: document.getElementById("supp-dose").value.trim(), benefit: "", reasons: ["Added by doctor"], on: true });
+    wizStepLabs();
+  });
+
+  document.getElementById("wz-back").addEventListener("click", () => { w.step = 1; paintWizard(); });
+  document.getElementById("wz-next").addEventListener("click", () => {
+    // Derive the legacy fields the EMR/guide callout still read.
+    const chosenLabs = w.labTests.filter((l) => l.on);
+    const chosenSupps = w.suppList.filter((s) => s.on);
+    const anyRequired = chosenLabs.some((l) => l.required);
+    const bt = chosenLabs.length ? (anyRequired ? "required" : "recommended") : "none";
+    w.cart.forEach((c) => { c.bloodTest = bt; });
+    w.supplements = chosenSupps.map((s) => s.name + (s.dose ? ` (${s.dose})` : "")).join(", ");
+    w.step = 3; paintWizard();
+  });
+}
+
 function wizStepClinical() {
   const w = S.wizard;
   const hasGlp1 = w.cart.some((c) => c.category === "glp1");
@@ -2156,13 +2358,6 @@ function wizStepClinical() {
         <div class="form-grid" style="padding:12px 16px 16px">
           <div class="field full"><label for="ci-instr-${i}">Instructions for the patient</label><textarea class="input" id="ci-instr-${i}" rows="4">${esc(c.instructions)}</textarea></div>
           <div class="field full"><label for="ci-warn-${i}">Warnings — when to contact you</label><textarea class="input" id="ci-warn-${i}" rows="3">${esc(c.warnings)}</textarea></div>
-          <div class="field"><label for="ci-blood-${i}">Blood test</label>
-            <select class="input" id="ci-blood-${i}">
-              <option value="none" ${c.bloodTest === "none" ? "selected" : ""}>Not needed</option>
-              <option value="recommended" ${c.bloodTest === "recommended" ? "selected" : ""}>Recommended</option>
-              <option value="required" ${c.bloodTest === "required" ? "selected" : ""}>Required</option>
-            </select>
-          </div>
         </div>
       </div>`).join("")}
 
@@ -2179,7 +2374,6 @@ function wizStepClinical() {
           <input class="input" id="cl-prot-max" type="number" value="${esc(w.diet.proteinMax ?? "")}" aria-label="Protein maximum">
         </div>
       </div>` : ""}
-      <div class="field full"><label for="cl-supp">Supplements (optional — shown in the guide)</label><input class="input" id="cl-supp" value="${esc(w.supplements)}" placeholder="e.g. Vitamin D3 2000 IU daily, Omega-3 1 g"></div>
       <div class="field full"><label for="cl-note">Private clinical note (EMR — not shown to patient)</label><textarea class="input" id="cl-note" rows="3" placeholder="Consultation summary for your records…">${esc(w.clinicalNote)}</textarea></div>
     </div>
 
@@ -2214,20 +2408,18 @@ function wizStepClinical() {
     await navigator.clipboard.writeText(document.getElementById("cl-emr").textContent);
     toast("Clinical record copied");
   });
-  document.getElementById("wz-back").addEventListener("click", () => { collect(); w.step = 1; paintWizard(); });
-  document.getElementById("wz-next").addEventListener("click", () => { collect(); w.step = 3; paintWizard(); });
+  document.getElementById("wz-back").addEventListener("click", () => { collect(); w.step = 2; paintWizard(); });
+  document.getElementById("wz-next").addEventListener("click", () => { collect(); w.step = 4; paintWizard(); });
 
   function collect() {
     w.cart.forEach((c, i) => {
       c.instructions = document.getElementById(`ci-instr-${i}`).value;
       c.warnings = document.getElementById(`ci-warn-${i}`).value;
-      c.bloodTest = document.getElementById(`ci-blood-${i}`).value;
     });
     w.patient.chronicIllnesses = document.getElementById("cl-chronic").value;
     w.patient.medications = document.getElementById("cl-meds").value;
     w.patient.allergies = document.getElementById("cl-allergy").value;
     w.followupDays = Number(document.getElementById("cl-fu").value) || 28;
-    w.supplements = document.getElementById("cl-supp").value;
     w.clinicalNote = document.getElementById("cl-note").value;
     if (hasGlp1) {
       w.diet.calories = Number(document.getElementById("cl-cal").value) || undefined;
@@ -2242,11 +2434,14 @@ function wizStepReview() {
   injectGuideCss();
   const nextFollowup = new Date(Date.now() + w.followupDays * 864e5).toISOString().slice(0, 10);
   const createdAt = new Date().toISOString().slice(0, 10);
+  const previewLabs = (w.labTests || []).filter((l) => l.on);
+  const previewSupps = (w.suppList || []).filter((s) => s.on);
   const fakePlans = w.cart.map((c) => ({
     title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
     category: c.category, medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
     phases: c.phases.filter((p) => p.label || p.dose), instructions: c.instructions, warnings: c.warnings,
     diet: c.category === "glp1" ? w.diet : {}, blood_test: c.bloodTest, supplements: w.supplements,
+    labTests: previewLabs, suppList: previewSupps,
     created_at: createdAt, next_followup: nextFollowup,
   }));
   const clinicalSuggestion = buildMultiClinicalSuggestion(
@@ -2292,7 +2487,7 @@ function wizStepReview() {
   </div>`;
   if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
 
-  document.getElementById("wz-back").addEventListener("click", () => { w.step = 2; paintWizard(); });
+  document.getElementById("wz-back").addEventListener("click", () => { w.step = 3; paintWizard(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
     const btn = document.getElementById("wz-publish");
     const err = document.getElementById("wz-err");
@@ -2326,6 +2521,10 @@ function wizStepReview() {
       // One plan row per program added this consultation — each keeps its
       // own dose/quantity/instructions/warnings/blood test, sharing the
       // visit-level follow-up date, clinical note and EMR suggestion.
+      // Chosen labs/supplements are visit-level — attach to every plan so
+      // the guide (rendered per-medication) can always show them.
+      const cleanLabs = (w.labTests || []).filter((l) => l.on).map((l) => ({ name: l.name, detail: l.detail, fasting: !!l.fasting, required: !!l.required, link: l.link || "" }));
+      const cleanSupps = (w.suppList || []).filter((s) => s.on).map((s) => ({ name: s.name, dose: s.dose || "", benefit: s.benefit || "" }));
       for (let i = 0; i < w.cart.length; i++) {
         const c = w.cart[i], p = fakePlans[i];
         await api("POST", "/api/plans", {
@@ -2334,6 +2533,7 @@ function wizStepReview() {
           phases: p.phases, instructions: c.instructions, warnings: c.warnings,
           diet: p.diet, followupDays: w.followupDays, bloodTest: c.bloodTest, clinicalNote: w.clinicalNote,
           clinicalSuggestion: w.clinicalSuggestion, supplements: w.supplements,
+          labTests: cleanLabs, suppList: cleanSupps,
         });
       }
       toast("Guide published");

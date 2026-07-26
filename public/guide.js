@@ -143,12 +143,39 @@ function buildGuide(plan, patient, doctorName, opts) {
   if (diet.proteinMin) dietItems.push({ ico: "utensils", label: "Daily protein", val: `${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g` });
   if (diet.water) dietItems.push({ ico: "droplet", label: "Water", val: diet.water });
 
-  const bloodTest = plan.blood_test && plan.blood_test !== "none"
+  // Structured lab tests + supplements chosen in the consultation's
+  // AI-analysis step. Fall back to the legacy blood-test callout /
+  // free-text supplements only when no structured items exist.
+  const labList = Array.isArray(plan.labTests) ? plan.labTests : [];
+  const suppItems = Array.isArray(plan.suppList) ? plan.suppList : [];
+
+  const labTestsHtml = labList.length ? `
+    <section class="g-sec">
+      <h3>${icon("droplet", 18)} Lab tests to complete</h3>
+      <div class="g-lab-list">
+        ${labList.map((l) => `
+          <div class="g-lab">
+            <div class="g-lab-top"><b>${esc(l.name)}</b>
+              ${l.required ? `<span class="badge badge-red">required</span>` : `<span class="badge badge-amber">recommended</span>`}
+              ${l.fasting ? `<span class="badge badge-gray">fasting</span>` : ""}
+            </div>
+            ${l.detail ? `<div class="g-lab-detail">${esc(l.detail)}</div>` : ""}
+            ${l.link ? `<a class="g-lab-link" href="${esc(l.link)}" target="_blank" rel="noopener">Book this test ${icon("chevR", 13)}</a>` : ""}
+          </div>`).join("")}
+      </div>
+    </section>` : "";
+
+  const bloodTest = labList.length ? "" : (plan.blood_test && plan.blood_test !== "none"
     ? `<div class="g-callout ${plan.blood_test === "required" ? "g-red" : "g-amber"}">
         ${icon("droplet", 18)}
         <div><strong>Blood test ${plan.blood_test === "required" ? "REQUIRED" : "recommended"}.</strong>
         Please complete your blood test as advised by your doctor.</div>
-      </div>` : "";
+      </div>` : "");
+
+  const supplementsAcc = suppItems.length
+    ? accordion("pill", "Recommended supplements", `<div class="g-supp-list">${suppItems.map((s) => `
+        <div class="g-supp"><b>${esc(s.name)}</b>${s.dose ? ` · <span style="color:var(--muted);font-weight:600">${esc(s.dose)}</span>` : ""}${s.benefit ? `<div class="g-lab-detail">${esc(s.benefit)}</div>` : ""}</div>`).join("")}</div>`, false)
+    : (plan.supplements ? accordion("pill", "Supplements", `<div class="g-prose">${esc(plan.supplements).replace(/\n/g, "<br>")}</div>`, false) : "");
 
   return `
   <div class="guide${portal ? " guide-portal" : ""}">
@@ -209,11 +236,13 @@ function buildGuide(plan, patient, doctorName, opts) {
 
         ${dietItems.length ? accordion("utensils", "Nutrition targets", `<div class="g-facts" style="margin-bottom:0">${dietItems.map((d) => `<div class="g-fact"><div class="g-fact-lbl">${esc(d.label)}</div><div class="g-fact-val">${esc(d.val)}</div></div>`).join("")}</div>`, false) : ""}
 
-        ${plan.supplements ? accordion("pill", "Supplements", `<div class="g-prose">${esc(plan.supplements).replace(/\n/g, "<br>")}</div>`, false) : ""}
+        ${supplementsAcc}
 
         ${plan.warnings ? accordion("alert", "When to contact your doctor", `<div class="g-callout g-red" style="margin:0">${icon("alert", 18)}<div>${esc(plan.warnings).replace(/\n/g, "<br>")}</div></div>`, true) : ""}
       </div>
     </section>
+
+    ${labTestsHtml}
 
     ${bloodTest}
 
@@ -361,6 +390,14 @@ const GUIDE_CSS = `
 .guide-portal .g-sec-program .g-facts { padding-top: 0; }
 .guide-portal .g-acc-group { margin: 0 -18px; }
 .guide-portal .g-acc { border-radius: 0; }
+/* structured lab tests + supplements */
+.g-lab-list, .g-supp-list { display: flex; flex-direction: column; gap: 10px; }
+.g-lab { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; }
+.g-lab-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font-head); font-size: 14.5px; }
+.g-lab-detail { font-size: 13px; color: var(--muted); line-height: 1.5; margin-top: 4px; }
+.g-lab-link { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--brand); font-family: var(--font-head); }
+.g-supp { padding: 4px 0; }
+.g-supp b { font-family: var(--font-head); font-size: 14.5px; }
 .g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .g-toolbar .btn { flex-shrink: 0; }
 .g-picker-wrap { flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }

@@ -73,6 +73,7 @@ function icon(name, size = 20) {
     spray: '<path d="m19 5-7 7"/><path d="M14 6.5 17.5 3"/><path d="m17 10 3.5-3.5"/><path d="M10 20a2 2 0 0 0 2-2v-3.5a2 2 0 0 0-.6-1.4l-4-4a2 2 0 0 0-1.4-.6H4a2 2 0 0 0-2 2v7.5A2 2 0 0 0 4 20Z"/>',
     cream: '<path d="M9 3h6l1 4H8Z"/><path d="M8 7h8l1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2Z"/><path d="M9 12h6"/>',
     capsule: '<rect x="2" y="9" width="20" height="6" rx="3"/><path d="M12 9v6"/>',
+    sparkles: '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z"/>',
     // brand mark — an olive leaf, used in every sidebar/login/document header
     leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
   };
