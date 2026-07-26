@@ -31,14 +31,13 @@
   }
   body.no-video .vid-wrap video { display: none; }
 
-  /* intro mode: video front and center, everything else hidden */
+  /* intro mode: video full-screen (cover) front and center, everything
+     else hidden. The square brand clip fills the viewport on mobile and
+     desktop alike. */
   body.mode-intro { overflow: hidden; }
   body.mode-intro .land { opacity: 0; pointer-events: none; }
   body.mode-intro .vid-wrap { z-index: 50; }
-  @media (min-width: 768px) {
-    /* portrait clip on a wide screen: letterbox it elegantly on the olive glow */
-    body.mode-intro .vid-wrap video { object-fit: contain; }
-  }
+  body.mode-intro .vid-wrap video { object-fit: cover; }
 
   /* background mode: video recedes behind a scrim, blurred on wide screens */
   body.mode-bg .vid-wrap::after {

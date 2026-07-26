@@ -1070,35 +1070,116 @@ function parseIntakeText(text) {
   const emailMatch = t.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   if (emailMatch) out.email = emailMatch[0];
 
-  const mobileMatch = t.match(/(\+?\d[\d\s-]{6,17}\d)/);
-  if (mobileMatch) {
-    const digits = mobileMatch[0].replace(/\D/g, "");
+  // Mobile — prefer a labelled number, else the longest 7–15 digit run.
+  const mobLabel = t.match(/(?:mobile|phone|contact|tel|whatsapp|cell|number|no\.?)\s*[:#-]?\s*(\+?[\d][\d\s().-]{5,18}\d)/i);
+  const mobRaw = mobLabel ? mobLabel[1] : (t.match(/(\+?\d[\d\s().-]{6,18}\d)/) || [])[0];
+  if (mobRaw) {
+    const digits = mobRaw.replace(/\D/g, "");
     if (digits.length >= 7 && digits.length <= 15) out.mobile = digits;
   }
 
-  const ageMatch = t.match(/\b(\d{1,3})\s*(?:y\.?o\.?|yrs?|years?|y)\b/i);
-  if (ageMatch) out.age = ageMatch[1];
+  const segsAll = t.split(/[\n,;|]+/).map((s) => s.trim()).filter(Boolean);
 
-  // Check "female" before "male" — "male" is a substring of "female".
-  if (/\bfemale\b/i.test(t)) out.gender = "Female";
-  else if (/\bmale\b/i.test(t)) out.gender = "Male";
+  // Age — labelled ("age: 35"), suffixed ("35y/35yo/35 years"), "35F/35 M",
+  // "45, male", or a bare number segment (1–110).
+  const ageMatch = t.match(/\bage\s*[:#-]?\s*(\d{1,3})\b/i)
+    || t.match(/\b(\d{1,3})\s*(?:y\.?o\.?|yrs?|years?|y)\b/i)
+    || t.match(/\b(\d{1,3})\s*[/,-]?\s*(?:male|female|[mf])\b/i);
+  if (ageMatch && Number(ageMatch[1]) > 0 && Number(ageMatch[1]) <= 120) out.age = ageMatch[1];
+  if (!out.age) {
+    const bare = segsAll.find((s) => /^\d{1,3}$/.test(s) && Number(s) >= 1 && Number(s) <= 110);
+    if (bare) out.age = bare;
+  }
 
-  const hMatch = t.match(/\b(\d{2,3})\s*cm\b/i);
+  // Gender — words, a lone M/F segment, or an age-adjacent M/F.
+  const lone = segsAll.map((s) => s.toLowerCase());
+  if (/\bfemale\b/i.test(t) || lone.includes("f")) out.gender = "Female";
+  else if (/\bmale\b/i.test(t) || lone.includes("m")) out.gender = "Male";
+  else if (/\d\s*[/,-]?\s*f\b/i.test(t)) out.gender = "Female";
+  else if (/\d\s*[/,-]?\s*m\b/i.test(t)) out.gender = "Male";
+
+  const hMatch = t.match(/(?:height|ht)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*cm\b/i);
   if (hMatch) out.heightCm = hMatch[1];
 
-  const wMatch = t.match(/\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i);
+  const wMatch = t.match(/(?:weight|wt)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*kgs?\b/i);
   if (wMatch) out.weightKg = wMatch[1];
 
-  // First comma-separated segment that looks like a name: has letters, no
-  // digits, isn't just the gender word, and isn't the email segment.
-  const segs = t.split(",").map((s) => s.trim());
-  for (const s of segs) {
-    if (s && /[a-zA-Z]/.test(s) && !/\d/.test(s) && !/^(male|female)$/i.test(s) && !s.includes("@")) { out.name = s; break; }
+  const eidMatch = t.match(/(?:emirates\s*id|eid|national\s*id|passport)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([\dA-Z-]{6,20})/i);
+  if (eidMatch) out.nationalId = eidMatch[1].trim();
+
+  // ── Name ─────────────────────────────────────────────────────────
+  // Tokens that must never be treated as (part of) a name.
+  const TITLES = /^(mr|mrs|ms|miss|dr|prof|sheikh|sheikha|mister|madam)\.?$/i;
+  const STOP = new Set(["male", "female", "patient", "name", "mobile", "phone", "contact", "tel",
+    "age", "years", "year", "yrs", "yo", "kg", "kgs", "cm", "height", "weight", "gender", "sex",
+    "diabetic", "diabetes", "hypertension", "hypertensive", "asthma", "thyroid", "allergy", "allergic",
+    "allergies", "none", "nil", "email", "whatsapp", "dob", "eid", "id", "the", "is", "a", "an", "old",
+    "he", "she", "his", "her", "with", "and", "history", "wants", "for", "weightloss", "peptide",
+    "hello", "hi", "hey", "dear", "my", "im", "named", "called", "booking", "book", "new", "am", "i",
+    "wt", "ht", "yr", "obesity", "obese", "pcos", "pcod",
+    "needs", "need", "wants", "want", "requesting", "request", "please", "taking", "on", "of", "to",
+    "medication", "med", "meds", "mounjaro", "wegovy", "ozempic", "rybelsus", "saxenda", "zepbound",
+    "glp", "glp1", "peptides", "bpc", "semaglutide", "tirzepatide"]);
+  const looksLikeName = (seg) => {
+    const words = seg.trim().replace(/[.,]+$/, "").split(/\s+/).filter(Boolean);
+    if (!words.length || words.length > 5) return null;
+    const kept = [];
+    for (const w0 of words) {
+      const w = w0.replace(/[^\p{L}'-]/gu, "");
+      if (!w) return null;                                   // had a digit/symbol → not a clean name
+      if (TITLES.test(w)) { kept.push(w0.replace(/[^\p{L}]/gu, "")); continue; }
+      if (STOP.has(w.toLowerCase())) return null;            // a keyword → this segment isn't the name
+      if (w.length < 2) return null;
+      kept.push(w0);
+    }
+    return kept.length ? kept.join(" ") : null;
+  };
+
+  // 1) Explicit label wins: "Name: X" / "Patient: X" / "name is X" / "named X".
+  const nameLabel = t.match(/(?:patient\s*name|patient|name)\s*[:#-]\s*([^\n,;|]+)/i)
+    || t.match(/\b(?:name\s+is|named|called|patient\s+is)\s+([A-Za-z][\p{L}'’.\s-]{1,40})/iu);
+  if (nameLabel) {
+    const cand = looksLikeName(nameLabel[1]);
+    if (cand) out.name = cand;
+  }
+  // 2) Otherwise scan comma / newline / pipe segments for the first name-like one.
+  if (!out.name) {
+    const segs = t.split(/[\n,;|]+/).map((s) => s.trim()).filter(Boolean);
+    for (const s of segs) {
+      if (s.includes("@")) continue;
+      const cand = looksLikeName(s);
+      if (cand) { out.name = cand; break; }
+    }
+  }
+  // 3) The first 2–3 consecutive capitalised words anywhere.
+  if (!out.name) {
+    const capRun = t.match(/\b([A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,3})\b/);
+    if (capRun) { const cand = looksLikeName(capRun[1]); if (cand) out.name = cand; }
+  }
+  // 4) Last resort — the first standalone word that isn't a keyword/unit/title
+  //    (catches a lone first name like "Meera 20 female").
+  if (!out.name) {
+    for (const word of t.split(/[\s,;|\n]+/)) {
+      const w = word.replace(/[^\p{L}'-]/gu, "");
+      if (w.length >= 2 && w.length <= 20 && !/\d/.test(word) && !TITLES.test(w) && !STOP.has(w.toLowerCase())) {
+        out.name = w.charAt(0).toUpperCase() + w.slice(1);
+        break;
+      }
+    }
+  }
+  // Split a leading title off the name into its own field.
+  if (out.name) {
+    const parts = out.name.split(/\s+/);
+    if (parts.length > 1 && TITLES.test(parts[0])) {
+      out.title = parts[0].replace(/\./g, "");
+      out.name = parts.slice(1).join(" ");
+    }
   }
 
   const condKeywords = [
-    [/diabet/i, "Diabetes"], [/hypertens|high blood pressure/i, "Hypertension"],
-    [/thyroid/i, "Thyroid disorder"], [/asthma/i, "Asthma"], [/cholesterol/i, "High cholesterol"],
+    [/diabet/i, "Diabetes"], [/hypertens|high blood pressure|htn\b/i, "Hypertension"],
+    [/thyroid/i, "Thyroid disorder"], [/asthma/i, "Asthma"], [/cholesterol|dyslipid/i, "High cholesterol"],
+    [/pcos|pcod/i, "PCOS"], [/fatty liver|nafld/i, "Fatty liver"],
   ];
   const foundConditions = condKeywords.filter(([re]) => re.test(t)).map(([, label]) => label);
   if (foundConditions.length) out.conditionsNote = foundConditions.join(", ");
@@ -1114,6 +1195,8 @@ function parseIntakeText(text) {
 function applyQuickFill(text) {
   const w = S.wizard, r = parseIntakeText(text), changed = [];
   if (r.name) { w.patient.name = r.name; changed.push("name"); }
+  if (r.title) { w.patient.title = r.title; }
+  if (r.nationalId) { w.patient.nationalId = r.nationalId; changed.push("ID"); }
   if (r.mobile) { w.patient.mobile = r.mobile; changed.push("mobile"); }
   if (r.email) { w.patient.email = r.email; changed.push("email"); }
   if (r.age) { w.patient.age = r.age; changed.push("age"); }
