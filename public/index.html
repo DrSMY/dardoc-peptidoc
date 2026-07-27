@@ -98,9 +98,22 @@
     border-radius: 28px; border: 1px solid var(--glass-border);
     background: var(--glass-bg);
     backdrop-filter: blur(22px) saturate(1.25); -webkit-backdrop-filter: blur(22px) saturate(1.25);
-    box-shadow: 0 18px 50px rgba(10, 14, 6, .45), inset 0 1px 0 rgba(255, 255, 255, .22);
+    /* Tight grounding shadow (negative spread keeps it under the card, not a
+       muddy rectangle on the dark bg) + a faint gold halo echoing the logo. */
+    box-shadow:
+      0 30px 60px -26px rgba(0, 0, 0, .55),
+      0 0 60px -12px rgba(198, 161, 91, .18),
+      inset 0 1px 0 rgba(255, 255, 255, .26);
   }
-  .hero-logo { height: clamp(56px, 9vw, 82px); width: auto; margin-bottom: 6px; filter: drop-shadow(0 3px 8px rgba(0,0,0,.55)) drop-shadow(0 0 18px rgba(225,199,132,.30)); }
+  .hero-logo {
+    height: clamp(56px, 9vw, 82px); width: auto; margin-bottom: 6px;
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,.45)) drop-shadow(0 0 18px rgba(225,199,132,.30));
+    animation: logo-breathe 5.5s var(--ease) infinite;
+  }
+  @keyframes logo-breathe {
+    0%, 100% { filter: drop-shadow(0 3px 8px rgba(0,0,0,.45)) drop-shadow(0 0 16px rgba(225,199,132,.24)); }
+    50%      { filter: drop-shadow(0 3px 8px rgba(0,0,0,.45)) drop-shadow(0 0 26px rgba(225,199,132,.45)); }
+  }
   .hero-tagline { font-size: 11.5px; letter-spacing: .3em; text-transform: uppercase; color: var(--champagne-gold, #E1C784); font-weight: 700; margin-bottom: 20px; }
   .hero h1 { font-size: clamp(26px, 4.2vw, 38px); font-weight: 800; letter-spacing: -.02em; color: #FDFBF3; line-height: 1.18; }
   .hero h1 em { font-style: normal; color: var(--champagne-gold, #E1C784); }
@@ -133,18 +146,30 @@
 
   .land-foot { text-align: center; padding: 26px 20px calc(18px + env(safe-area-inset-bottom)); font-size: 12.5px; color: rgba(245, 240, 223, .5); }
 
-  /* content entrance once the intro hands over */
-  body.mode-bg .land > * { animation: land-in .55s var(--ease) both; }
-  body.mode-bg .land-nav { animation-delay: .05s; }
-  body.mode-bg .hero { animation-delay: .15s; }
-  body.mode-bg .feats { animation-delay: .28s; }
-  body.mode-bg .land-foot { animation-delay: .36s; }
+  /* content entrance once the intro hands over — an orchestrated reveal:
+     nav settles, the card scales up, the feature chips stagger in, footer last. */
+  body.mode-bg .land-nav { animation: land-in .55s var(--ease) both; animation-delay: .04s; }
+  body.mode-bg .hero-card { animation: card-in .62s var(--ease) both; animation-delay: .14s; }
+  body.mode-bg .feat { animation: land-in .5s var(--ease) both; }
+  body.mode-bg .feat:nth-child(1) { animation-delay: .36s; }
+  body.mode-bg .feat:nth-child(2) { animation-delay: .44s; }
+  body.mode-bg .feat:nth-child(3) { animation-delay: .52s; }
+  body.mode-bg .feat:nth-child(4) { animation-delay: .60s; }
+  body.mode-bg .land-foot { animation: land-in .55s var(--ease) both; animation-delay: .66s; }
   @keyframes land-in {
     from { opacity: 0; transform: translateY(14px); }
     to { opacity: 1; transform: translateY(0); }
   }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(18px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
   @media (prefers-reduced-motion: reduce) {
-    body.mode-bg .land > * { animation: none; }
+    body.mode-bg .land-nav,
+    body.mode-bg .hero-card,
+    body.mode-bg .feat,
+    body.mode-bg .land-foot { animation: none; }
+    .hero-logo { animation: none; }
     .vid-wrap video { transition: none; }
   }
 </style>
