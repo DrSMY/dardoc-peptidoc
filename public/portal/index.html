@@ -269,39 +269,31 @@
   .lp-save:hover { filter: brightness(1.06); box-shadow: var(--inset-top-highlight), 0 6px 18px color-mix(in srgb, var(--mc) 48%, transparent); }
   .lp-save .btn-label, .ci-save .btn-label { display: inline-flex; align-items: center; gap: 8px; }
 
-  /* clickable injection-site body map */
-  .bodymap { position: relative; width: 100%; aspect-ratio: 320 / 210; margin: 2px 0 8px; }
-  .bodymap-art { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .bodymap-art .bd { fill: #F2DFC6; stroke: #D8B893; stroke-width: 1.6; }
-  .bodymap-art .briefs { fill: #EDEFE2; stroke: #CFD2BE; stroke-width: 1.4; }
-  .bodymap-art .navel { fill: #C79E76; }
+  /* clickable injection-site body map (medical illustrations) */
+  .bodymap { display: flex; align-items: center; justify-content: center; gap: 1%; width: 100%; margin: 2px 0 8px; overflow: hidden; }
+  .bm-fig { position: relative; line-height: 0; }
+  .bm-fig img { width: 100%; height: auto; display: block; -webkit-user-drag: none; user-select: none; }
   /* zones are real buttons overlaid on the drawing, placed by percentage */
+  /* The illustration already draws each zone (dashed outline + number), so
+     the buttons stay invisible until touched — they are hit areas, and the
+     chosen one lights up in the medication's colour. */
   .hs {
     position: absolute; left: var(--l); top: var(--t); width: var(--w); height: var(--h);
     transform: translate(-50%, -50%); padding: 0;
-    border: 2px dashed color-mix(in srgb, var(--mc) 62%, #9C917C);
-    border-radius: 9px; background: color-mix(in srgb, var(--mc) 11%, transparent);
-    display: flex; align-items: center; justify-content: center;
-    transition: background .16s var(--ease), border-color .16s var(--ease), transform .14s var(--ease);
+    border: 2.5px solid transparent; border-radius: 16%/22%;
+    background: transparent;
+    transition: background .16s var(--ease), border-color .16s var(--ease), box-shadow .16s var(--ease), transform .14s var(--ease);
   }
   .hs.round { border-radius: 50%; }
-  /* widen the tap area past the drawn outline without moving it */
-  .hs::after { content: ""; position: absolute; inset: -9px; border-radius: inherit; }
-  .hs > span {
-    width: 21px; height: 21px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--mc) 26%, #fff); color: color-mix(in srgb, var(--mc) 78%, #000);
-    font-family: var(--font-head); font-weight: 800; font-size: 11.5px;
-    transition: background .16s var(--ease), color .16s var(--ease);
-  }
-  .hs:active { transform: translate(-50%, -50%) scale(.93); }
-  .hs:focus-visible { outline: 3px solid var(--mc); outline-offset: 2px; }
-  .hs.on { border-style: solid; border-color: var(--mc); background: color-mix(in srgb, var(--mc) 34%, transparent); }
-  .hs.on > span { background: var(--mc); color: #fff; }
-  /* round zones get a solid centre dot when chosen, like the printed chart */
-  .hs.round.on::before {
-    content: ""; position: absolute; left: 50%; top: 50%; width: 46%; height: 46%;
-    transform: translate(-50%, -50%); border-radius: 50%; background: var(--mc);
+  /* widen the tap area past the zone outline without moving it */
+  .hs::after { content: ""; position: absolute; inset: -8px; border-radius: inherit; }
+  .hs:hover { background: color-mix(in srgb, var(--mc) 14%, transparent); }
+  .hs:active { transform: translate(-50%, -50%) scale(.94); }
+  .hs:focus-visible { outline: 3px solid var(--mc); outline-offset: 3px; }
+  .hs.on {
+    border-color: var(--mc);
+    background: color-mix(in srgb, var(--mc) 30%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc) 24%, transparent);
   }
   .site-pick { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .site-pick.chosen { color: var(--mc); font-weight: 600; }
@@ -411,9 +403,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare18"></script>
-<script src="/patient-guides.js?v=docare18"></script>
-<script src="/guide.js?v=docare18"></script>
-<script src="/portal/app.js?v=docare18"></script>
+<script src="/shared.js?v=docare19"></script>
+<script src="/patient-guides.js?v=docare19"></script>
+<script src="/guide.js?v=docare19"></script>
+<script src="/portal/app.js?v=docare19"></script>
 </body>
 </html>

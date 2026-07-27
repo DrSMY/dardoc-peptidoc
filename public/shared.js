@@ -230,37 +230,52 @@ function medIcon(plan) {
 // in percentage coordinates, so zones scale with the diagram while keeping
 // focus rings, aria-pressed and keyboard activation. `l`/`t` are the zone
 // centre and `w`/`h` its size, as a percentage of the 320×210 diagram box.
-const INJECTION_SITES = [
-  { name: "Abdomen Upper L", label: "1", l: 41.5, t: 31, w: 15, h: 20 },
-  { name: "Abdomen Upper R", label: "2", l: 58.5, t: 31, w: 15, h: 20 },
-  { name: "Abdomen Lower L", label: "3", l: 41.5, t: 55, w: 15, h: 20 },
-  { name: "Abdomen Lower R", label: "4", l: 58.5, t: 55, w: 15, h: 20 },
-  { name: "Thigh L", round: true, l: 41.5, t: 89, w: 9, h: 13 },
-  { name: "Thigh R", round: true, l: 58.5, t: 89, w: 9, h: 13 },
-  { name: "Arm L", round: true, l: 11, t: 30, w: 9.5, h: 13 },
-  { name: "Arm R", round: true, l: 89, t: 30, w: 9.5, h: 13 },
+// Three medical illustrations laid out as one figure — left arm, torso
+// (four abdominal quadrants + both thighs), right arm. `flex` is each
+// panel's share of the row, set from the artwork's own aspect ratio so the
+// three line up at a common height.
+//
+// Zone coordinates are percentages *of their own panel*, measured from the
+// artwork: `l`/`t` is the centre, `w`/`h` the size. Sites are named in full
+// ("Upper left abdomen", not "Abdomen Upper L") because the name is shown
+// back to the patient and stored on the dose record.
+const BODY_PANELS = [
+  {
+    img: "/body/arm-left.png", alt: "Left arm", flex: 24.5,
+    zones: [{ name: "Left arm", round: true, l: 33, t: 24, w: 46, h: 14 }],
+  },
+  {
+    img: "/body/torso.png", alt: "Abdomen and thighs", flex: 53.8,
+    zones: [
+      { name: "Upper left abdomen", label: "1", l: 30.6, t: 21.6, w: 34, h: 17.5 },
+      { name: "Upper right abdomen", label: "2", l: 69.6, t: 21.6, w: 34, h: 17.5 },
+      { name: "Lower left abdomen", label: "3", l: 27.5, t: 40.1, w: 34, h: 16 },
+      { name: "Lower right abdomen", label: "4", l: 72.5, t: 40.1, w: 34, h: 16 },
+      { name: "Left thigh", round: true, l: 23.1, t: 80.8, w: 23, h: 12 },
+      { name: "Right thigh", round: true, l: 76.9, t: 80.8, w: 23, h: 12 },
+    ],
+  },
+  {
+    img: "/body/arm-right.png", alt: "Right arm", flex: 16.7,
+    zones: [{ name: "Right arm", round: true, l: 80, t: 24.9, w: 46, h: 14 }],
+  },
 ];
 
-const BODY_MAP_SVG = `
-<svg viewBox="0 0 320 210" class="bodymap-art" aria-hidden="true" focusable="false">
-  <path class="bd" d="M34 34c-9 4-13 15-13 27 0 13 1 26 3 38 2 13 5 26 8 38h20c-2-13-4-26-5-39-1-11-1-22 0-33 1-11 2-20 1-27-1-6-6-8-14-4z"/>
-  <path class="bd" d="M286 34c9 4 13 15 13 27 0 13-1 26-3 38-2 13-5 26-8 38h-20c2-13 4-26 5-39 1-11 1-22 0-33-1-11-2-20-1-27 1-6 6-8 14-4z"/>
-  <path class="bd" d="M104 20c-7 27-7 56 0 81 5 18 7 27 7 39h98c0-12 2-21 7-39 7-25 7-54 0-81z"/>
-  <path class="bd" d="M122 156c-4 17-6 36-6 54h40c0-19 1-36 3-54z"/>
-  <path class="bd" d="M198 156c4 17 6 36 6 54h-40c0-19-1-36-3-54z"/>
-  <path class="briefs" d="M111 140h98c-1 17-5 29-12 37-6 7-16 6-21-1-6-8-10-16-16-23-6 7-10 15-16 23-5 7-15 8-21 1-7-8-11-20-12-37z"/>
-  <ellipse class="navel" cx="160" cy="94" rx="2.6" ry="3.4"/>
-</svg>`;
+// Flat list of every site, in the order a patient reads them.
+const INJECTION_SITES = BODY_PANELS.flatMap((p) => p.zones);
 
 // `mc` is the medication's colour — the chosen zone fills with it.
 function injectionBodyMap(mc) {
   return `
   <div class="bodymap" style="--mc:${mc}">
-    ${BODY_MAP_SVG}
-    ${INJECTION_SITES.map((z) => `
-      <button type="button" class="hs${z.round ? " round" : ""}" data-site="${esc(z.name)}"
-        style="--l:${z.l}%;--t:${z.t}%;--w:${z.w}%;--h:${z.h}%"
-        aria-label="${esc(z.name)}" aria-pressed="false">${z.label ? `<span>${z.label}</span>` : ""}</button>`).join("")}
+    ${BODY_PANELS.map((p) => `
+      <div class="bm-fig" style="flex:0 0 ${p.flex}%">
+        <img src="${p.img}" alt="${esc(p.alt)}" draggable="false">
+        ${p.zones.map((z) => `
+          <button type="button" class="hs${z.round ? " round" : ""}" data-site="${esc(z.name)}"
+            style="--l:${z.l}%;--t:${z.t}%;--w:${z.w}%;--h:${z.h}%"
+            aria-label="${esc(z.name)}" aria-pressed="false"></button>`).join("")}
+      </div>`).join("")}
   </div>`;
 }
 
