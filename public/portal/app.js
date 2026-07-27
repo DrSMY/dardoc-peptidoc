@@ -549,7 +549,8 @@ function paintGuide(v) {
 // Two clearly distinct modes: "Log injection/dose" (olive) and "Daily
 // check-in" (blue). The big segmented switch, its colour and its icon all
 // change so a patient instantly knows which they're doing.
-const SITE_NAMES = ["Abdomen L", "Abdomen R", "Thigh L", "Thigh R", "Arm L", "Arm R"];
+// Injection zones come from INJECTION_SITES (shared.js) — abdomen split
+// into four quadrants around the navel, plus both thighs and upper arms.
 
 function paintLog(v) {
   const active = S.me.plans.filter((pl) => pl.status === "active");
@@ -558,15 +559,15 @@ function paintLog(v) {
   const injWord = plan && routeIcon(plan.route) !== "syringe" ? "dose" : "injection";
 
   v.innerHTML = `
-  <div class="hello"><h1>Log</h1><div class="sub">Keep your doctor in the loop — it takes 30 seconds.</div></div>
+  <div class="hello log-hello"><h1>Log</h1><div class="sub">Keep your doctor in the loop — it takes 30 seconds.</div></div>
   <div class="mode-switch" role="tablist" aria-label="What would you like to log?">
     <button class="mode-btn inj ${mode === "dose" ? "on" : ""}" id="m-inj" role="tab" aria-selected="${mode === "dose"}">
-      <span class="mode-ico">${icon("syringe", 21)}</span>
-      <span class="mode-tx"><b>Log ${injWord}</b><small>Record what you took</small></span>
+      <span class="mode-ico">${icon("syringe", 19)}</span>
+      <span class="mode-tx"><b>Log ${injWord}</b><small>What you took</small></span>
     </button>
     <button class="mode-btn ci ${mode === "checkin" ? "on" : ""}" id="m-ci" role="tab" aria-selected="${mode === "checkin"}">
-      <span class="mode-ico">${icon("message", 21)}</span>
-      <span class="mode-tx"><b>Daily check-in</b><small>Share how you feel</small></span>
+      <span class="mode-ico">${icon("message", 19)}</span>
+      <span class="mode-tx"><b>Check-in</b><small>How you feel</small></span>
     </button>
   </div>
   <div id="log-body"></div>`;
@@ -654,7 +655,7 @@ function paintLogDose(body, v, active, plan) {
     ${isInjection ? `
     <div class="field"><label>Injection site</label>
       <div class="site-fig-grid" id="ds-sites">
-        ${SITE_NAMES.map((s) => `<button type="button" class="site-tile" data-site="${s}" style="--mc:${mc}" aria-pressed="false">${siteBody(s, mc)}<span>${esc(s)}</span></button>`).join("")}
+        ${INJECTION_SITES.map((s) => `<button type="button" class="site-tile" data-site="${esc(s.name)}" style="--mc:${mc}" aria-label="${esc(s.name)}" aria-pressed="false">${siteBody(s.name, mc)}<span class="st-region">${esc(s.region)}</span><span class="st-pos">${esc(s.pos)}</span></button>`).join("")}
       </div>
       <span class="hint">Rotate sites to avoid soreness.</span>
     </div>` : ""}
@@ -733,7 +734,7 @@ function symBlockHTML(s) {
   return `
   <div class="sym-block"><div class="sym-lbl">${esc(s.label)}</div>
     <div class="sev-opts" data-sym="${s.key}">
-      ${s.options.map((o, i) => `<button type="button" class="sev-chip" data-v="${esc(o)}" data-sev="${severityOf(s, o, i)}" aria-pressed="false"><span class="sev-dot"></span>${esc(o)}</button>`).join("")}
+      ${s.options.map((o, i) => `<button type="button" class="sev-chip" data-v="${esc(o)}" data-sev="${severityOf(s, o, i)}" aria-pressed="false">${severityBars(i + 1, s.options.length)}${esc(o)}</button>`).join("")}
     </div>
   </div>`;
 }

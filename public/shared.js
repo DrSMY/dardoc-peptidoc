@@ -219,11 +219,22 @@ function medIcon(plan) {
 // with one injection zone highlighted in the medication's colour. Same
 // silhouette in every tile, different zone lit — so the abdomen / thigh /
 // arm sites read anatomically at a glance instead of as plain text chips.
-const SITE_SPOTS = {
-  "Abdomen L": { cx: 18, cy: 30 }, "Abdomen R": { cx: 26, cy: 30 },
-  "Thigh L": { cx: 18.2, cy: 41 }, "Thigh R": { cx: 25.8, cy: 41 },
-  "Arm L": { cx: 9.8, cy: 19 }, "Arm R": { cx: 34.2, cy: 19 },
-};
+// Injection zones, split the way a patient is actually taught to rotate:
+// the abdomen has four quadrants (upper/lower × left/right) around the
+// navel, plus both thighs and both upper arms. `label` is the two-line
+// tile caption; the stored site string stays the readable full name.
+const INJECTION_SITES = [
+  { name: "Abdomen Upper L", region: "Abdomen", pos: "Upper L", cx: 18.2, cy: 22.2 },
+  { name: "Abdomen Upper R", region: "Abdomen", pos: "Upper R", cx: 25.8, cy: 22.2 },
+  { name: "Abdomen Lower L", region: "Abdomen", pos: "Lower L", cx: 18.2, cy: 31 },
+  { name: "Abdomen Lower R", region: "Abdomen", pos: "Lower R", cx: 25.8, cy: 31 },
+  { name: "Thigh L", region: "Thigh", pos: "Left", cx: 18.2, cy: 42 },
+  { name: "Thigh R", region: "Thigh", pos: "Right", cx: 25.8, cy: 42 },
+  { name: "Arm L", region: "Arm", pos: "Left", cx: 9.6, cy: 19 },
+  { name: "Arm R", region: "Arm", pos: "Right", cx: 34.4, cy: 19 },
+];
+const SITE_SPOTS = Object.fromEntries(INJECTION_SITES.map((s) => [s.name, s]));
+
 function siteBody(siteName, mc) {
   const s = SITE_SPOTS[siteName] || { cx: 22, cy: 30 };
   return `<svg viewBox="0 0 44 60" class="site-fig" aria-hidden="true">
@@ -235,9 +246,28 @@ function siteBody(siteName, mc) {
       <rect x="15" y="33" width="6.4" height="23" rx="3.2"/>
       <rect x="22.6" y="33" width="6.4" height="23" rx="3.2"/>
     </g>
-    <circle cx="${s.cx}" cy="${s.cy}" r="6.4" fill="none" stroke="${mc}" stroke-width="1.5" opacity=".4"/>
-    <circle cx="${s.cx}" cy="${s.cy}" r="3.6" fill="${mc}"/>
+    <circle cx="${s.cx}" cy="${s.cy}" r="4.6" fill="none" stroke="${mc}" stroke-width="1.4" opacity=".42"/>
+    <circle cx="${s.cx}" cy="${s.cy}" r="2.7" fill="${mc}"/>
   </svg>`;
+}
+
+// ── severity glyph ────────────────────────────────────────────────
+// A tiny 4-step level meter shown on every symptom option: the bars fill
+// up as the answer gets more severe, so intensity reads at a glance even
+// before the colour registers (and stays legible for colour-blind users,
+// who otherwise only have the text). Neutral by design — it shows "how
+// much", which suits every scale from Nausea to Hunger.
+function severityBars(level, total) {
+  const n = Math.max(2, total);
+  const on = Math.max(1, Math.min(n, level));
+  const W = 3, GAP = 1.6, H = 10;
+  let bars = "";
+  for (let i = 0; i < n; i++) {
+    const h = 3.4 + (i / (n - 1)) * (H - 3.4);
+    bars += `<rect x="${(i * (W + GAP)).toFixed(2)}" y="${(H - h).toFixed(2)}" width="${W}" height="${h.toFixed(2)}" rx="1.1" class="${i < on ? "sb-on" : "sb-off"}"/>`;
+  }
+  const w = n * W + (n - 1) * GAP;
+  return `<svg class="sev-bars" viewBox="0 0 ${w.toFixed(2)} ${H}" width="${w.toFixed(2)}" height="${H}" aria-hidden="true">${bars}</svg>`;
 }
 
 // ── toast ────────────────────────────────────────────────────────

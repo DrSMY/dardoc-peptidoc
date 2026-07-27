@@ -214,18 +214,23 @@
   .p-app { --ci: #2E5AAC; }   /* daily check-in accent (distinct from meds) */
 
   /* big segmented mode switch — injection (olive) vs check-in (blue) */
-  .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+  /* compact page heading on the Log tab so the form itself leads */
+  .log-hello { margin-bottom: 12px; }
+  .log-hello h1 { font-size: 24px; }
+  .log-hello .sub { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+
+  .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
   .mode-btn {
-    display: flex; align-items: center; gap: 10px; text-align: left;
-    padding: 13px 13px; border-radius: 16px; border: 1.5px solid var(--border);
+    display: flex; align-items: center; gap: 9px; text-align: left;
+    padding: 10px 11px; border-radius: 14px; border: 1.5px solid var(--border);
     background: var(--surface); color: var(--muted); box-shadow: var(--shadow-sm);
     transition: transform .14s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
   }
   .mode-btn:active { transform: scale(.98); }
-  .mode-btn .mode-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--faint); transition: background .18s var(--ease), color .18s var(--ease); }
+  .mode-btn .mode-ico { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--faint); transition: background .18s var(--ease), color .18s var(--ease); }
   .mode-btn .mode-tx { display: flex; flex-direction: column; min-width: 0; }
-  .mode-btn .mode-tx b { font-family: var(--font-head); font-size: 14.5px; color: var(--text); line-height: 1.15; }
-  .mode-btn .mode-tx small { font-size: 11px; color: var(--faint); margin-top: 1px; }
+  .mode-btn .mode-tx b { font-family: var(--font-head); font-size: 13.5px; color: var(--text); line-height: 1.15; white-space: nowrap; }
+  .mode-btn .mode-tx small { font-size: 10.5px; color: var(--faint); margin-top: 1px; white-space: nowrap; }
   .mode-btn.inj.on { border-color: var(--brand); background: linear-gradient(180deg, #34461F, var(--brand)); box-shadow: var(--inset-top-highlight), 0 6px 16px rgba(23,32,15,.28); }
   .mode-btn.ci.on { border-color: var(--ci); background: linear-gradient(180deg, color-mix(in srgb, var(--ci) 84%, #fff), var(--ci)); box-shadow: var(--inset-top-highlight), 0 6px 16px color-mix(in srgb, var(--ci) 42%, transparent); }
   .mode-btn.on .mode-ico { background: rgba(255,255,255,.18); color: #fff; }
@@ -264,16 +269,20 @@
   .lp-save:hover { filter: brightness(1.06); box-shadow: var(--inset-top-highlight), 0 6px 18px color-mix(in srgb, var(--mc) 48%, transparent); }
   .lp-save .btn-label, .ci-save .btn-label { display: inline-flex; align-items: center; gap: 8px; }
 
-  /* anatomical injection-site tiles */
-  .site-fig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  /* anatomical injection-site tiles — 8 zones (abdomen in 4 quadrants) */
+  .site-fig-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .site-tile {
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 10px 4px 8px; border-radius: 14px; border: 1.5px solid var(--border);
-    background: var(--bg); color: var(--muted); font-size: 12px; font-weight: 600; font-family: var(--font-head);
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 8px 2px 7px; border-radius: 12px; border: 1.5px solid var(--border);
+    background: var(--bg); color: var(--muted); font-family: var(--font-head);
     transition: border-color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease), color .15s var(--ease);
   }
   .site-tile:active { transform: scale(.96); }
-  .site-fig { width: 34px; height: 46px; }
+  .site-fig { width: 26px; height: 36px; margin-bottom: 2px; }
+  .st-region { font-size: 10.5px; font-weight: 700; line-height: 1.15; }
+  .st-pos { font-size: 9.5px; font-weight: 600; color: var(--faint); line-height: 1.15; }
+  .site-tile.on .st-pos { color: inherit; opacity: .78; }
+  @media (max-width: 359px) { .site-fig-grid { grid-template-columns: repeat(3, 1fr); } }
   .site-fig-body * { fill: #E4E1D2; transition: fill .15s var(--ease); }
   .site-tile.on { border-color: var(--mc); background: color-mix(in srgb, var(--mc) 9%, #fff); color: color-mix(in srgb, var(--mc) 76%, #000); }
   .site-tile.on .site-fig-body * { fill: color-mix(in srgb, var(--mc) 26%, #E4E1D2); }
@@ -294,23 +303,37 @@
   .recent-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
   /* blue-themed daily check-in */
-  .ci-card { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--ci); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 16px 16px 18px; margin-bottom: 14px; }
+  .ci-card { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--ci); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 15px 15px 17px; margin-bottom: 14px; }
+  /* denser field rhythm inside the check-in so the whole form reads in one view */
+  .ci-card .field { margin-bottom: 11px; }
+  .ci-card .field > label { font-size: 12px; }
+  .ci-card .input { min-height: 40px; font-size: 14.5px; padding: 8px 12px; }
+  .ci-card .ci-head { margin-bottom: 13px; }
   .ci-save { background: var(--ci); color: #fff; box-shadow: var(--inset-top-highlight), 0 4px 14px color-mix(in srgb, var(--ci) 40%, transparent); }
   .ci-save:hover { filter: brightness(1.06); }
-  .sym-set { display: flex; flex-direction: column; gap: 15px; margin-bottom: 15px; }
-  .sev-opts { display: flex; gap: 7px; flex-wrap: wrap; }
-  .sev-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 7px 13px; border-radius: 999px; border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 600; font-family: var(--font-head); transition: all .14s var(--ease); }
-  .sev-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); transition: background .14s var(--ease); }
+  .sym-set { display: flex; flex-direction: column; gap: 11px; margin-bottom: 14px; }
+  .sym-block .sym-lbl { font-size: 11px; margin-bottom: 5px; }
+  .sev-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sev-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 11px; border-radius: 999px; border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; font-family: var(--font-head); transition: all .14s var(--ease); }
+  /* severity level meter — bars fill up as the answer gets more severe, so
+     intensity is readable without relying on colour alone */
+  .sev-bars { flex-shrink: 0; overflow: visible; }
+  .sev-bars .sb-off { fill: var(--border-strong); }
+  .sev-bars .sb-on { fill: #9AA08C; }
+  .sev-chip[data-sev="good"] .sb-on { fill: #2F6B4F; }
+  .sev-chip[data-sev="warn"] .sb-on { fill: #9C6B1F; }
+  .sev-chip[data-sev="bad"] .sb-on { fill: var(--danger); }
   .sev-chip.on { color: #fff; }
   .sev-chip.on.good { background: #2F6B4F; border-color: #2F6B4F; }
   .sev-chip.on.warn { background: #9C6B1F; border-color: #9C6B1F; }
   .sev-chip.on.bad { background: var(--danger); border-color: var(--danger); }
-  .sev-chip.on .sev-dot { background: rgba(255,255,255,.85); }
+  .sev-chip.on .sb-on { fill: #fff; }
+  .sev-chip.on .sb-off { fill: rgba(255,255,255,.34); }
 
   /* energy batteries */
-  .batt-row { display: flex; gap: 8px; flex-wrap: wrap; }
-  .batt-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 8px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted); font-size: 11.5px; font-weight: 600; font-family: var(--font-head); min-width: 66px; transition: all .14s var(--ease); }
-  .batt { position: relative; width: 30px; height: 15px; border: 2px solid currentColor; border-radius: 3px; color: #BFBCAB; }
+  .batt-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .batt-btn { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 6px; border-radius: 11px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted); font-size: 10.5px; font-weight: 600; font-family: var(--font-head); min-width: 60px; transition: all .14s var(--ease); }
+  .batt { position: relative; width: 26px; height: 13px; border: 2px solid currentColor; border-radius: 3px; color: #BFBCAB; }
   .batt::after { content: ""; position: absolute; left: 100%; top: 4px; width: 2.5px; height: 5px; background: currentColor; border-radius: 0 2px 2px 0; }
   .batt-fill { position: absolute; left: 1.5px; top: 1.5px; bottom: 1.5px; width: calc(var(--fill) - 3px); border-radius: 1px; background: currentColor; }
   .batt-btn[data-sev="good"] .batt { color: #2F6B4F; }
@@ -344,9 +367,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare11"></script>
-<script src="/patient-guides.js?v=docare11"></script>
-<script src="/guide.js?v=docare11"></script>
-<script src="/portal/app.js?v=docare11"></script>
+<script src="/shared.js?v=docare12"></script>
+<script src="/patient-guides.js?v=docare12"></script>
+<script src="/guide.js?v=docare12"></script>
+<script src="/portal/app.js?v=docare12"></script>
 </body>
 </html>
