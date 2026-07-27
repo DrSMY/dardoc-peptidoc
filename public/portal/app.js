@@ -483,6 +483,42 @@ function medRowHTML(pl) {
   </details>`;
 }
 
+// Medication chooser for the Guide tab. The old version squeezed chips into
+// a one-line horizontal scroller beside the Save-PDF button, so with more
+// than two medications the rest were cut off screen and easy to miss
+// entirely. This lays every prescribed medication out as a full-width
+// tappable card in its own colour — nothing hidden, and the same card
+// language the Log tab uses. Keeps `.g-picker` + `data-gpick` so
+// wireGuidePicker() drives it unchanged.
+function guideMedChooser(plans, activeId) {
+  if (plans.length <= 1) return "";
+  return `
+  <div class="g-medbar">
+    <div class="g-medbar-head">${icon("layers", 15)} Choose a medication to read about</div>
+    <div class="g-picker g-medlist">
+      ${plans.map((p) => {
+        const on = p.id === activeId;
+        // Some programs repeat the dose inside the frequency ("2-3 sprays"
+        // / "2-3 sprays daily") — show it once rather than twice.
+        const dose = String(p.dose || "").trim();
+        const freq = String(p.frequency || "").trim();
+        const sub = dose && freq && !freq.toLowerCase().includes(dose.toLowerCase())
+          ? `${dose} · ${freq}` : (freq || dose);
+        return `
+        <button type="button" class="g-medcard ${on ? "on" : ""}" data-gpick="${p.id}" style="--mc:${medColor(p)}" aria-pressed="${on}">
+          <span class="g-medcard-ico">${icon(medIcon(p), 19)}</span>
+          <span class="g-medcard-tx">
+            <b>${esc(p.medication)}</b>
+            <small>${esc(sub)}</small>
+          </span>
+          <span class="g-medcard-badge">${routeLabelShort(p.route)}</span>
+          <span class="g-medcard-check">${icon("check", 13)}</span>
+        </button>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
 // ── guide ────────────────────────────────────────────────────────
 // Every active medication is its own full guide, selectable via a chip
 // picker — "Also on your program" summaries were replaced by this so a
@@ -519,8 +555,8 @@ function paintGuide(v) {
   v.innerHTML = `
   <div class="home-band" id="g-hero-band">${heroFor(plans.find((p) => p.id === activeId))}</div>
 
+  ${guideMedChooser(plans, activeId)}
   <div class="g-toolbar">
-    <div class="g-picker-wrap">${guidePickerHTML(plans, activeId)}</div>
     <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Save PDF</button>
   </div>
 
@@ -655,7 +691,7 @@ function paintLogDose(body, v, active, plan) {
     ${isInjection ? `
     <div class="field"><label>Injection site</label>
       <div class="site-fig-grid" id="ds-sites">
-        ${INJECTION_SITES.map((s) => `<button type="button" class="site-tile" data-site="${esc(s.name)}" style="--mc:${mc}" aria-label="${esc(s.name)}" aria-pressed="false">${siteBody(s.name, mc)}<span class="st-region">${esc(s.region)}</span><span class="st-pos">${esc(s.pos)}</span></button>`).join("")}
+        ${INJECTION_SITES.map((s) => `<button type="button" class="site-tile" data-site="${esc(s.name)}" style="--mc:${mc}" aria-label="${esc(s.name)}" aria-pressed="false">${siteCloseup(s.name, mc)}<span class="st-region">${esc(s.region)}</span><span class="st-pos">${esc(s.pos)}</span></button>`).join("")}
       </div>
       <span class="hint">Rotate sites to avoid soreness.</span>
     </div>` : ""}

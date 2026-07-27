@@ -223,31 +223,49 @@ function medIcon(plan) {
 // the abdomen has four quadrants (upper/lower × left/right) around the
 // navel, plus both thighs and both upper arms. `label` is the two-line
 // tile caption; the stored site string stays the readable full name.
+// `zx`/`zy` are the target's position inside that region's close-up
+// drawing (a 48×40 viewBox), not on a whole-body figure.
 const INJECTION_SITES = [
-  { name: "Abdomen Upper L", region: "Abdomen", pos: "Upper L", cx: 18.2, cy: 22.2 },
-  { name: "Abdomen Upper R", region: "Abdomen", pos: "Upper R", cx: 25.8, cy: 22.2 },
-  { name: "Abdomen Lower L", region: "Abdomen", pos: "Lower L", cx: 18.2, cy: 31 },
-  { name: "Abdomen Lower R", region: "Abdomen", pos: "Lower R", cx: 25.8, cy: 31 },
-  { name: "Thigh L", region: "Thigh", pos: "Left", cx: 18.2, cy: 42 },
-  { name: "Thigh R", region: "Thigh", pos: "Right", cx: 25.8, cy: 42 },
-  { name: "Arm L", region: "Arm", pos: "Left", cx: 9.6, cy: 19 },
-  { name: "Arm R", region: "Arm", pos: "Right", cx: 34.4, cy: 19 },
+  { name: "Abdomen Upper L", region: "Abdomen", pos: "Upper L", zx: 16.5, zy: 13 },
+  { name: "Abdomen Upper R", region: "Abdomen", pos: "Upper R", zx: 31.5, zy: 13 },
+  { name: "Abdomen Lower L", region: "Abdomen", pos: "Lower L", zx: 16.5, zy: 28.5 },
+  { name: "Abdomen Lower R", region: "Abdomen", pos: "Lower R", zx: 31.5, zy: 28.5 },
+  { name: "Thigh L", region: "Thigh", pos: "Left", zx: 19, zy: 17 },
+  { name: "Thigh R", region: "Thigh", pos: "Right", zx: 29, zy: 17 },
+  { name: "Arm L", region: "Arm", pos: "Left", zx: 19.5, zy: 16 },
+  { name: "Arm R", region: "Arm", pos: "Right", zx: 28.5, zy: 16 },
 ];
 const SITE_SPOTS = Object.fromEntries(INJECTION_SITES.map((s) => [s.name, s]));
 
-function siteBody(siteName, mc) {
-  const s = SITE_SPOTS[siteName] || { cx: 22, cy: 30 };
-  return `<svg viewBox="0 0 44 60" class="site-fig" aria-hidden="true">
-    <g class="site-fig-body">
-      <circle cx="22" cy="8" r="5"/>
-      <rect x="14" y="14" width="16" height="19" rx="6"/>
-      <rect x="6.5" y="15" width="6" height="18" rx="3"/>
-      <rect x="31.5" y="15" width="6" height="18" rx="3"/>
-      <rect x="15" y="33" width="6.4" height="23" rx="3.2"/>
-      <rect x="22.6" y="33" width="6.4" height="23" rx="3.2"/>
-    </g>
-    <circle cx="${s.cx}" cy="${s.cy}" r="4.6" fill="none" stroke="${mc}" stroke-width="1.4" opacity=".42"/>
-    <circle cx="${s.cx}" cy="${s.cy}" r="2.7" fill="${mc}"/>
+// Close-up anatomy for each injection region, drawn at the scale a patient
+// actually looks at when they inject — a zoomed abdomen with the navel and
+// its four quadrants, a single thigh, a single upper arm — instead of one
+// generic whole-body figure where every site was an indistinct dot. The
+// target zone is a filled patch in the medication's own colour, with a
+// dashed "rotate around here" ring, so the tile shows *where on the body*
+// at a glance.
+const SITE_ART = {
+  Abdomen: `
+    <path class="sk" d="M9 2 C12.5 14 12.5 26 9 38 L39 38 C35.5 26 35.5 14 39 2 Z"/>
+    <path class="sk-line" d="M24 7 V33"/>
+    <path class="sk-line" d="M11 20.5 H37"/>
+    <ellipse class="sk-navel" cx="24" cy="20.5" rx="1.7" ry="2.3"/>`,
+  Thigh: `
+    <path class="sk" d="M13 2 C10 13 11 27 13.5 38 L34.5 38 C37 27 38 13 35 2 Z"/>
+    <path class="sk-line" d="M24 6 C22.5 16 22.5 27 24 35"/>`,
+  Arm: `
+    <path class="sk" d="M16 5 C18.5 1.5 29.5 1.5 32 5 C34 14 34 27 32.5 38 L15.5 38 C14 27 14 14 16 5 Z"/>
+    <path class="sk-line" d="M24 8 C22.8 17 22.8 28 24 36"/>`,
+};
+
+function siteCloseup(siteName, mc) {
+  const s = SITE_SPOTS[siteName];
+  if (!s) return "";
+  const art = SITE_ART[s.region] || SITE_ART.Abdomen;
+  return `<svg viewBox="0 0 48 40" class="site-fig" aria-hidden="true">
+    ${art}
+    <ellipse class="sk-ring" cx="${s.zx}" cy="${s.zy}" rx="7.4" ry="6.4" fill="none" stroke="${mc}" stroke-width="1.3" stroke-dasharray="2.4 2.2" opacity=".55"/>
+    <ellipse class="sk-zone" cx="${s.zx}" cy="${s.zy}" rx="4.8" ry="4.1" fill="${mc}"/>
   </svg>`;
 }
 

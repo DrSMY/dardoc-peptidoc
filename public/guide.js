@@ -404,9 +404,6 @@ const GUIDE_CSS = `
 .g-supp b { font-family: var(--font-head); font-size: 14.5px; }
 .g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .g-toolbar .btn { flex-shrink: 0; }
-.g-picker-wrap { flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-.g-picker-wrap::-webkit-scrollbar { display: none; }
-.g-picker-wrap .g-picker { flex-wrap: nowrap; width: max-content; margin: 0; }
 `;
 
 function injectGuideCss() {
