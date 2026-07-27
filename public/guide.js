@@ -48,8 +48,9 @@ function standardGuideSections(plan) {
 // and the doctor's per-patient Guide tab.
 function guidePickerHTML(plans, activeId) {
   if (plans.length <= 1) return "";
+  const mc = typeof medColor === "function" ? medColor : () => "#283618";
   return `<div class="g-picker">
-    ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}">${icon(routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
+    ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}" style="--mc:${mc(p)}">${icon(typeof medIcon === "function" ? medIcon(p) : routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
   </div>`;
 }
 
@@ -367,12 +368,15 @@ const GUIDE_CSS = `
   font-family: var(--font-head); font-weight: 600; font-size: 13.5px;
   cursor: pointer; transition: all .15s var(--ease);
 }
-.g-pick-chip:hover { border-color: var(--primary); color: var(--gold-bronze); }
+.g-pick-chip { --mc: var(--brand); }
+.g-pick-chip svg { color: var(--mc); }
+.g-pick-chip:hover { border-color: var(--mc); color: color-mix(in srgb, var(--mc) 78%, #000); }
 .g-pick-chip.on {
-  border-color: var(--brand); color: #fff;
-  background: linear-gradient(180deg, #34461F, var(--brand));
-  box-shadow: var(--inset-top-highlight), 0 2px 6px rgba(23,32,15,.22);
+  border-color: var(--mc); color: #fff;
+  background: var(--mc);
+  box-shadow: var(--inset-top-highlight), 0 2px 8px color-mix(in srgb, var(--mc) 40%, transparent);
 }
+.g-pick-chip.on svg { color: #fff; }
 @media print {
   body * { visibility: hidden; }
   .guide, .guide * { visibility: visible; }

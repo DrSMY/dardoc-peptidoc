@@ -76,6 +76,14 @@ function icon(name, size = 20) {
     sparkles: '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z"/>',
     // brand mark — an olive leaf, used in every sidebar/login/document header
     leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>',
+    // compounded-peptide vial — distinguishes an injectable peptide (drawn
+    // from a vial) from a GLP-1 pen/auto-injector at a glance
+    vial: '<path d="M9 3h6"/><path d="M10 3v4.5L7.4 16.6A3 3 0 0 0 10.3 20.5h3.4a3 3 0 0 0 2.9-3.9L14 7.5V3"/><path d="M7.7 13h8.6"/>',
+    // mood faces for the daily check-in feeling scale
+    faceSmile: '<circle cx="12" cy="12" r="10"/><path d="M8 14.5s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+    faceMeh: '<circle cx="12" cy="12" r="10"/><path d="M8.5 15h7"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+    faceFrown: '<circle cx="12" cy="12" r="10"/><path d="M16 16.5s-1.5-2-4-2-4 2-4 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+    battery: '<rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/>',
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.info}</svg>`;
 }
@@ -166,6 +174,70 @@ function productIllustration(route, size = 48) {
       <rect x="19" y="8" width="10" height="11" rx="2" fill="#8F6D32"/>`,
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">${bodies[r] || bodies.pill}</svg>`;
+}
+
+// ── medication colour identity ────────────────────────────────────
+// Each of a patient's medications gets its own colour so they can tell
+// them apart at a glance — on the home list, the Log picker and the Guide.
+// The palette is deep, clinical and white-text-safe, with no orange/brown/
+// yellow so it never competes with the brand gold. Assignment is stable per
+// plan id and deterministic; the GLP-1 (the usual anchor medication) always
+// takes the signature emerald.
+const MED_PALETTE = ["#2F6B4F", "#2C6E8F", "#6C4FB0", "#1F7A68", "#5B7248", "#8E4A6E"];
+function medCatRank(p) {
+  return p.category === "glp1" ? 0 : p.category === "peptide" ? 1 : 2;
+}
+function medColorMap(plans) {
+  const order = [...(plans || [])].sort((a, b) => medCatRank(a) - medCatRank(b) || (a.id - b.id));
+  const map = {};
+  order.forEach((p, i) => { map[p.id] = MED_PALETTE[i % MED_PALETTE.length]; });
+  return map;
+}
+// Colour for one plan — reads the map computed at boot, else falls back to
+// computing from the loaded plans, else the signature emerald.
+function medColor(plan) {
+  if (!plan) return MED_PALETTE[0];
+  if (typeof S !== "undefined" && S && S.medColors && S.medColors[plan.id]) return S.medColors[plan.id];
+  if (typeof S !== "undefined" && S && S.me && S.me.plans) return medColorMap(S.me.plans)[plan.id] || MED_PALETTE[0];
+  return MED_PALETTE[0];
+}
+// Short "how it's taken" label for a medication card badge.
+function routeLabelShort(route) {
+  const r = routeIcon(route);
+  return r === "syringe" ? "Injection" : r === "spray" ? "Nasal spray" : r === "cream" ? "Topical" : "Oral";
+}
+// Icon that best represents the medication itself: injectable peptides come
+// in vials, GLP-1s in pens, everything else follows its route.
+function medIcon(plan) {
+  const r = routeIcon(plan.route);
+  if (r === "syringe" && plan.category === "peptide") return "vial";
+  return r;
+}
+
+// ── injection-site body map ───────────────────────────────────────
+// A clean front-facing figure (built from simple primitives, no rotation)
+// with one injection zone highlighted in the medication's colour. Same
+// silhouette in every tile, different zone lit — so the abdomen / thigh /
+// arm sites read anatomically at a glance instead of as plain text chips.
+const SITE_SPOTS = {
+  "Abdomen L": { cx: 18, cy: 30 }, "Abdomen R": { cx: 26, cy: 30 },
+  "Thigh L": { cx: 18.2, cy: 41 }, "Thigh R": { cx: 25.8, cy: 41 },
+  "Arm L": { cx: 9.8, cy: 19 }, "Arm R": { cx: 34.2, cy: 19 },
+};
+function siteBody(siteName, mc) {
+  const s = SITE_SPOTS[siteName] || { cx: 22, cy: 30 };
+  return `<svg viewBox="0 0 44 60" class="site-fig" aria-hidden="true">
+    <g class="site-fig-body">
+      <circle cx="22" cy="8" r="5"/>
+      <rect x="14" y="14" width="16" height="19" rx="6"/>
+      <rect x="6.5" y="15" width="6" height="18" rx="3"/>
+      <rect x="31.5" y="15" width="6" height="18" rx="3"/>
+      <rect x="15" y="33" width="6.4" height="23" rx="3.2"/>
+      <rect x="22.6" y="33" width="6.4" height="23" rx="3.2"/>
+    </g>
+    <circle cx="${s.cx}" cy="${s.cy}" r="6.4" fill="none" stroke="${mc}" stroke-width="1.5" opacity=".4"/>
+    <circle cx="${s.cx}" cy="${s.cy}" r="3.6" fill="${mc}"/>
+  </svg>`;
 }
 
 // ── toast ────────────────────────────────────────────────────────

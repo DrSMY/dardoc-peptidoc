@@ -14,6 +14,7 @@ async function boot() {
   try {
     S.me = await api("GET", "/api/portal/me");
     S.data = await api("GET", "/api/portal/data");
+    S.medColors = medColorMap(S.me.plans); // stable per-medication colour identity
     renderShell();
     paint();
   } catch {
@@ -460,13 +461,14 @@ function howToLine(pl) {
 // next-dose timing and the Guide/Log/Finished actions, instead of showing
 // everything as text up front.
 function medRowHTML(pl) {
+  const mc = medColor(pl);
   return `
-  <details class="med-row">
+  <details class="med-row" style="--mc:${mc}">
     <summary class="med-row-sum">
       <span class="med-row-illus">${medVisualHTML(pl.medication, pl.route, 40, pl.category)}</span>
       <span class="pt-info">
         <span class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
-        <span class="pt-meta">${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</span>
+        <span class="pt-meta"><span class="med-badge">${routeLabelShort(pl.route)}</span>${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</span>
       </span>
       ${icon("chevR", 16)}
     </summary>
@@ -499,13 +501,14 @@ function paintGuide(v) {
   const renderOne = (plan) => buildGuide(plan, S.me.patient, S.me.doctorName, { portal: true });
 
   // Home-style header: dark olive band with a hero card for the selected
-  // medication — same visual language as the Home tab.
+  // medication — same visual language as the Home tab, tinted with that
+  // medication's own colour so its identity carries through to the guide.
   const heroFor = (plan) => `
-    <div class="hero-card">
-      <div class="hero-lbl">${esc(plan.medication)}${plan.dose ? " " + esc(plan.dose) : ""} • ${esc(plan.frequency)}</div>
-      <h2 class="hero-title">Your treatment guide</h2>
+    <div class="hero-card g-hero-card" style="--mc:${medColor(plan)}">
+      <div class="hero-lbl">${routeLabelShort(plan.route)} · treatment guide</div>
+      <h2 class="hero-title">${esc(plan.medication)}</h2>
       <p class="hero-desc">${esc(howToLine(plan))}</p>
-      ${medPhoto(plan.medication, plan.category) ? `<img class="hero-photo" src="${medPhoto(plan.medication, plan.category)}" alt="">` : ""}
+      ${medPhoto(plan.medication, plan.category) ? `<img class="hero-photo" src="${medPhoto(plan.medication, plan.category)}" alt="">` : `<span class="hero-photo g-hero-ico">${icon(medIcon(plan), 54)}</span>`}
       <div class="dose-chips" style="margin-top:16px;margin-bottom:0">
         ${plan.dose ? `<span class="chip-solid">${esc(plan.dose)}</span>` : ""}
         <span class="chip-soft">${esc(plan.frequency)}</span>
@@ -542,135 +545,258 @@ function paintGuide(v) {
   v.querySelector("#g-print").addEventListener("click", () => window.print());
 }
 
-// ── log (dose + check-in) ────────────────────────────────────────
+// ── log (injection/dose + check-in) ──────────────────────────────
+// Two clearly distinct modes: "Log injection/dose" (olive) and "Daily
+// check-in" (blue). The big segmented switch, its colour and its icon all
+// change so a patient instantly knows which they're doing.
+const SITE_NAMES = ["Abdomen L", "Abdomen R", "Thigh L", "Thigh R", "Arm L", "Arm R"];
+
 function paintLog(v) {
   const active = S.me.plans.filter((pl) => pl.status === "active");
+  const mode = S.logMode === "checkin" ? "checkin" : "dose";
   const plan = active.find((pl) => pl.id === S.logPlanId) || active.find((pl) => pl.category === "glp1") || active[0] || null;
-  const mode = S.logMode || "dose";
-  const sites = ["Abdomen L", "Abdomen R", "Thigh L", "Thigh R", "Arm L", "Arm R"];
-  const now = new Date();
-  const localDT = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const injWord = plan && routeIcon(plan.route) !== "syringe" ? "dose" : "injection";
 
   v.innerHTML = `
   <div class="hello"><h1>Log</h1><div class="sub">Keep your doctor in the loop — it takes 30 seconds.</div></div>
-  <div style="display:flex;gap:8px;margin-bottom:16px">
-    <button class="chip ${mode === "dose" ? "on" : ""}" id="lg-dose-tab">${plan && plan.route !== "injection" ? "Log dose" : "Log injection"}</button>
-    <button class="chip ${mode === "checkin" ? "on" : ""}" id="lg-ci-tab">Daily check-in</button>
+  <div class="mode-switch" role="tablist" aria-label="What would you like to log?">
+    <button class="mode-btn inj ${mode === "dose" ? "on" : ""}" id="m-inj" role="tab" aria-selected="${mode === "dose"}">
+      <span class="mode-ico">${icon("syringe", 21)}</span>
+      <span class="mode-tx"><b>Log ${injWord}</b><small>Record what you took</small></span>
+    </button>
+    <button class="mode-btn ci ${mode === "checkin" ? "on" : ""}" id="m-ci" role="tab" aria-selected="${mode === "checkin"}">
+      <span class="mode-ico">${icon("message", 21)}</span>
+      <span class="mode-tx"><b>Daily check-in</b><small>Share how you feel</small></span>
+    </button>
   </div>
   <div id="log-body"></div>`;
 
-  v.querySelector("#lg-dose-tab").addEventListener("click", () => { S.logMode = "dose"; paintLog(v); });
-  v.querySelector("#lg-ci-tab").addEventListener("click", () => { S.logMode = "checkin"; paintLog(v); });
+  v.querySelector("#m-inj").addEventListener("click", () => { S.logMode = "dose"; paintLog(v); });
+  v.querySelector("#m-ci").addEventListener("click", () => { S.logMode = "checkin"; paintLog(v); });
+
   const body = v.querySelector("#log-body");
+  if (mode === "dose") paintLogDose(body, v, active, plan);
+  else paintLogCheckin(body, v);
+}
 
-  if (mode === "dose") {
-    // Different medications can be logged on the same day, so when more
-    // than one is active the patient picks which one this entry is for.
-    const medPicker = active.length > 1 ? `
-      <div class="field"><label>Which medication?</label>
-        <div class="chip-row" id="ds-med-picker">
-          ${active.map((pl) => `<button type="button" class="chip ${plan && pl.id === plan.id ? "on" : ""}" data-medpick="${pl.id}">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}</button>`).join("")}
-        </div>
-      </div>` : "";
-    body.innerHTML = `
-    <form class="list-card card-pad" id="dose-form">
-      ${medPicker}
-      ${plan && active.length <= 1 ? `<div class="metric-strip" style="margin-top:0"><div class="metric"><b>${esc(plan.medication)}</b>${esc(plan.dose ? plan.dose + " · " : "")}${esc(plan.frequency)}</div></div>` : ""}
-      <div class="field"><label for="ds-when">When</label><input class="input" id="ds-when" type="datetime-local" value="${localDT}" max="${localDT}"></div>
-      <div class="field"><label for="ds-dose">Dose</label><input class="input" id="ds-dose" value="${esc(plan ? plan.dose : "")}" placeholder="e.g. 2.5mg"></div>
-      ${plan && plan.route === "injection" ? `
-      <div class="field"><label>Injection site</label>
-        <div class="site-grid" id="ds-sites">${sites.map((s) => `<button type="button" class="chip" data-site="${s}">${s}</button>`).join("")}</div>
-        <span class="hint">Rotate sites to avoid soreness.</span>
-      </div>` : ""}
-      <div class="field"><label for="ds-notes">Notes (optional)</label><input class="input" id="ds-notes" placeholder="Anything to mention?"></div>
-      <button class="btn btn-primary btn-block" type="submit"><span class="spin"></span><span class="btn-label">Save dose</span></button>
-    </form>
-    ${S.data.doses.length ? accordion("clock", `Recent doses (${S.data.doses.length})`, S.data.doses.slice(0, 5).map((d) => {
-      const medName = (S.me.plans.find((pl) => pl.id === d.plan_id) || {}).medication;
-      return `
-      <div style="padding:9px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13.5px">
-        <span>${medName ? `<b>${esc(medName)}</b> ` : ""}${esc(d.dose || "Dose")}${d.site ? ` · ${esc(d.site)}` : ""}</span>
-        <span style="color:var(--muted)">${esc(fmtDate(d.taken_at, true))}</span>
-      </div>`;
-    }).join("").replace("border-top:1px solid var(--border);", ""), false) : ""}`;
+// A selectable, colour-coded medication card for the Log picker.
+function medOptHTML(pl, selected) {
+  const mc = medColor(pl);
+  return `
+  <button type="button" class="med-opt ${selected ? "sel" : ""}" data-medpick="${pl.id}" style="--mc:${mc}" aria-pressed="${!!selected}">
+    <span class="med-opt-ico">${icon(medIcon(pl), 20)}</span>
+    <span class="med-opt-tx">
+      <b>${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}</b>
+      <span class="med-opt-badges"><span class="med-badge">${routeLabelShort(pl.route)}</span>${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
+    </span>
+    <span class="med-opt-check">${icon("check", 14)}</span>
+  </button>`;
+}
 
-    body.querySelectorAll("[data-medpick]").forEach((b) => b.addEventListener("click", () => {
-      S.logPlanId = Number(b.dataset.medpick);
-      paintLog(v);
-    }));
-    let site = "";
-    body.querySelectorAll("[data-site]").forEach((b) => b.addEventListener("click", () => {
-      body.querySelectorAll("[data-site]").forEach((x) => x.classList.remove("on"));
-      b.classList.add("on");
-      site = b.dataset.site;
-    }));
-    body.querySelector("#dose-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("button[type=submit]");
-      btn.classList.add("loading");
-      try {
-        await api("POST", "/api/portal/doses", {
-          planId: plan ? plan.id : undefined,
-          takenAt: new Date(body.querySelector("#ds-when").value).toISOString(),
-          dose: body.querySelector("#ds-dose").value,
-          site,
-          notes: body.querySelector("#ds-notes").value,
-        });
-        S.data = await api("GET", "/api/portal/data");
-        toast(`${plan ? plan.medication + " dose" : "Dose"} saved — nice work!`);
-        S.tab = "home";
-        paint();
-      } catch (ex) { toast(ex.message, "bad"); }
-      finally { btn.classList.remove("loading"); }
-    });
-  } else {
-    const syms = S.me.presets.symptoms;
-    body.innerHTML = `
-    <form class="list-card card-pad" id="ci-form">
-      <div class="form-grid">
-        <div class="field"><label for="ci-date">Date</label><input class="input" id="ci-date" type="date" value="${new Date().toISOString().slice(0, 10)}" max="${new Date().toISOString().slice(0, 10)}"></div>
-        <div class="field"><label for="ci-wt">Weight (kg) — optional</label><input class="input" id="ci-wt" type="number" step="0.1" min="25" max="350" inputmode="decimal" placeholder="e.g. 82.5"></div>
-      </div>
-      ${accordion("clipboard", "How are you feeling today?", syms.map((s) => `
-      <div class="sym-block">
-        <div class="sym-lbl">${esc(s.label)}</div>
-        <div class="sym-opts" data-sym="${s.key}">
-          ${s.options.map((o, i) => `<button type="button" class="chip" data-v="${esc(o)}" data-sev="${i === 0 ? "" : s.alertOn.includes(o) ? "bad" : i >= 2 ? "warn" : ""}">${esc(o)}</button>`).join("")}
-        </div>
-      </div>`).join(""), true)}
-      <div class="field"><label for="ci-notes">Anything else? (optional)</label><textarea class="input" id="ci-notes" rows="2" placeholder="Describe how you're feeling…"></textarea></div>
-      <button class="btn btn-accent btn-block" type="submit"><span class="spin"></span><span class="btn-label">Submit check-in</span></button>
-    </form>`;
-
-    const selected = {};
-    body.querySelectorAll("[data-sym]").forEach((row) => {
-      row.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => {
-        row.querySelectorAll(".chip").forEach((x) => x.classList.remove("on", "warn", "bad"));
-        b.classList.add("on");
-        if (b.dataset.sev) b.classList.add(b.dataset.sev);
-        selected[row.dataset.sym] = b.dataset.v;
-      }));
-    });
-    body.querySelector("#ci-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = e.target.querySelector("button[type=submit]");
-      btn.classList.add("loading");
-      try {
-        const r = await api("POST", "/api/portal/checkins", {
-          date: body.querySelector("#ci-date").value,
-          weightKg: Number(body.querySelector("#ci-wt").value) || null,
-          symptoms: selected,
-          notes: body.querySelector("#ci-notes").value,
-        });
-        S.data = await api("GET", "/api/portal/data");
-        toast(r.flagged ? "Check-in sent — your doctor has been alerted about your symptoms." : "Check-in saved. Keep it up!");
-        S.tab = "home";
-        paint();
-      } catch (ex) { toast(ex.message, "bad"); }
-      finally { btn.classList.remove("loading"); }
-    });
+// Compact "this month / last / next" strip under the injection form.
+function injectionSummary(plan) {
+  const doses = dosesForPlan(plan.id);
+  const now = new Date();
+  const monthN = doses.filter((d) => { const t = new Date(d.taken_at); return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear(); }).length;
+  const last = doses[0];
+  const cycleH = frequencyToHours(plan.frequency);
+  let nextVal = "—";
+  if (String(plan.frequency).includes("needed")) nextVal = "As needed";
+  else if (last) {
+    const diff = new Date(last.taken_at).getTime() + cycleH * 36e5 - Date.now();
+    if (diff <= 0) nextVal = "Due now";
+    else { const h = Math.round(diff / 36e5); nextVal = h >= 24 ? `${Math.round(h / 24)}d` : `${h}h`; }
   }
+  const item = (ico, val, lbl) => `<div class="sum-item"><span class="sum-ico">${icon(ico, 15)}</span><b>${esc(val)}</b><small>${lbl}</small></div>`;
+  return `<div class="sum-strip" style="--mc:${medColor(plan)}">
+    ${item("syringe", monthN, "This month")}
+    ${item("clock", last ? timeAgo(last.taken_at) : "None yet", "Last dose")}
+    ${item("calendar", nextVal, "Next dose")}
+  </div>`;
+}
+
+function paintLogDose(body, v, active, plan) {
+  const now = new Date();
+  const localDT = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const mc = plan ? medColor(plan) : MED_PALETTE[0];
+  const isInjection = plan && routeIcon(plan.route) === "syringe";
+  const saveWord = isInjection ? "injection" : "dose";
+
+  const picker = active.length > 1 ? `
+    <div class="med-select">
+      <div class="med-select-lbl">Which medication?</div>
+      ${active.map((pl) => medOptHTML(pl, plan && pl.id === plan.id)).join("")}
+    </div>` : "";
+
+  const recent = S.data.doses.length ? accordion("clock", `Recent doses (${S.data.doses.length})`, S.data.doses.slice(0, 6).map((d, idx) => {
+    const dp = S.me.plans.find((pl) => pl.id === d.plan_id);
+    const dc = dp ? medColor(dp) : "var(--muted)";
+    return `
+      <div class="recent-row"${idx === 0 ? ' style="border-top:none"' : ""}>
+        <span class="recent-dot" style="background:${dc}"></span>
+        <span class="recent-main">${dp ? `<b>${esc(dp.medication)}</b> ` : ""}${esc(d.dose || "Dose")}${d.site ? ` · ${esc(d.site)}` : ""}</span>
+        <span class="recent-time">${esc(fmtDate(d.taken_at, true))}</span>
+      </div>`;
+  }).join(""), false) : "";
+
+  if (!plan) {
+    body.innerHTML = `<div class="list-card card-pad empty">${icon("syringe", 32)}<div class="empty-title">No active medication</div><p>When your doctor starts a program for you, you'll log your doses here.</p></div>${recent}`;
+    return;
+  }
+
+  body.innerHTML = `
+  ${picker}
+  <form class="log-panel" id="dose-form" style="--mc:${mc}">
+    <div class="log-panel-head">
+      <span class="lp-ico">${icon(medIcon(plan), 19)}</span>
+      <div class="lp-title"><b>Logging ${esc(plan.medication)}${plan.dose ? " · " + esc(plan.dose) : ""}</b><small>${routeLabelShort(plan.route)} · ${esc(plan.frequency)}</small></div>
+    </div>
+    ${isInjection ? `
+    <div class="field"><label>Injection site</label>
+      <div class="site-fig-grid" id="ds-sites">
+        ${SITE_NAMES.map((s) => `<button type="button" class="site-tile" data-site="${s}" style="--mc:${mc}" aria-pressed="false">${siteBody(s, mc)}<span>${esc(s)}</span></button>`).join("")}
+      </div>
+      <span class="hint">Rotate sites to avoid soreness.</span>
+    </div>` : ""}
+    <div class="field"><label for="ds-when">When</label><input class="input" id="ds-when" type="datetime-local" value="${localDT}" max="${localDT}"></div>
+    <div class="field"><label for="ds-dose">Dose</label><input class="input" id="ds-dose" value="${esc(plan.dose || "")}" placeholder="e.g. 2.5mg"></div>
+    <div class="field"><label for="ds-notes">Notes (optional)</label><input class="input" id="ds-notes" placeholder="Anything to mention?"></div>
+    <button class="btn btn-block lp-save" type="submit"><span class="spin"></span><span class="btn-label">${icon(medIcon(plan), 17)} Save ${saveWord}</span></button>
+  </form>
+  ${injectionSummary(plan)}
+  ${recent}`;
+
+  body.querySelectorAll("[data-medpick]").forEach((b) => b.addEventListener("click", () => {
+    S.logPlanId = Number(b.dataset.medpick);
+    paintLog(v);
+  }));
+
+  let site = "";
+  body.querySelectorAll("[data-site]").forEach((b) => b.addEventListener("click", () => {
+    body.querySelectorAll("[data-site]").forEach((x) => { x.classList.remove("on"); x.setAttribute("aria-pressed", "false"); });
+    b.classList.add("on");
+    b.setAttribute("aria-pressed", "true");
+    site = b.dataset.site;
+  }));
+
+  body.querySelector("#dose-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.classList.add("loading");
+    try {
+      await api("POST", "/api/portal/doses", {
+        planId: plan.id,
+        takenAt: new Date(body.querySelector("#ds-when").value).toISOString(),
+        dose: body.querySelector("#ds-dose").value,
+        site,
+        notes: body.querySelector("#ds-notes").value,
+      });
+      S.data = await api("GET", "/api/portal/data");
+      toast(`${plan.medication} ${saveWord} saved — nice work!`);
+      S.tab = "home";
+      paint();
+    } catch (ex) { toast(ex.message, "bad"); }
+    finally { btn.classList.remove("loading"); }
+  });
+}
+
+// Blue-themed daily check-in. Each symptom question renders as a colour-
+// coded severity scale (green → amber → red by how concerning the answer
+// is); the energy question renders as battery levels. Option values stay
+// exactly the preset strings, so the clinical data model is unchanged.
+function severityOf(s, opt, i) {
+  const n = s.options.length;
+  const hasAlerts = s.alertOn && s.alertOn.length;
+  if (hasAlerts && s.alertOn.includes(opt)) return "bad";
+  if (i === 0) return "good";
+  let sev = i === n - 1 ? "bad" : (i / (n - 1) <= 0.34 ? "good" : "warn");
+  if (!hasAlerts && sev === "bad") sev = "warn"; // benign scales never read as red
+  return sev;
+}
+
+function symBlockHTML(s) {
+  if (s.key === "fatigue") {
+    // energy: full → empty batteries, best option first
+    return `
+    <div class="sym-block"><div class="sym-lbl">${esc(s.label)}</div>
+      <div class="batt-row" data-sym="${s.key}">
+        ${s.options.map((o, i) => {
+          const lvl = s.options.length - i;        // full for the best option
+          const sev = severityOf(s, o, i);
+          return `<button type="button" class="batt-btn" data-v="${esc(o)}" data-sev="${sev}" aria-pressed="false">
+            <span class="batt" data-lvl="${lvl}" style="--fill:${(lvl / s.options.length) * 100}%"><span class="batt-fill"></span></span>
+            <span>${esc(o)}</span></button>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="sym-block"><div class="sym-lbl">${esc(s.label)}</div>
+    <div class="sev-opts" data-sym="${s.key}">
+      ${s.options.map((o, i) => `<button type="button" class="sev-chip" data-v="${esc(o)}" data-sev="${severityOf(s, o, i)}" aria-pressed="false"><span class="sev-dot"></span>${esc(o)}</button>`).join("")}
+    </div>
+  </div>`;
+}
+
+function checkinSummary() {
+  const cis = S.data.checkins;
+  if (!cis.length) return "";
+  const now = new Date();
+  const monthN = cis.filter((c) => { const t = new Date(c.date + "T12:00:00"); return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear(); }).length;
+  const last = cis[0];
+  const flagged = last && last.flagged;
+  const item = (ico, val, lbl, cls) => `<div class="sum-item"><span class="sum-ico">${icon(ico, 15)}</span><b class="${cls || ""}">${esc(val)}</b><small>${lbl}</small></div>`;
+  return `<div class="sum-strip ci-strip">
+    ${item("message", monthN, "This month")}
+    ${item("clock", last ? fmtDate(last.date) : "—", "Last check-in")}
+    ${item(flagged ? "alert" : "checkCircle", flagged ? "Flagged" : "All clear", "Latest", flagged ? "flag-bad" : "flag-ok")}
+  </div>`;
+}
+
+function paintLogCheckin(body, v) {
+  const syms = S.me.presets.symptoms;
+  const today = new Date().toISOString().slice(0, 10);
+  body.innerHTML = `
+  <form class="ci-card" id="ci-form">
+    <div class="ci-head"><span class="ci-ico">${icon("message", 18)}</span><div class="lp-title"><b>How are you doing today?</b><small>Helps your doctor understand how you're feeling</small></div></div>
+    <div class="form-grid">
+      <div class="field"><label for="ci-date">Date</label><input class="input" id="ci-date" type="date" value="${today}" max="${today}"></div>
+      <div class="field"><label for="ci-wt">Weight (kg) — optional</label><input class="input" id="ci-wt" type="number" step="0.1" min="25" max="350" inputmode="decimal" placeholder="e.g. 82.5"></div>
+    </div>
+    <div class="sym-set">${syms.map(symBlockHTML).join("")}</div>
+    <div class="field"><label for="ci-notes">Anything else? (optional)</label><textarea class="input" id="ci-notes" rows="2" placeholder="Describe how you're feeling…"></textarea></div>
+    <button class="btn btn-block ci-save" type="submit"><span class="spin"></span><span class="btn-label">${icon("check", 17)} Save check-in</span></button>
+  </form>
+  ${checkinSummary()}`;
+
+  const selected = {};
+  body.querySelectorAll("[data-sym]").forEach((row) => {
+    row.querySelectorAll("[data-v]").forEach((b) => b.addEventListener("click", () => {
+      row.querySelectorAll("[data-v]").forEach((x) => { x.classList.remove("on", "warn", "bad", "good"); x.setAttribute("aria-pressed", "false"); });
+      b.classList.add("on", b.dataset.sev || "good");
+      b.setAttribute("aria-pressed", "true");
+      selected[row.dataset.sym] = b.dataset.v;
+    }));
+  });
+
+  body.querySelector("#ci-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.classList.add("loading");
+    try {
+      const r = await api("POST", "/api/portal/checkins", {
+        date: body.querySelector("#ci-date").value,
+        weightKg: Number(body.querySelector("#ci-wt").value) || null,
+        symptoms: selected,
+        notes: body.querySelector("#ci-notes").value,
+      });
+      S.data = await api("GET", "/api/portal/data");
+      toast(r.flagged ? "Check-in sent — your doctor has been alerted about your symptoms." : "Check-in saved. Keep it up!");
+      S.tab = "home";
+      paint();
+    } catch (ex) { toast(ex.message, "bad"); }
+    finally { btn.classList.remove("loading"); }
+  });
 }
 
 // ── progress ─────────────────────────────────────────────────────

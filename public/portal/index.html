@@ -210,6 +210,132 @@
   .la-endcard img { width: min(320px, 70vw); height: auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.55)) drop-shadow(0 0 22px rgba(225,199,132,.32)); }
   .la-endcard span { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: var(--champagne-gold, #E1C784); font-weight: 700; }
 
+  /* ══ Log page: distinct modes + colour-coded medications ═══════════ */
+  .p-app { --ci: #2E5AAC; }   /* daily check-in accent (distinct from meds) */
+
+  /* big segmented mode switch — injection (olive) vs check-in (blue) */
+  .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+  .mode-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left;
+    padding: 13px 13px; border-radius: 16px; border: 1.5px solid var(--border);
+    background: var(--surface); color: var(--muted); box-shadow: var(--shadow-sm);
+    transition: transform .14s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+  }
+  .mode-btn:active { transform: scale(.98); }
+  .mode-btn .mode-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); color: var(--faint); transition: background .18s var(--ease), color .18s var(--ease); }
+  .mode-btn .mode-tx { display: flex; flex-direction: column; min-width: 0; }
+  .mode-btn .mode-tx b { font-family: var(--font-head); font-size: 14.5px; color: var(--text); line-height: 1.15; }
+  .mode-btn .mode-tx small { font-size: 11px; color: var(--faint); margin-top: 1px; }
+  .mode-btn.inj.on { border-color: var(--brand); background: linear-gradient(180deg, #34461F, var(--brand)); box-shadow: var(--inset-top-highlight), 0 6px 16px rgba(23,32,15,.28); }
+  .mode-btn.ci.on { border-color: var(--ci); background: linear-gradient(180deg, color-mix(in srgb, var(--ci) 84%, #fff), var(--ci)); box-shadow: var(--inset-top-highlight), 0 6px 16px color-mix(in srgb, var(--ci) 42%, transparent); }
+  .mode-btn.on .mode-ico { background: rgba(255,255,255,.18); color: #fff; }
+  .mode-btn.on .mode-tx b { color: #fff; }
+  .mode-btn.on .mode-tx small { color: rgba(255,255,255,.82); }
+
+  /* colour-coded medication selector */
+  .med-select { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 12px; margin-bottom: 14px; }
+  .med-select-lbl { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 2px 4px 9px; }
+  .med-opt {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 11px 12px; border-radius: 14px; border: 1.5px solid transparent; background: var(--bg);
+    margin-bottom: 8px; transition: border-color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease);
+  }
+  .med-opt:last-child { margin-bottom: 0; }
+  .med-opt:active { transform: scale(.985); }
+  .med-opt-ico { width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--mc); box-shadow: var(--inset-top-highlight), 0 2px 6px color-mix(in srgb, var(--mc) 45%, transparent); }
+  .med-opt-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .med-opt-tx b { font-family: var(--font-head); font-size: 14.5px; color: var(--text); }
+  .med-opt-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .med-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; font-family: var(--font-head); padding: 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--mc, var(--brand)) 15%, #fff); color: color-mix(in srgb, var(--mc, var(--brand)) 72%, #000); }
+  .med-opt-check { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; background: var(--mc); opacity: 0; transform: scale(.6); transition: opacity .15s var(--ease), transform .15s var(--ease); }
+  .med-opt.sel { border-color: var(--mc); background: color-mix(in srgb, var(--mc) 8%, #fff); }
+  .med-opt.sel .med-opt-check { opacity: 1; transform: scale(1); }
+
+  /* the inline logging panel, tinted with the selected medication's colour */
+  .log-panel { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--mc); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 16px 16px 18px; margin-bottom: 14px; }
+  .log-panel-head, .ci-head { display: flex; align-items: center; gap: 11px; margin-bottom: 15px; }
+  .lp-ico, .ci-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .lp-ico { background: var(--mc); box-shadow: var(--inset-top-highlight), 0 2px 6px color-mix(in srgb, var(--mc) 45%, transparent); }
+  .ci-ico { background: var(--ci); box-shadow: var(--inset-top-highlight), 0 2px 6px color-mix(in srgb, var(--ci) 42%, transparent); }
+  .lp-title { display: flex; flex-direction: column; min-width: 0; }
+  .lp-title b { font-family: var(--font-head); font-size: 15px; color: var(--text); }
+  .lp-title small { font-size: 12px; color: var(--muted); }
+  .lp-save { background: var(--mc); color: #fff; box-shadow: var(--inset-top-highlight), 0 4px 14px color-mix(in srgb, var(--mc) 40%, transparent); }
+  .lp-save:hover { filter: brightness(1.06); box-shadow: var(--inset-top-highlight), 0 6px 18px color-mix(in srgb, var(--mc) 48%, transparent); }
+  .lp-save .btn-label, .ci-save .btn-label { display: inline-flex; align-items: center; gap: 8px; }
+
+  /* anatomical injection-site tiles */
+  .site-fig-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .site-tile {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 10px 4px 8px; border-radius: 14px; border: 1.5px solid var(--border);
+    background: var(--bg); color: var(--muted); font-size: 12px; font-weight: 600; font-family: var(--font-head);
+    transition: border-color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease), color .15s var(--ease);
+  }
+  .site-tile:active { transform: scale(.96); }
+  .site-fig { width: 34px; height: 46px; }
+  .site-fig-body * { fill: #E4E1D2; transition: fill .15s var(--ease); }
+  .site-tile.on { border-color: var(--mc); background: color-mix(in srgb, var(--mc) 9%, #fff); color: color-mix(in srgb, var(--mc) 76%, #000); }
+  .site-tile.on .site-fig-body * { fill: color-mix(in srgb, var(--mc) 26%, #E4E1D2); }
+
+  /* compact summary strips (injection / check-in) */
+  .sum-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 14px 8px; margin-bottom: 14px; }
+  .sum-item { display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
+  .sum-ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; margin-bottom: 5px; background: color-mix(in srgb, var(--mc, var(--brand)) 13%, #fff); color: var(--mc, var(--brand)); }
+  .sum-item b { font-family: var(--font-head); font-size: 14.5px; color: var(--text); }
+  .sum-item small { font-size: 10.5px; color: var(--muted); }
+  .ci-strip { --mc: var(--ci); }
+  .flag-ok { color: #2F6B4F !important; } .flag-bad { color: var(--danger) !important; }
+
+  /* recent-doses rows */
+  .recent-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+  .recent-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .recent-main { flex: 1; min-width: 0; }
+  .recent-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+  /* blue-themed daily check-in */
+  .ci-card { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--ci); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 16px 16px 18px; margin-bottom: 14px; }
+  .ci-save { background: var(--ci); color: #fff; box-shadow: var(--inset-top-highlight), 0 4px 14px color-mix(in srgb, var(--ci) 40%, transparent); }
+  .ci-save:hover { filter: brightness(1.06); }
+  .sym-set { display: flex; flex-direction: column; gap: 15px; margin-bottom: 15px; }
+  .sev-opts { display: flex; gap: 7px; flex-wrap: wrap; }
+  .sev-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 7px 13px; border-radius: 999px; border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 600; font-family: var(--font-head); transition: all .14s var(--ease); }
+  .sev-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); transition: background .14s var(--ease); }
+  .sev-chip.on { color: #fff; }
+  .sev-chip.on.good { background: #2F6B4F; border-color: #2F6B4F; }
+  .sev-chip.on.warn { background: #9C6B1F; border-color: #9C6B1F; }
+  .sev-chip.on.bad { background: var(--danger); border-color: var(--danger); }
+  .sev-chip.on .sev-dot { background: rgba(255,255,255,.85); }
+
+  /* energy batteries */
+  .batt-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .batt-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 8px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted); font-size: 11.5px; font-weight: 600; font-family: var(--font-head); min-width: 66px; transition: all .14s var(--ease); }
+  .batt { position: relative; width: 30px; height: 15px; border: 2px solid currentColor; border-radius: 3px; color: #BFBCAB; }
+  .batt::after { content: ""; position: absolute; left: 100%; top: 4px; width: 2.5px; height: 5px; background: currentColor; border-radius: 0 2px 2px 0; }
+  .batt-fill { position: absolute; left: 1.5px; top: 1.5px; bottom: 1.5px; width: calc(var(--fill) - 3px); border-radius: 1px; background: currentColor; }
+  .batt-btn[data-sev="good"] .batt { color: #2F6B4F; }
+  .batt-btn[data-sev="warn"] .batt { color: #9C6B1F; }
+  .batt-btn[data-sev="bad"] .batt { color: var(--danger); }
+  .batt-btn.on[data-sev="good"] { border-color: #2F6B4F; background: #E7F0EA; color: #275C44; }
+  .batt-btn.on[data-sev="warn"] { border-color: #9C6B1F; background: var(--amber-soft); color: #7A531A; }
+  .batt-btn.on[data-sev="bad"] { border-color: var(--danger); background: var(--danger-soft); color: #7A2E22; }
+
+  /* home medication rows — colour identity */
+  .med-row-illus { border-radius: 12px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--mc, var(--brand)) 38%, transparent); }
+  .med-row-sum .pt-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pt-meta .med-badge { flex-shrink: 0; }
+
+  /* guide hero — medication colour identity */
+  .g-hero-card .hero-lbl { color: var(--mc); }
+  .g-hero-card .hero-title { padding-right: 122px; font-size: 22px; line-height: 1.18; word-break: break-word; }
+  .g-hero-card .hero-desc { max-width: 60%; }
+  .g-hero-card .chip-solid { background: var(--mc); }
+  .g-hero-ico { display: flex; align-items: center; justify-content: center; color: var(--mc); background: color-mix(in srgb, var(--mc) 12%, #fff); border-radius: 18px; width: 100px !important; height: 100px !important; top: 18px !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mode-btn, .med-opt, .site-tile, .sev-chip, .batt-btn { transition: none; }
+  }
+
   .login-hero { text-align: center; padding: 46px 20px 26px; }
   .login-hero .brand-mark { width: 62px; height: 62px; border-radius: 18px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
   .login-hero h1 { font-size: 23px; }
@@ -218,9 +344,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare10"></script>
-<script src="/patient-guides.js?v=docare10"></script>
-<script src="/guide.js?v=docare10"></script>
-<script src="/portal/app.js?v=docare10"></script>
+<script src="/shared.js?v=docare11"></script>
+<script src="/patient-guides.js?v=docare11"></script>
+<script src="/guide.js?v=docare11"></script>
+<script src="/portal/app.js?v=docare11"></script>
 </body>
 </html>
