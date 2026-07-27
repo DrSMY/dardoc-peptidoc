@@ -285,7 +285,7 @@ function phaseStripHTML(plan, ph) {
   }
   return `
   <div class="phase-journey" role="group" aria-label="Phases of your dose cycle">
-    <div class="pj-track" aria-hidden="true"><span style="width:${fillPct.toFixed(1)}%"></span></div>
+    <div class="pj-track" aria-hidden="true"><span style="--fill:${(fillPct / 100).toFixed(3)}"></span></div>
     ${dots}
   </div>`;
 }
@@ -465,7 +465,7 @@ function medRowHTML(pl) {
   return `
   <details class="med-row" style="--mc:${mc}">
     <summary class="med-row-sum">
-      <span class="med-row-illus">${medVisualHTML(pl.medication, pl.route, 40, pl.category)}</span>
+      <span class="med-row-illus">${medFormIcon(pl, 26)}</span>
       <span class="pt-info">
         <span class="pt-name">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""} ${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
         <span class="pt-meta"><span class="med-badge">${routeLabelShort(pl.route)}</span>${esc(pl.frequency)}${pl.quantity > 1 ? ` · × ${esc(pl.quantity)}` : ""}</span>
@@ -506,7 +506,7 @@ function guideMedChooser(plans, activeId) {
           ? `${dose} · ${freq}` : (freq || dose);
         return `
         <button type="button" class="g-medcard ${on ? "on" : ""}" data-gpick="${p.id}" style="--mc:${medColor(p)}" aria-pressed="${on}">
-          <span class="g-medcard-ico">${icon(medIcon(p), 19)}</span>
+          <span class="g-medcard-ico">${medFormIcon(p, 22)}</span>
           <span class="g-medcard-tx">
             <b>${esc(p.medication)}</b>
             <small>${esc(sub)}</small>
@@ -544,7 +544,7 @@ function paintGuide(v) {
       <div class="hero-lbl">${routeLabelShort(plan.route)} · treatment guide</div>
       <h2 class="hero-title">${esc(plan.medication)}</h2>
       <p class="hero-desc">${esc(howToLine(plan))}</p>
-      ${medPhoto(plan.medication, plan.category) ? `<img class="hero-photo" src="${medPhoto(plan.medication, plan.category)}" alt="">` : `<span class="hero-photo g-hero-ico">${icon(medIcon(plan), 54)}</span>`}
+      ${medPhoto(plan.medication, plan.category) ? `<img class="hero-photo" src="${medPhoto(plan.medication, plan.category)}" alt="">` : `<span class="hero-photo g-hero-ico">${medFormIcon(plan, 54)}</span>`}
       <div class="dose-chips" style="margin-top:16px;margin-bottom:0">
         ${plan.dose ? `<span class="chip-solid">${esc(plan.dose)}</span>` : ""}
         <span class="chip-soft">${esc(plan.frequency)}</span>
@@ -621,7 +621,7 @@ function medOptHTML(pl, selected) {
   const mc = medColor(pl);
   return `
   <button type="button" class="med-opt ${selected ? "sel" : ""}" data-medpick="${pl.id}" style="--mc:${mc}" aria-pressed="${!!selected}">
-    <span class="med-opt-ico">${icon(medIcon(pl), 20)}</span>
+    <span class="med-opt-ico">${medFormIcon(pl, 24)}</span>
     <span class="med-opt-tx">
       <b>${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}</b>
       <span class="med-opt-badges"><span class="med-badge">${routeLabelShort(pl.route)}</span>${pl.needs_refill ? '<span class="badge badge-amber">refill requested</span>' : ""}</span>
@@ -685,7 +685,7 @@ function paintLogDose(body, v, active, plan) {
   ${picker}
   <form class="log-panel" id="dose-form" style="--mc:${mc}">
     <div class="log-panel-head">
-      <span class="lp-ico">${icon(medIcon(plan), 19)}</span>
+      <span class="lp-ico">${medFormIcon(plan, 23)}</span>
       <div class="lp-title"><b>Logging ${esc(plan.medication)}${plan.dose ? " · " + esc(plan.dose) : ""}</b><small>${routeLabelShort(plan.route)} · ${esc(plan.frequency)}</small></div>
     </div>
     ${isInjection ? `
@@ -697,7 +697,7 @@ function paintLogDose(body, v, active, plan) {
     <div class="field"><label for="ds-when">When</label><input class="input" id="ds-when" type="datetime-local" value="${localDT}" max="${localDT}"></div>
     <div class="field"><label for="ds-dose">Dose</label><input class="input" id="ds-dose" value="${esc(plan.dose || "")}" placeholder="e.g. 2.5mg"></div>
     <div class="field"><label for="ds-notes">Notes (optional)</label><input class="input" id="ds-notes" placeholder="Anything to mention?"></div>
-    <button class="btn btn-block lp-save" type="submit"><span class="spin"></span><span class="btn-label">${icon(medIcon(plan), 17)} Save ${saveWord}</span></button>
+    <button class="btn btn-block lp-save" type="submit"><span class="spin"></span><span class="btn-label">${medFormIcon(plan, 18)} Save ${saveWord}</span></button>
   </form>
   ${injectionSummary(plan)}
   ${recent}`;

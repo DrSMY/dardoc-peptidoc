@@ -130,19 +130,6 @@ function medPhoto(medication, category) {
   return null;
 }
 
-// <img> or illustration for a medication card — prefers the real product
-// photo, falls back to the drawn illustration for the same route. All real
-// photos have a genuinely transparent background, so they're shown with
-// object-fit:contain on the app's own card-tint background (no cropping,
-// no photo backdrop clashing with the surrounding UI).
-function medVisualHTML(medication, route, size = 48, category) {
-  const photo = medPhoto(medication, category);
-  if (photo) {
-    return `<img src="${photo}" alt="${esc(medication)}" style="width:${size}px;height:${size}px;object-fit:contain;border-radius:${Math.round(size * 0.22)}px;background:#F0EEE2;padding:${Math.round(size * 0.08)}px;box-sizing:border-box">`;
-  }
-  return productIllustration(route, size);
-}
-
 function productIllustration(route, size = 48) {
   const r = routeIcon(route);
   const bodies = {
@@ -176,6 +163,51 @@ function productIllustration(route, size = 48) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">${bodies[r] || bodies.pill}</svg>`;
 }
 
+// ── medication form icons ─────────────────────────────────────────
+// Filled two-tone glyphs drawn to the actual shape of what the patient
+// holds — an auto-injector pen, a compounded vial, a nasal bottle, a
+// capsule, a tablet, a tube. The old outline glyphs made every medication
+// look alike; here the silhouette does the distinguishing and the
+// medication's own colour does the rest (both tones are currentColor, so a
+// single `color` on the parent tints the whole icon).
+const MED_FORM_ART = {
+  pen: `<rect class="mf-b" x="6.6" y="1.6" width="10.8" height="19.2" rx="4.4"/>
+        <path class="mf-s" d="M9 2.1a4.4 4.4 0 0 1 6 0V7H9z"/>
+        <rect class="mf-s" x="9.4" y="9.5" width="5.2" height="6.2" rx="1.4"/>
+        <path class="mf-s" d="M10.5 20.8h3l-1.5 2.9z"/>`,
+  vial: `<path class="mf-b" d="M8 8.6c0-.9.4-1.4 1-1.9V5h6v1.7c.6.5 1 1 1 1.9V19a3 3 0 0 1-3 3h-2a3 3 0 0 1-3-3z"/>
+         <path class="mf-s" d="M8 13.5h8V19a3 3 0 0 1-3 3h-2a3 3 0 0 1-3-3z"/>
+         <rect class="mf-s" x="8.6" y="1.6" width="6.8" height="3.6" rx="1.2"/>`,
+  nasal: `<path class="mf-b" d="M9 10.5h6a2 2 0 0 1 2 2V20a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-7.5a2 2 0 0 1 2-2z"/>
+          <path class="mf-s" d="M10 6.4h4v4.1h-4z"/>
+          <path class="mf-s" d="M10.3 2.2h3.4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-3.4a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1z"/>
+          <circle class="mf-s" cx="18.6" cy="3.4" r="1"/><circle class="mf-s" cx="20.8" cy="6" r=".85"/><circle class="mf-s" cx="18.2" cy="7.6" r=".7"/>`,
+  capsule: `<path class="mf-b" d="M15.8 3.3a5 5 0 0 1 7.1 7.1l-9.5 9.5a5 5 0 1 1-7.1-7.1z"/>
+            <path class="mf-s" d="M6.3 12.8 11 8.1l4.95 4.95-4.7 4.7a3.5 3.5 0 0 1-4.95-4.95z"/>`,
+  tablet: `<circle class="mf-b" cx="12" cy="12" r="9.2"/>
+           <path class="mf-s" d="M12 3.4a8.6 8.6 0 0 1 0 17.2z"/>
+           <rect class="mf-s" x="11.3" y="5.4" width="1.4" height="13.2" rx=".7"/>`,
+  cream: `<path class="mf-b" d="M8 8h8l1 11.6a2.4 2.4 0 0 1-2.4 2.6H9.4A2.4 2.4 0 0 1 7 19.6z"/>
+          <path class="mf-s" d="M9.4 2.6h5.2l.9 4.2H8.5z"/>
+          <rect class="mf-s" x="9.6" y="12" width="4.8" height="1.5" rx=".75"/>`,
+};
+
+// Which drawing represents this plan: peptides come in vials, GLP-1s in
+// pens, everything else follows how it is taken.
+function medForm(plan) {
+  const r = routeIcon(plan.route);
+  if (r === "syringe") return plan.category === "peptide" ? "vial" : "pen";
+  if (r === "spray") return "nasal";
+  if (r === "cream") return "cream";
+  if (r === "capsule") return "capsule";
+  return "tablet";
+}
+
+function medFormIcon(plan, size = 24) {
+  const art = MED_FORM_ART[medForm(plan)] || MED_FORM_ART.tablet;
+  return `<svg class="med-form" width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${art}</svg>`;
+}
+
 // ── medication colour identity ────────────────────────────────────
 // Each of a patient's medications gets its own colour so they can tell
 // them apart at a glance — on the home list, the Log picker and the Guide.
@@ -188,7 +220,12 @@ function medCatRank(p) {
   return p.category === "glp1" ? 0 : p.category === "peptide" ? 1 : 2;
 }
 function medColorMap(plans) {
-  const order = [...(plans || [])].sort((a, b) => medCatRank(a) - medCatRank(b) || (a.id - b.id));
+  // Medications the patient is actually on claim the most distinct colours
+  // first; finished programs take what is left. Otherwise a long history
+  // pushes the live medications into near-identical shades.
+  const order = [...(plans || [])].sort((a, b) =>
+    (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) ||
+    medCatRank(a) - medCatRank(b) || (a.id - b.id));
   const map = {};
   order.forEach((p, i) => { map[p.id] = MED_PALETTE[i % MED_PALETTE.length]; });
   return map;

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Super Admin — DoCare</title>
-<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/theme.css?v=docare25">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%238F6D32'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23E1C784' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23E1C784'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23E1C784' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23E1C784'/></svg>">
 <style>
   /* ── app shell (mirrors /doctor's, brand-tinted violet for super admin) ── */
@@ -16,7 +16,7 @@
   }
   .sb-brand { display: flex; align-items: center; gap: 11px; padding: 4px 10px 20px; color: #fff; }
   .sb-mark { width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; }
-  .sb-name { font-family: var(--font-head); font-weight: 800; font-size: 15.5px; line-height: 1.15; }
+  .sb-name { font-family: var(--font-head); font-weight: 700; font-size: 15.5px; line-height: 1.15; }
   .sb-sub { font-size: 11px; opacity: .7; }
   .sb-nav { display: flex; flex-direction: column; gap: 3px; flex: 1; }
   .sb-link {
@@ -36,7 +36,7 @@
 
   .main { padding: clamp(16px, 3vw, 32px); max-width: 1200px; width: 100%; margin: 0 auto; }
   .page-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
-  .page-head h1 { font-size: clamp(21px, 3vw, 26px); font-weight: 800; }
+  .page-head h1 { font-size: clamp(21px, 3vw, 26px); font-weight: 700; }
   .page-head .sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
 
   .mobile-bar, .m-nav { display: none; }
@@ -48,7 +48,7 @@
       position: sticky; top: 0; z-index: 50;
       background: var(--brand-strong); color: #fff; padding: 12px 16px;
     }
-    .mobile-bar .brand-line { display: flex; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 800; font-size: 15.5px; }
+    .mobile-bar .brand-line { display: flex; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 700; font-size: 15.5px; }
     .m-nav {
       display: flex; position: sticky; top: 58px; z-index: 49;
       background: var(--surface); border-bottom: 1px solid var(--border);

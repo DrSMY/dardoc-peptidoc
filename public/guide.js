@@ -50,7 +50,7 @@ function guidePickerHTML(plans, activeId) {
   if (plans.length <= 1) return "";
   const mc = typeof medColor === "function" ? medColor : () => "#283618";
   return `<div class="g-picker">
-    ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}" style="--mc:${mc(p)}">${icon(typeof medIcon === "function" ? medIcon(p) : routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
+    ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}" style="--mc:${mc(p)}">${typeof medFormIcon === "function" ? medFormIcon(p, 17) : icon(routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
   </div>`;
 }
 
@@ -283,7 +283,7 @@ const GUIDE_CSS = `
 .g-brand { display: flex; gap: 12px; align-items: center; }
 .g-brand img { filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
 .g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
-.g-brand-name { font-family: var(--font-head); font-weight: 800; font-size: 17px; }
+.g-brand-name { font-family: var(--font-head); font-weight: 700; font-size: 17px; }
 .g-brand-sub { font-size: 12.5px; opacity: .8; }
 .g-issued { font-size: 12.5px; opacity: .85; text-align: right; }
 .g-patient { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
@@ -330,7 +330,7 @@ const GUIDE_CSS = `
 .g-teal svg { color: var(--brand); }
 .g-foot { padding: 14px 22px 20px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--border); margin-top: 8px; }
 .g-divider { border: none; border-top: 1.5px dashed var(--border-strong); margin: 20px 22px 4px; }
-.g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
+.g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
 .g-emoji { font-size: 16px; }
 .g-prose a { color: var(--primary); word-break: break-all; }
 .g-other-med { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); padding: 14px 16px; margin-bottom: 12px; }

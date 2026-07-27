@@ -2,7 +2,11 @@
    healthcare, quiet exclusivity. Deep olive carries structure & navigation;
    refined gold is reserved for premium accents, active states and fine
    decorative detail; warm ivory is the resting background. */
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap');
+/* Public Sans carries the interface — drawn for public-health information,
+   so it stays legible at label sizes. Bodoni Moda appears only on hero
+   titles, at display size, where its high stroke contrast answers the
+   DoCare wordmark's own serif. */
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500&display=swap');
 
 :root {
   /* ── Clinical Olive & Gold palette ─────────────────────── */
@@ -39,8 +43,9 @@
   --muted: #5C5D4F;
   --faint: #8B8C78;
 
-  --font-head: 'Figtree', system-ui, sans-serif;
-  --font-body: 'Noto Sans', system-ui, sans-serif;
+  --font-head: 'Public Sans', system-ui, sans-serif;
+  --font-body: 'Public Sans', system-ui, sans-serif;
+  --font-display: 'Bodoni Moda', Georgia, serif;   /* hero titles only */
 
   --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
 
@@ -62,7 +67,7 @@ body {
   color: var(--text); background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
-h1,h2,h3,h4 { font-family: var(--font-head); line-height: 1.25; letter-spacing: -.01em; }
+h1,h2,h3,h4 { font-family: var(--font-head); line-height: 1.22; letter-spacing: -.022em; }
 button { font: inherit; cursor: pointer; }
 input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--primary); }
@@ -194,6 +199,13 @@ textarea.input { resize: vertical; min-height: 84px; }
 .chip.on.warn { border-color: var(--amber); background: var(--amber); }
 .chip.on.bad { border-color: var(--danger); background: var(--danger); }
 
+/* Medication form icons — body at low opacity, details solid, both drawn in
+   the medication's own colour, so the silhouette identifies the medicine
+   and the colour identifies which one. Shared: the patient portal, the
+   guide, and the doctor's medication picker all render these. */
+.med-form .mf-b { opacity: .34; }
+.med-form .mf-s { opacity: 1; }
+
 /* ── misc ────────────────────────────────────────────────── */
 .avatar {
   display: flex; align-items: center; justify-content: center;
@@ -265,7 +277,7 @@ textarea.input { resize: vertical; min-height: 84px; }
   display: flex; align-items: center; justify-content: center; margin-bottom: 10px;
   box-shadow: var(--inset-top-highlight), 0 1px 3px rgba(23,32,15,.12);
 }
-.stat .stat-val { font-family: var(--font-head); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat .stat-val { font-family: var(--font-head); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat .stat-lbl { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
 
 /* practice statistics (animated, interactive) */
@@ -307,17 +319,6 @@ textarea.input { resize: vertical; min-height: 84px; }
 .tpl-card, .path, .pt-row, .adm-row { transition: background-color .15s var(--ease), border-color .18s var(--ease), transform .18s var(--ease), box-shadow .18s var(--ease); }
 .stat, .metric { transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
 .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-@keyframes brand-shine {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-.brand-gradient-text {
-  background: linear-gradient(100deg, var(--brand) 0%, var(--primary) 45%, var(--brand) 90%);
-  background-size: 220% auto;
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: brand-shine 7s linear infinite;
-}
-
 /* ── depth utilities — glassmorphism, gold glow, raised surfaces ──── */
 /* Restrained glass panel: translucent ivory, thin champagne-gold border,
    subtle blur. Never applied where it would reduce text legibility. */
