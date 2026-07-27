@@ -219,54 +219,49 @@ function medIcon(plan) {
 // with one injection zone highlighted in the medication's colour. Same
 // silhouette in every tile, different zone lit — so the abdomen / thigh /
 // arm sites read anatomically at a glance instead of as plain text chips.
-// Injection zones, split the way a patient is actually taught to rotate:
-// the abdomen has four quadrants (upper/lower × left/right) around the
-// navel, plus both thighs and both upper arms. `label` is the two-line
-// tile caption; the stored site string stays the readable full name.
-// `zx`/`zy` are the target's position inside that region's close-up
-// drawing (a 48×40 viewBox), not on a whole-body figure.
+// ── clickable injection-site body map ─────────────────────────────
+// One anatomical diagram the patient taps directly: front torso with the
+// four abdominal quadrants around the navel (numbered, the way rotation is
+// taught), both upper thighs, and both upper arms. Replaces the old grid of
+// eight separate figures — you now point at the spot on a body instead of
+// reading labels off tiles.
+//
+// The drawing itself is inert; each zone is a real <button> overlaid on it
+// in percentage coordinates, so zones scale with the diagram while keeping
+// focus rings, aria-pressed and keyboard activation. `l`/`t` are the zone
+// centre and `w`/`h` its size, as a percentage of the 320×210 diagram box.
 const INJECTION_SITES = [
-  { name: "Abdomen Upper L", region: "Abdomen", pos: "Upper L", zx: 16.5, zy: 13 },
-  { name: "Abdomen Upper R", region: "Abdomen", pos: "Upper R", zx: 31.5, zy: 13 },
-  { name: "Abdomen Lower L", region: "Abdomen", pos: "Lower L", zx: 16.5, zy: 28.5 },
-  { name: "Abdomen Lower R", region: "Abdomen", pos: "Lower R", zx: 31.5, zy: 28.5 },
-  { name: "Thigh L", region: "Thigh", pos: "Left", zx: 19, zy: 17 },
-  { name: "Thigh R", region: "Thigh", pos: "Right", zx: 29, zy: 17 },
-  { name: "Arm L", region: "Arm", pos: "Left", zx: 19.5, zy: 16 },
-  { name: "Arm R", region: "Arm", pos: "Right", zx: 28.5, zy: 16 },
+  { name: "Abdomen Upper L", label: "1", l: 41.5, t: 31, w: 15, h: 20 },
+  { name: "Abdomen Upper R", label: "2", l: 58.5, t: 31, w: 15, h: 20 },
+  { name: "Abdomen Lower L", label: "3", l: 41.5, t: 55, w: 15, h: 20 },
+  { name: "Abdomen Lower R", label: "4", l: 58.5, t: 55, w: 15, h: 20 },
+  { name: "Thigh L", round: true, l: 41.5, t: 89, w: 9, h: 13 },
+  { name: "Thigh R", round: true, l: 58.5, t: 89, w: 9, h: 13 },
+  { name: "Arm L", round: true, l: 11, t: 30, w: 9.5, h: 13 },
+  { name: "Arm R", round: true, l: 89, t: 30, w: 9.5, h: 13 },
 ];
-const SITE_SPOTS = Object.fromEntries(INJECTION_SITES.map((s) => [s.name, s]));
 
-// Close-up anatomy for each injection region, drawn at the scale a patient
-// actually looks at when they inject — a zoomed abdomen with the navel and
-// its four quadrants, a single thigh, a single upper arm — instead of one
-// generic whole-body figure where every site was an indistinct dot. The
-// target zone is a filled patch in the medication's own colour, with a
-// dashed "rotate around here" ring, so the tile shows *where on the body*
-// at a glance.
-const SITE_ART = {
-  Abdomen: `
-    <path class="sk" d="M9 2 C12.5 14 12.5 26 9 38 L39 38 C35.5 26 35.5 14 39 2 Z"/>
-    <path class="sk-line" d="M24 7 V33"/>
-    <path class="sk-line" d="M11 20.5 H37"/>
-    <ellipse class="sk-navel" cx="24" cy="20.5" rx="1.7" ry="2.3"/>`,
-  Thigh: `
-    <path class="sk" d="M13 2 C10 13 11 27 13.5 38 L34.5 38 C37 27 38 13 35 2 Z"/>
-    <path class="sk-line" d="M24 6 C22.5 16 22.5 27 24 35"/>`,
-  Arm: `
-    <path class="sk" d="M16 5 C18.5 1.5 29.5 1.5 32 5 C34 14 34 27 32.5 38 L15.5 38 C14 27 14 14 16 5 Z"/>
-    <path class="sk-line" d="M24 8 C22.8 17 22.8 28 24 36"/>`,
-};
+const BODY_MAP_SVG = `
+<svg viewBox="0 0 320 210" class="bodymap-art" aria-hidden="true" focusable="false">
+  <path class="bd" d="M34 34c-9 4-13 15-13 27 0 13 1 26 3 38 2 13 5 26 8 38h20c-2-13-4-26-5-39-1-11-1-22 0-33 1-11 2-20 1-27-1-6-6-8-14-4z"/>
+  <path class="bd" d="M286 34c9 4 13 15 13 27 0 13-1 26-3 38-2 13-5 26-8 38h-20c2-13 4-26 5-39 1-11 1-22 0-33-1-11-2-20-1-27 1-6 6-8 14-4z"/>
+  <path class="bd" d="M104 20c-7 27-7 56 0 81 5 18 7 27 7 39h98c0-12 2-21 7-39 7-25 7-54 0-81z"/>
+  <path class="bd" d="M122 156c-4 17-6 36-6 54h40c0-19 1-36 3-54z"/>
+  <path class="bd" d="M198 156c4 17 6 36 6 54h-40c0-19-1-36-3-54z"/>
+  <path class="briefs" d="M111 140h98c-1 17-5 29-12 37-6 7-16 6-21-1-6-8-10-16-16-23-6 7-10 15-16 23-5 7-15 8-21 1-7-8-11-20-12-37z"/>
+  <ellipse class="navel" cx="160" cy="94" rx="2.6" ry="3.4"/>
+</svg>`;
 
-function siteCloseup(siteName, mc) {
-  const s = SITE_SPOTS[siteName];
-  if (!s) return "";
-  const art = SITE_ART[s.region] || SITE_ART.Abdomen;
-  return `<svg viewBox="0 0 48 40" class="site-fig" aria-hidden="true">
-    ${art}
-    <ellipse class="sk-ring" cx="${s.zx}" cy="${s.zy}" rx="7.4" ry="6.4" fill="none" stroke="${mc}" stroke-width="1.3" stroke-dasharray="2.4 2.2" opacity=".55"/>
-    <ellipse class="sk-zone" cx="${s.zx}" cy="${s.zy}" rx="4.8" ry="4.1" fill="${mc}"/>
-  </svg>`;
+// `mc` is the medication's colour — the chosen zone fills with it.
+function injectionBodyMap(mc) {
+  return `
+  <div class="bodymap" style="--mc:${mc}">
+    ${BODY_MAP_SVG}
+    ${INJECTION_SITES.map((z) => `
+      <button type="button" class="hs${z.round ? " round" : ""}" data-site="${esc(z.name)}"
+        style="--l:${z.l}%;--t:${z.t}%;--w:${z.w}%;--h:${z.h}%"
+        aria-label="${esc(z.name)}" aria-pressed="false">${z.label ? `<span>${z.label}</span>` : ""}</button>`).join("")}
+  </div>`;
 }
 
 // ── severity glyph ────────────────────────────────────────────────

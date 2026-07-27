@@ -690,9 +690,8 @@ function paintLogDose(body, v, active, plan) {
     </div>
     ${isInjection ? `
     <div class="field"><label>Injection site</label>
-      <div class="site-fig-grid" id="ds-sites">
-        ${INJECTION_SITES.map((s) => `<button type="button" class="site-tile" data-site="${esc(s.name)}" style="--mc:${mc}" aria-label="${esc(s.name)}" aria-pressed="false">${siteCloseup(s.name, mc)}<span class="st-region">${esc(s.region)}</span><span class="st-pos">${esc(s.pos)}</span></button>`).join("")}
-      </div>
+      <div id="ds-sites">${injectionBodyMap(mc)}</div>
+      <div class="site-pick" id="ds-site-pick" aria-live="polite">Tap the spot on the body where you injected</div>
       <span class="hint">Rotate sites to avoid soreness.</span>
     </div>` : ""}
     <div class="field"><label for="ds-when">When</label><input class="input" id="ds-when" type="datetime-local" value="${localDT}" max="${localDT}"></div>
@@ -709,11 +708,18 @@ function paintLogDose(body, v, active, plan) {
   }));
 
   let site = "";
+  const sitePick = body.querySelector("#ds-site-pick");
   body.querySelectorAll("[data-site]").forEach((b) => b.addEventListener("click", () => {
     body.querySelectorAll("[data-site]").forEach((x) => { x.classList.remove("on"); x.setAttribute("aria-pressed", "false"); });
     b.classList.add("on");
     b.setAttribute("aria-pressed", "true");
     site = b.dataset.site;
+    // Name the spot in text too — the diagram alone can't confirm the
+    // choice for a screen reader, or for anyone who mis-taps a neighbour.
+    if (sitePick) {
+      sitePick.classList.add("chosen");
+      sitePick.innerHTML = `${icon("check", 14)} Injecting in <b>${esc(site)}</b>`;
+    }
   }));
 
   body.querySelector("#dose-form").addEventListener("submit", async (e) => {

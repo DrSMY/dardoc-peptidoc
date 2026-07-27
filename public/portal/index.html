@@ -269,25 +269,44 @@
   .lp-save:hover { filter: brightness(1.06); box-shadow: var(--inset-top-highlight), 0 6px 18px color-mix(in srgb, var(--mc) 48%, transparent); }
   .lp-save .btn-label, .ci-save .btn-label { display: inline-flex; align-items: center; gap: 8px; }
 
-  /* anatomical injection-site tiles — 8 zones (abdomen in 4 quadrants) */
-  .site-fig-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .site-tile {
-    display: flex; flex-direction: column; align-items: center; gap: 1px;
-    padding: 8px 2px 7px; border-radius: 12px; border: 1.5px solid var(--border);
-    background: var(--bg); color: var(--muted); font-family: var(--font-head);
-    transition: border-color .15s var(--ease), background .15s var(--ease), transform .12s var(--ease), color .15s var(--ease);
+  /* clickable injection-site body map */
+  .bodymap { position: relative; width: 100%; aspect-ratio: 320 / 210; margin: 2px 0 8px; }
+  .bodymap-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .bodymap-art .bd { fill: #F2DFC6; stroke: #D8B893; stroke-width: 1.6; }
+  .bodymap-art .briefs { fill: #EDEFE2; stroke: #CFD2BE; stroke-width: 1.4; }
+  .bodymap-art .navel { fill: #C79E76; }
+  /* zones are real buttons overlaid on the drawing, placed by percentage */
+  .hs {
+    position: absolute; left: var(--l); top: var(--t); width: var(--w); height: var(--h);
+    transform: translate(-50%, -50%); padding: 0;
+    border: 2px dashed color-mix(in srgb, var(--mc) 62%, #9C917C);
+    border-radius: 9px; background: color-mix(in srgb, var(--mc) 11%, transparent);
+    display: flex; align-items: center; justify-content: center;
+    transition: background .16s var(--ease), border-color .16s var(--ease), transform .14s var(--ease);
   }
-  .site-tile:active { transform: scale(.96); }
-  /* close-up anatomy per region (abdomen / thigh / arm) */
-  .site-fig { width: 100%; max-width: 46px; height: auto; aspect-ratio: 48 / 40; margin-bottom: 3px; }
-  .site-fig .sk { fill: #E6DCC8; stroke: #BCAF92; stroke-width: 1.2; transition: fill .15s var(--ease), stroke .15s var(--ease); }
-  .site-fig .sk-line { fill: none; stroke: #BCAF92; stroke-width: .9; stroke-dasharray: 2 2; opacity: .75; }
-  .site-fig .sk-navel { fill: #A2957A; }
-  .site-tile.on .sk { fill: color-mix(in srgb, var(--mc) 15%, #E8E0D0); stroke: color-mix(in srgb, var(--mc) 45%, #D3C9B2); }
-  .st-region { font-size: 10.5px; font-weight: 700; line-height: 1.15; }
-  .st-pos { font-size: 9.5px; font-weight: 600; color: var(--faint); line-height: 1.15; }
-  .site-tile.on .st-pos { color: inherit; opacity: .78; }
-  @media (max-width: 359px) { .site-fig-grid { grid-template-columns: repeat(3, 1fr); } }
+  .hs.round { border-radius: 50%; }
+  /* widen the tap area past the drawn outline without moving it */
+  .hs::after { content: ""; position: absolute; inset: -9px; border-radius: inherit; }
+  .hs > span {
+    width: 21px; height: 21px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--mc) 26%, #fff); color: color-mix(in srgb, var(--mc) 78%, #000);
+    font-family: var(--font-head); font-weight: 800; font-size: 11.5px;
+    transition: background .16s var(--ease), color .16s var(--ease);
+  }
+  .hs:active { transform: translate(-50%, -50%) scale(.93); }
+  .hs:focus-visible { outline: 3px solid var(--mc); outline-offset: 2px; }
+  .hs.on { border-style: solid; border-color: var(--mc); background: color-mix(in srgb, var(--mc) 34%, transparent); }
+  .hs.on > span { background: var(--mc); color: #fff; }
+  /* round zones get a solid centre dot when chosen, like the printed chart */
+  .hs.round.on::before {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 46%; height: 46%;
+    transform: translate(-50%, -50%); border-radius: 50%; background: var(--mc);
+  }
+  .site-pick { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .site-pick.chosen { color: var(--mc); font-weight: 600; }
+  .site-pick b { font-family: var(--font-head); }
+  @media (prefers-reduced-motion: reduce) { .hs { transition: none; } }
 
   /* Guide medication chooser — every medication visible, nothing scrolled off */
   .g-medbar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 12px; margin: 14px 0 12px; }
@@ -311,9 +330,6 @@
   .g-medcard.on { border-color: var(--mc); background: color-mix(in srgb, var(--mc) 8%, #fff); }
   .g-medcard.on .g-medcard-check { opacity: 1; transform: scale(1); }
   .g-toolbar { justify-content: flex-end; }
-  .site-fig-body * { fill: #E4E1D2; transition: fill .15s var(--ease); }
-  .site-tile.on { border-color: var(--mc); background: color-mix(in srgb, var(--mc) 9%, #fff); color: color-mix(in srgb, var(--mc) 76%, #000); }
-  .site-tile.on .site-fig-body * { fill: color-mix(in srgb, var(--mc) 26%, #E4E1D2); }
 
   /* compact summary strips (injection / check-in) */
   .sum-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 14px 8px; margin-bottom: 14px; }
@@ -384,7 +400,7 @@
   .g-hero-ico { display: flex; align-items: center; justify-content: center; color: var(--mc); background: color-mix(in srgb, var(--mc) 12%, #fff); border-radius: 18px; width: 100px !important; height: 100px !important; top: 18px !important; }
 
   @media (prefers-reduced-motion: reduce) {
-    .mode-btn, .med-opt, .site-tile, .sev-chip, .batt-btn { transition: none; }
+    .mode-btn, .med-opt, .hs, .sev-chip, .batt-btn { transition: none; }
   }
 
   .login-hero { text-align: center; padding: 46px 20px 26px; }
@@ -395,9 +411,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare15"></script>
-<script src="/patient-guides.js?v=docare15"></script>
-<script src="/guide.js?v=docare15"></script>
-<script src="/portal/app.js?v=docare15"></script>
+<script src="/shared.js?v=docare18"></script>
+<script src="/patient-guides.js?v=docare18"></script>
+<script src="/guide.js?v=docare18"></script>
+<script src="/portal/app.js?v=docare18"></script>
 </body>
 </html>
