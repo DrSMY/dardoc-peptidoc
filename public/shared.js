@@ -239,25 +239,29 @@ function medIcon(plan) {
 // artwork: `l`/`t` is the centre, `w`/`h` the size. Sites are named in full
 // ("Upper left abdomen", not "Abdomen Upper L") because the name is shown
 // back to the patient and stored on the dose record.
+// Sides are anatomical — the figure faces the reader, so the panel drawn on
+// the reader's left is the patient's RIGHT arm, and quadrant 1 (reader's
+// left) is their upper-right abdomen. This matches how the illustrations
+// are named and how clinical charts label sides.
 const BODY_PANELS = [
   {
-    img: "/body/arm-left.png", alt: "Left arm", flex: 24.5,
-    zones: [{ name: "Left arm", round: true, l: 33, t: 24, w: 46, h: 14 }],
+    img: "/body/arm-right.png", alt: "Right arm", flex: 21,
+    zones: [{ name: "Right arm", round: true, l: 42, t: 20.1, w: 38, h: 14.2 }],
   },
   {
-    img: "/body/torso.png", alt: "Abdomen and thighs", flex: 53.8,
+    img: "/body/torso.png", alt: "Abdomen and thighs", flex: 54,
     zones: [
-      { name: "Upper left abdomen", label: "1", l: 30.6, t: 21.6, w: 34, h: 17.5 },
-      { name: "Upper right abdomen", label: "2", l: 69.6, t: 21.6, w: 34, h: 17.5 },
-      { name: "Lower left abdomen", label: "3", l: 27.5, t: 40.1, w: 34, h: 16 },
-      { name: "Lower right abdomen", label: "4", l: 72.5, t: 40.1, w: 34, h: 16 },
-      { name: "Left thigh", round: true, l: 23.1, t: 80.8, w: 23, h: 12 },
-      { name: "Right thigh", round: true, l: 76.9, t: 80.8, w: 23, h: 12 },
+      { name: "Upper right abdomen", l: 30.1, t: 18.0, w: 29.7, h: 18.8 },
+      { name: "Upper left abdomen",  l: 64.1, t: 18.1, w: 29.1, h: 18.3 },
+      { name: "Lower right abdomen", l: 27.2, t: 38.1, w: 33.1, h: 16.8 },
+      { name: "Lower left abdomen",  l: 67.5, t: 37.7, w: 33.1, h: 16.8 },
+      { name: "Right thigh", round: true, l: 23.6, t: 82.3, w: 19.3, h: 12.3 },
+      { name: "Left thigh",  round: true, l: 77.0, t: 82.5, w: 19.3, h: 12.3 },
     ],
   },
   {
-    img: "/body/arm-right.png", alt: "Right arm", flex: 16.7,
-    zones: [{ name: "Right arm", round: true, l: 80, t: 24.9, w: 46, h: 14 }],
+    img: "/body/arm-left.png", alt: "Left arm", flex: 20,
+    zones: [{ name: "Left arm", round: true, l: 54.8, t: 20.1, w: 41, h: 14.2 }],
   },
 ];
 
