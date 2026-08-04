@@ -2317,6 +2317,84 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
 // current cart it auto-runs analyzeClinicalExtras() to pre-select the
 // suggested items; the doctor can toggle any off, add custom ones, and
 // the chosen items flow into the guide.
+// Supplement and lab names arrive from two places — the local catalog and
+// the guidebook — and rarely agree on spelling. Compare on the meaningful
+// words so "Zinc and Magnesium (ZMA)" and "Magnesium Glycinate" merge
+// instead of appearing twice.
+const SUPP_STOPWORDS = new Set(["and", "or", "the", "with", "supplement", "peptides", "acid", "complex", "profile", "level", "serum", "test", "in", "blood", "count", "total"]);
+function normSupp(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+function suppTokens(name) {
+  return new Set(normSupp(name).split(" ").filter((w) => w.length >= 4 && !SUPP_STOPWORDS.has(w)));
+}
+function sameSupplement(a, b) {
+  const A = suppTokens(a), B = suppTokens(b);
+  if (!A.size || !B.size) return normSupp(a) === normSupp(b);
+  for (const t of A) if (B.has(t)) return true;
+  return false;
+}
+
+// Pulls the prescriber's guidebook review for the current cart — the blood
+// panels each peptide requires, its supporting supplements, and any
+// cross-peptide safety rule that has fired — then re-renders the step. The
+// guidebook is authoritative for peptides; analyzeClinicalExtras still
+// covers GLP-1 and patient-finding rules that the guidebook does not model.
+async function loadProtocolReview(cartKey) {
+  const w = S.wizard;
+  try {
+    const res = await api("POST", "/api/clinical/review", {
+      items: w.cart.map((c) => ({ medication: c.medication, route: c.route, category: c.category })),
+      patientId: w.patient.id || undefined,
+      patient: { age: w.patient.age, chronic_illnesses: w.patient.chronicIllnesses || w.patient.chronic_illnesses },
+    });
+    w.review = res;
+
+    const seenL = new Set(w.labTests.map((l) => l.name));
+    for (const p of res.panels || []) {
+      const name = `${p.id} — ${p.name}`;
+      if (seenL.has(name)) continue;
+      w.labTests.push({
+        name,
+        detail: (p.tests || []).join(", "),
+        fasting: (p.tests || []).some((t) => /fasting/i.test(t)),
+        required: !!p.required,
+        reasons: p.reasons || [],
+        on: !!p.suggested,
+        suggested: true,
+      });
+      seenL.add(name);
+    }
+    // A panel already contains its individual tests, so drop the loose
+    // suggestions the local analysis made for the same thing — otherwise the
+    // doctor sees "IGF-1" beside "Panel 2 — GH / IGF-1 Axis".
+    const panelTests = (res.panels || []).flatMap((p) => p.tests || []);
+    w.labTests = w.labTests.filter((l) => {
+      if (/^Panel /.test(l.name)) return true;
+      return !panelTests.some((t) => sameSupplement(t, l.name));
+    });
+
+    // Merge supplements on meaning, not exact spelling: the local catalog says
+    // "Zinc and Magnesium (ZMA)" where the guidebook says "Magnesium Glycinate".
+    for (const s of res.supplements || []) {
+      const existing = w.suppList.find((x) => sameSupplement(x.name, s.name));
+      if (existing) {
+        if (!existing.dose && s.dose) existing.dose = s.dose;
+        for (const r of s.reasons || []) if (!existing.reasons.includes(r)) existing.reasons.push(r);
+        continue;
+      }
+      w.suppList.push({ name: s.name, dose: s.dose || "", benefit: "", reasons: s.reasons || [], on: true, suggested: true });
+    }
+    for (const a of res.advice || []) {
+      if (!w.protocolAdvice) w.protocolAdvice = [];
+      if (!w.protocolAdvice.some((x) => x.text === a.text)) w.protocolAdvice.push(a);
+    }
+  } catch {
+    w.review = w.review || null;   // offline or not signed in — keep the local analysis
+  }
+  if (S.wizard.step === 2) wizStepLabs();
+}
+
 function wizStepLabs() {
   const w = S.wizard;
 
@@ -2330,7 +2408,23 @@ function wizStepLabs() {
     const seenS = new Set(w.suppList.map((s) => s.name));
     res.supps.forEach((s) => { if (!seenS.has(s.name)) w.suppList.push({ ...s, on: true, suggested: true }); });
     w.labsAnalyzed = cartKey;
+    w.review = null;
+    loadProtocolReview(cartKey);   // guidebook layer arrives and re-renders
   }
+
+  const findings = (w.review && w.review.safety) || [];
+  const blocking = findings.filter((f) => f.level === "blocking");
+  const LEVEL = { blocking: ["g-red", "alert"], warning: ["g-amber", "alert"], info: ["g-teal", "info"] };
+  const safetyBlock = findings.length ? `
+    <div class="ai-block">
+      <div class="ai-head">${icon("shield", 17)} Protocol safety — from the prescriber&rsquo;s guidebook
+        ${blocking.length ? `<span class="badge badge-red">${blocking.length} must resolve</span>` : `<span class="badge badge-teal">${findings.length}</span>`}</div>
+      ${findings.map((f) => `
+        <div class="g-callout ${LEVEL[f.level][0]}" style="margin-bottom:8px">
+          ${icon(LEVEL[f.level][1], 17)}
+          <div><strong>${esc(f.title)}</strong><div style="margin-top:2px">${esc(f.detail)}</div></div>
+        </div>`).join("")}
+    </div>` : "";
 
   const reasonText = (r) => (r && r.length) ? `<span class="ai-why">${esc(r.join(" · "))}</span>` : "";
   const labRow = (l, i) => `
@@ -2357,7 +2451,9 @@ function wizStepLabs() {
   view().innerHTML = `${wizHead()}
   <div class="card card-pad" style="max-width:820px">
     <div class="card-title">${icon("sparkles", 19)} AI clinical analysis — labs &amp; supplements</div>
-    <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings. Suggestions are pre-selected — untick anything you don&rsquo;t want, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
+    <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings and the prescriber&rsquo;s protocol guidebook. Suggestions are pre-selected — untick anything you don&rsquo;t want, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
+
+    ${safetyBlock}
 
     <div class="ai-block">
       <div class="ai-head">${icon("droplet", 17)} Recommended lab tests <span class="badge badge-teal" id="lab-count"></span></div>
@@ -2371,6 +2467,7 @@ function wizStepLabs() {
     <div class="ai-block">
       <div class="ai-head">${icon("pill", 17)} Recommended supplements <span class="badge badge-teal" id="supp-count"></span></div>
       <div id="supp-list">${w.suppList.length ? w.suppList.map(suppRow).join("") : `<p class="hint">No supplements suggested — add one below if needed.</p>`}</div>
+      ${(w.protocolAdvice || []).length ? `<div class="g-callout g-teal" style="margin:4px 0 10px">${icon("info", 17)}<div>${(w.protocolAdvice || []).map((a) => `<div><strong>${esc(a.reasons.join(", "))}:</strong> ${esc(a.text)}</div>`).join("")}</div></div>` : ""}
       <div class="add-row">
         <input class="input" id="supp-add" placeholder="Supplement name">
         <input class="input" id="supp-dose" placeholder="Dose (e.g. 2000 IU daily)" style="max-width:200px">
@@ -2380,7 +2477,7 @@ function wizStepLabs() {
 
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px">
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
-      <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
+      <button class="btn btn-primary" id="wz-next" ${blocking.length ? "disabled" : ""} title="${blocking.length ? "Resolve the protocol safety issues first" : ""}">Continue ${icon("chevR", 17)}</button>
     </div>
   </div>`;
 

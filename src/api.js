@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 const { db, hashSecret, verifySecret } = require("./db");
 const presets = require("./presets");
+const protocolMap = require("./protocol-map.js");
 
 const SESSION_HOURS = { doctor: 24 * 14, patient: 24 * 90 };
 
@@ -561,6 +562,80 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
 });
 
 // ── plans ────────────────────────────────────────────────────────
+// Protocol review for a prescription in progress. The prescriber's guidebook
+// decides which blood panels the chosen peptides require, which of them are
+// mandatory rather than optional, which supporting supplements go with each,
+// and which cross-peptide safety rules have fired. Kept on the server so
+// there is one clinical implementation rather than a copy in the browser.
+route("POST", "/api/clinical/review", async (req, res, _p, body) => {
+  const doc = getDoctor(req);
+  if (!doc) return json(res, 401, { error: "Not signed in." });
+  const items = Array.isArray(body.items) ? body.items : [];
+  const patient = body.patientId
+    ? db.prepare("SELECT * FROM patients WHERE id = ?").get(body.patientId)
+    : null;
+  const who = patient || body.patient || {};
+
+  const panels = new Map();
+  const supplements = new Map();
+  const advice = new Map();
+  const protocols = [];
+
+  for (const item of items) {
+    const product = protocolMap.matchProtocol(item.medication, item.route);
+    if (!product) continue;
+    protocols.push({
+      ref: product.ref, medication: item.medication, name: product.name,
+      presentation: product.presentation, monitoring: product.monitoring || "",
+      cycling: product.cycling || "", timing: product.timing || "",
+      sideEffects: product.sideEffects || "", cautions: product.cautions || "",
+      combinesWith: product.combinesWith || "", variants: product.variants || [],
+      strength: product.strength || "", containers: product.containers || "",
+    });
+    for (const p of protocolMap.panelsForProduct(product, who)) {
+      const cur = panels.get(p.id) || { ...p, reasons: [] };
+      cur.required = cur.required || p.required;
+      cur.suggested = cur.suggested || p.suggested;
+      if (p.why && !cur.reasons.includes(p.why)) cur.reasons.push(p.why);
+      panels.set(p.id, cur);
+    }
+    // "Collagen peptides 10-20 g/day; Vitamin C 500-1000 mg/day" → entries.
+    // A few products give dietary instructions here instead of a list
+    // ("Post-injection carbohydrate and protein… Avoid fasted use."); those
+    // are carried as advice rather than dressed up as a supplement.
+    for (const chunk of String(product.supplements || "").split(";")) {
+      const text = chunk.trim();
+      if (!text) continue;
+      const m = text.match(/^(.+?)\s+(\d[\d.\-–\s]*(?:g|mg|mcg|iu|ml)\b.*)$/i);
+      const name = (m ? m[1] : text).trim();
+      const looksLikeSentence = /\.\s/.test(text) || (!m && name.split(/\s+/).length > 5);
+      if (looksLikeSentence) {
+        const key = "advice:" + text.toLowerCase();
+        const cur = advice.get(key) || { text, reasons: [] };
+        if (!cur.reasons.includes(product.name)) cur.reasons.push(product.name);
+        advice.set(key, cur);
+        continue;
+      }
+      const key = name.toLowerCase();
+      const cur = supplements.get(key) || {
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        dose: m ? m[2].trim() : "", reasons: [],
+      };
+      if (m && !cur.dose) cur.dose = m[2].trim();
+      if (!cur.reasons.includes(product.name)) cur.reasons.push(product.name);
+      supplements.set(key, cur);
+    }
+  }
+
+  json(res, 200, {
+    protocols,
+    panels: [...panels.values()],
+    supplements: [...supplements.values()],
+    advice: [...advice.values()],
+    safety: protocolMap.protocolSafetyFindings(items, who),
+  });
+});
+
 route("POST", "/api/plans", async (req, res, _p, body) => {
   const doc = getDoctor(req);
   if (!doc) return json(res, 401, { error: "Not signed in." });
