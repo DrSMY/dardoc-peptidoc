@@ -625,6 +625,14 @@ route("POST", "/api/clinical/review", async (req, res, _p, body) => {
       if (!cur.reasons.includes(product.name)) cur.reasons.push(product.name);
       supplements.set(key, cur);
     }
+    // This practice's own additions for the product, on top of the guidebook.
+    for (const extra of protocolMap.PRACTICE_SUPPLEMENTS[product.ref] || []) {
+      const key = extra.name.toLowerCase();
+      const cur = supplements.get(key) || { name: extra.name, dose: extra.dose || "", reasons: [] };
+      if (extra.dose) cur.dose = extra.dose;
+      if (!cur.reasons.includes(product.name)) cur.reasons.push(product.name);
+      supplements.set(key, cur);
+    }
   }
 
   json(res, 200, {

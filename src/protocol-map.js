@@ -42,6 +42,15 @@ const PROTOCOL_ALIASES = {
   "SS-31": { any: "P31" },
 };
 
+// Supplements this practice adds on top of the guidebook's own list. Kept
+// here rather than in the generated protocols module so regenerating from a
+// new guidebook never drops them.
+const PRACTICE_SUPPLEMENTS = {
+  P12: [{ name: "GS1 Decoded", dose: "1 per day mixed with water daily" }], // GHK-Cu injection
+  P13: [{ name: "GS1 Decoded", dose: "1 per day mixed with water daily" }], // GHK-Cu facial serum
+  P14: [{ name: "GS1 Decoded", dose: "1 per day mixed with water daily" }], // GHK-Cu scalp foam
+};
+
 const BY_REF = Object.fromEntries(PEPTIDE_PRODUCTS.map((p) => [p.ref, p]));
 const PANEL_BY_ID = Object.fromEntries(LAB_PANELS.map((p) => [p.id, p]));
 
@@ -186,6 +195,7 @@ function protocolSafetyFindings(cart, patient) {
 
 module.exports = {
   PROTOCOL_ALIASES,
+  PRACTICE_SUPPLEMENTS,
   matchProtocol,
   panelsForProduct,
   protocolSafetyFindings,
