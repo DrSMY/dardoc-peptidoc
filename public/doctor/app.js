@@ -2405,7 +2405,7 @@ function emrMedExtra(it, goals) {
 // program added this consultation — Date of Encounter / PATIENT /
 // CLINICAL SUMMARY / MEDICATION(S) PRESCRIBED / INVESTIGATIONS / PLAN /
 // Physician, matching DarDoc's standard consultation-note format.
-function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays, labTests) {
+function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays, labTests, suppList) {
   if (!items.length || !patient.name) return "";
   const m = metrics || {};
   const intake = patient.intake || {};
@@ -2513,6 +2513,16 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
 
   const investigations = invLines.length ? invLines.join("\n\n") : "No additional investigations required at this time.";
 
+  // ── SUPPLEMENTS ADVISED ──
+  // The other half of the Labs & Supplements step. These reached the
+  // patient's guide but never the clinical record, so the record did not
+  // say what the patient was actually advised to take alongside the
+  // prescription. Omitted entirely when nothing was selected.
+  const advisedSupps = (suppList || []).filter((s) => s.on !== false);
+  const supplementsBlock = advisedSupps.length
+    ? `SUPPLEMENTS ADVISED\n\n${advisedSupps.map((s) => `${s.name}${s.dose ? ` — ${s.dose}` : ""}`).join("\n")}`
+    : "";
+
   // ── PLAN ──
   const planBullets = [
     "Assess response, tolerance, and compliance at follow-up.",
@@ -2529,9 +2539,10 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `CLINICAL SUMMARY\n\n${paras.join("\n\n")}`,
     `${medHeader}\n\n${medLines.join("\n\n")}\n\n${counsel}`,
     `INVESTIGATIONS\n\n${investigations}`,
+    supplementsBlock,
     `PLAN\n\nFollow-up appointment scheduled for ${fmtDMY(followup)}.\n\n${planBullets.join("\n")}`,
     `Physician:\n${S.user.name}\nDarDoc Healthcare`,
-  ];
+  ].filter(Boolean);
   return [sections.join("\n\n"), note].filter(Boolean).join("\n\n");
 }
 
@@ -2829,7 +2840,8 @@ function wizStepClinical() {
         age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
         chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
         intake: w.patient.intake },
-      w.cart, wizMetrics(), w.clinicalNote, w.followupDays, (w.labTests || []).filter((l) => l.on)
+      w.cart, wizMetrics(), w.clinicalNote, w.followupDays,
+      (w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on)
     ) || "Add a medication and patient details to generate the clinical record.";
   };
   view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
@@ -2880,7 +2892,7 @@ function wizStepReview() {
       age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
       chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
       intake: w.patient.intake },
-    w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs
+    w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs, previewSupps
   );
   w.clinicalSuggestion = clinicalSuggestion;
   view().innerHTML = `${wizHead()}
