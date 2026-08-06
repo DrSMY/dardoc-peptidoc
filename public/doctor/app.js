@@ -2405,7 +2405,7 @@ function emrMedExtra(it, goals) {
 // program added this consultation — Date of Encounter / PATIENT /
 // CLINICAL SUMMARY / MEDICATION(S) PRESCRIBED / INVESTIGATIONS / PLAN /
 // Physician, matching DarDoc's standard consultation-note format.
-function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays) {
+function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays, labTests) {
   if (!items.length || !patient.name) return "";
   const m = metrics || {};
   const intake = patient.intake || {};
@@ -2484,17 +2484,33 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     : "The patient was counseled regarding expected benefits, common side effects, injection technique, adherence, and the importance of reporting any adverse effects promptly.";
 
   // ── INVESTIGATIONS ──
+  // Exactly what the doctor ticked in the Labs step, named test by test —
+  // "Panel 1 — Basic Safety: Complete Blood Count (CBC), …". Nothing the
+  // doctor did not order appears here, and no generic per-medication line
+  // stands in for the actual order.
+  const ordered = (labTests || []).filter((l) => l.on !== false);
+  const isPanel = (l) => /^Panel\s/i.test(l.name);
+  const flag = (l) => (l.required ? " (mandatory)" : "");
   const invLines = [];
-  const glp1Blood = items.find((i) => i.category === "glp1" && i.bloodTest && i.bloodTest !== "none");
-  if (glp1Blood) {
-    invLines.push(`Weight Loss Blood Test Panel: ${glp1Blood.bloodTest === "required" ? "Required" : "Recommended"}\n\nLink: https://www.dardoc.com/dubai/lab-test/weight-loss-blood-test`);
+
+  for (const p of ordered.filter(isPanel)) {
+    const tests = String(p.detail || "").trim();
+    invLines.push(`${p.name}${flag(p)}${tests ? `: ${tests}` : ""}`);
   }
-  for (const it of others) {
-    if (it.bloodTest && it.bloodTest !== "none") {
-      const info = peptideOrGlp1Info(it.medication);
-      invLines.push(`${it.medication} — Key blood tests: ${(info && info.keyBloodTests) || "as clinically indicated"} (${it.bloodTest})`);
-    }
+  // Bookable bundles carry their own booking link (the weight-loss panel).
+  for (const b of ordered.filter((l) => !isPanel(l) && l.link)) {
+    invLines.push(`${b.name}${flag(b)}\n\nLink: ${b.link}`);
   }
+  // Individual tests the doctor added or the analysis suggested outside a
+  // panel — listed by name, since the name is the test. Anything a listed
+  // panel already covers is not repeated here.
+  const panelTests = orderedPanelTests(ordered);
+  const singles = ordered.filter((l) => !isPanel(l) && !l.link && !testCoveredByPanels(l.name, panelTests));
+  if (singles.length) {
+    invLines.push(`Additional tests: ${singles.map((l) => l.name + flag(l)).join(", ")}`);
+  }
+  if (ordered.some((l) => l.fasting)) invLines.push("Fasting sample required.");
+
   const investigations = invLines.length ? invLines.join("\n\n") : "No additional investigations required at this time.";
 
   // ── PLAN ──
@@ -2541,6 +2557,38 @@ function sameSupplement(a, b) {
   return false;
 }
 
+// Is this test already inside one of the ordered panels? Stops the same
+// test being ordered twice — once as part of a panel, once on its own. The
+// two names rarely match character for character, so three signals are
+// tried: the whole name inside a panel test ("IGF-1" within "Insulin-like
+// Growth Factor (IGF-1)"), the parenthesised code ("Thyroid Function (TSH)"
+// against "Thyroid Stimulating Hormone (TSH)"), or two shared significant
+// words ("Fasting Blood Glucose" against "Fasting Blood Sugar / Glucose").
+// One shared word is not enough — "Insulin Level" must not be swallowed by
+// "Insulin-like Growth Factor".
+function testCoveredByPanels(name, panelTests) {
+  const needle = normSupp(name);
+  if (needle.length < 3 || !panelTests.length) return false;
+  const has = (hay, phrase) => !!phrase && new RegExp(`(^| )${phrase}( |$)`).test(hay);
+  const words = needle.split(" ").filter((w) => w.length >= 4 && !SUPP_STOPWORDS.has(w));
+  const code = normSupp((String(name).match(/\(([^)]+)\)/) || [])[1] || "");
+  return panelTests.some((t) => {
+    const hay = normSupp(t);
+    if (has(hay, needle) || has(hay, code)) return true;
+    return words.filter((w) => has(hay, w)).length >= 2;
+  });
+}
+
+// The individual tests inside the panels on this list. A panel carries its
+// tests as one comma-joined string, but a test may hold commas of its own
+// ("Lipid Profile (Cholesterol, LDL, HDL, Triglycerides)"), so only split on
+// commas outside brackets.
+function orderedPanelTests(labs) {
+  return labs.filter((l) => /^Panel\s/i.test(l.name))
+    .flatMap((l) => String(l.detail || "").split(/,(?![^(]*\))/))
+    .map((t) => t.trim()).filter(Boolean);
+}
+
 // Pulls the prescriber's guidebook review for the current cart — the blood
 // panels each peptide requires, its supporting supplements, and any
 // cross-peptide safety rule that has fired — then re-renders the step. The
@@ -2575,10 +2623,7 @@ async function loadProtocolReview(cartKey) {
     // suggestions the local analysis made for the same thing — otherwise the
     // doctor sees "IGF-1" beside "Panel 2 — GH / IGF-1 Axis".
     const panelTests = (res.panels || []).flatMap((p) => p.tests || []);
-    w.labTests = w.labTests.filter((l) => {
-      if (/^Panel /.test(l.name)) return true;
-      return !panelTests.some((t) => sameSupplement(t, l.name));
-    });
+    w.labTests = w.labTests.filter((l) => /^Panel /.test(l.name) || !testCoveredByPanels(l.name, panelTests));
 
     // Merge supplements on meaning, not exact spelling: the local catalog says
     // "Zinc and Magnesium (ZMA)" where the guidebook says "Magnesium Glycinate".
@@ -2784,7 +2829,7 @@ function wizStepClinical() {
         age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
         chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
         intake: w.patient.intake },
-      w.cart, wizMetrics(), w.clinicalNote, w.followupDays
+      w.cart, wizMetrics(), w.clinicalNote, w.followupDays, (w.labTests || []).filter((l) => l.on)
     ) || "Add a medication and patient details to generate the clinical record.";
   };
   view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
@@ -2835,7 +2880,7 @@ function wizStepReview() {
       age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
       chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
       intake: w.patient.intake },
-    w.cart, wizMetrics(), w.clinicalNote, w.followupDays
+    w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs
   );
   w.clinicalSuggestion = clinicalSuggestion;
   view().innerHTML = `${wizHead()}
