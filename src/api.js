@@ -562,6 +562,15 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
 });
 
 // ── plans ────────────────────────────────────────────────────────
+// The prescriber's guidebook, keyed by the medication names the app uses:
+// every approved presentation of a peptide with all of its dosing variants,
+// so the Program step can offer the real protocol to choose from instead of
+// a single hard-coded default. Loaded once per dashboard session.
+route("GET", "/api/clinical/protocols", (req, res) => {
+  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  json(res, 200, { byMedication: protocolMap.protocolCatalogue() });
+});
+
 // Protocol review for a prescription in progress. The prescriber's guidebook
 // decides which blood panels the chosen peptides require, which of them are
 // mandatory rather than optional, which supporting supplements go with each,

@@ -243,6 +243,34 @@
   .pick-name { font-family: var(--font-head); font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .pick-detail { font-size: 13px; color: var(--muted); line-height: 1.45; }
   .ai-why { font-size: 12px; color: var(--brand); font-weight: 600; margin-top: 2px; }
+  .pick-item input[type="radio"] { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--brand); flex-shrink: 0; cursor: pointer; }
+  .pick-facts { font-size: 12.5px; color: var(--faint); line-height: 1.45; }
+  /* Protocol chooser — heading, presentation groups, and the product-level
+     facts a chosen dosing variant inherits. */
+  .pick-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .pick-lbl { display: flex; align-items: center; gap: 7px; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; }
+  .pick-lbl svg { color: var(--brand); }
+  .pick-count { font-size: 12px; color: var(--faint); }
+  .pick-group {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin: 16px 0 8px;
+  }
+  .pick-group:first-of-type { margin-top: 4px; }
+  .pick-group span { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
+  .pfacts { display: grid; grid-template-columns: auto 1fr; gap: 5px 16px; font-size: 12.5px; margin: 14px 0 12px; }
+  .pfacts dt { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); padding-top: 2px; white-space: nowrap; }
+  .pfacts dd { color: var(--muted); line-height: 1.45; }
+  @media (max-width: 560px) { .pfacts { grid-template-columns: 1fr; gap: 1px 0; } .pfacts dd { margin-bottom: 7px; } }
+  /* Callouts, shared with the patient guide's visual language. */
+  .g-callout { display: flex; gap: 10px; padding: 13px 15px; border-radius: var(--r-md); font-size: 13.5px; line-height: 1.45; }
+  .g-callout svg { flex-shrink: 0; margin-top: 1px; }
+  .g-red { background: var(--danger-soft); color: #7A2E22; }
+  .g-red svg { color: var(--danger); }
+  .g-amber { background: var(--amber-soft); color: #6E4A0E; }
+  .g-amber svg { color: var(--amber); }
+  .g-teal { background: var(--brand-soft); color: var(--brand-strong); }
+  .g-teal svg { color: var(--brand); }
   .add-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
   .add-row .input { flex: 1; min-width: 140px; }
 </style>
@@ -252,6 +280,6 @@
 <script src="/shared.js?v=docare25"></script>
 <script src="/patient-guides.js?v=docare25"></script>
 <script src="/guide.js?v=docare25"></script>
-<script src="/doctor/app.js?v=docare29"></script>
+<script src="/doctor/app.js?v=docare33"></script>
 </body>
 </html>

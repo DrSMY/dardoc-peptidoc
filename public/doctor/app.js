@@ -5,6 +5,7 @@ const S = {
   user: null,
   templates: [],
   presets: null,
+  protocols: {},  // medication → guidebook presentations, each with its dosing variants
   patients: [],
   wizard: null,
   detailTab: "overview",
@@ -25,12 +26,14 @@ async function boot() {
 }
 
 async function loadStatics() {
-  const [templates, presets] = await Promise.all([
+  const [templates, presets, protocols] = await Promise.all([
     api("GET", "/api/templates"),
     api("GET", "/api/presets"),
+    api("GET", "/api/clinical/protocols").catch(() => ({ byMedication: {} })),
   ]);
   S.templates = templates;
   S.presets = presets;
+  S.protocols = protocols.byMedication || {};
 }
 
 window.addEventListener("hashchange", () => { if (S.user) route(); });
@@ -870,7 +873,7 @@ const WIZ_STEPS = ["Intake", "Program", "Labs & Supplements", "Clinical", "Revie
 // consultation can prescribe several medications (e.g. a GLP-1 + a peptide).
 function freshDraft(category) {
   return {
-    category, template: null, protocol: null, protocolBase: null, customizing: false,
+    category, template: null, protocol: null, protocolBase: null, protocolKey: null, customizing: false,
     medication: "", dose: "", quantity: 1, route: "injection", frequency: "weekly", halfLifeHours: null,
     phases: [],
   };
@@ -1854,7 +1857,7 @@ function wizStepProgram() {
         <button class="tpl-card ${d.template && d.template.id === t.id ? "sel" : ""}" data-tpl="${t.id}">
           ${icon(routeIcon(t.config.route || (t.config.protocols && t.config.protocols[0] && t.config.protocols[0].route)), 20)}
           <div class="tpl-name">${esc(t.name)}</div>
-          <div class="tpl-sub">${d.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : (t.config.protocols ? t.config.protocols.length + " protocol" + (t.config.protocols.length > 1 ? "s" : "") : "")}</div>
+          <div class="tpl-sub">${d.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : esc(peptideCardSub(t))}</div>
         </button>`).join("")}
     </div>
     <div id="wz-tpl-detail" style="margin-top:18px"></div>`;
@@ -1869,7 +1872,13 @@ function wizStepProgram() {
         d.dose = d.template.config.doses[0];
         d.phases = suggestTitration(d.template.config.doses, d.dose, d.template.config.titration);
       } else {
-        d.protocol = d.template.config.protocols[0];
+        // Default to the guidebook's first approved variant; fall back to the
+        // clinic's own protocol for anything the guidebook doesn't cover.
+        const first = peptideProtocolOptions(d.medication, d.template)[0];
+        d.protocolKey = first ? first.key : null;
+        d.protocol = first ? first.protocol : d.template.config.protocols[0];
+        d.protocolBase = d.protocol;
+        d.customizing = false;
         applyProtocolTo(d);
       }
       wizStepProgram();
@@ -1896,20 +1905,24 @@ function wizStepProgram() {
       wirePhases(det);
     }
     if (d.template && d.category === "peptide") {
-      const protos = d.template.config.protocols;
-      const selIdx = protos.findIndex((pr) => pr === d.protocolBase || pr === d.protocol);
+      const opts = peptideProtocolOptions(d.medication, d.template);
+      const sel = opts.find((o) => o.key === d.protocolKey) || opts[0];
+      if (sel && !d.customizing && d.protocol !== sel.protocol) {
+        // Re-rendering rebuilds the option objects, so re-anchor on the key.
+        d.protocol = sel.protocol;
+        d.protocolBase = sel.protocol;
+      }
       det.innerHTML = `
       <hr class="divider">
-      <div class="field">
-        <label for="pp-proto">Protocol</label>
-        <select class="input" id="pp-proto">${protos.map((pr, i) => `<option value="${i}" ${i === selIdx ? "selected" : ""}>${esc(pr.protocolType)} — ${esc(pr.doseVolume)} · ${esc(pr.time)}</option>`).join("")}</select>
-      </div>
+      ${protocolPickerHTML(opts, sel)}
       ${d.customizing ? `
       <div class="form-grid" id="pp-custom">
         <div class="field"><label for="pc-dosevol">Dose (volume)</label><input class="input" id="pc-dosevol" data-pk="doseVolume" value="${esc(d.protocol.doseVolume || "")}"></div>
-        <div class="field"><label for="pc-doseamt">Dose (amount)</label><input class="input" id="pc-doseamt" data-pk="doseAmount" value="${esc(d.protocol.doseAmount || "")}"></div>
+        <div class="field"><label for="pc-doseamt">Dose (amount delivered)</label><input class="input" id="pc-doseamt" data-pk="doseAmount" value="${esc(d.protocol.doseAmount || "")}"></div>
         <div class="field"><label for="pc-strength">Strength / concentration</label><input class="input" id="pc-strength" data-pk="strength" value="${esc(d.protocol.strength || "")}"></div>
-        <div class="field"><label for="pc-duration">Vial lasts / duration</label><input class="input" id="pc-duration" data-pk="duration" value="${esc(d.protocol.duration || "")}"></div>
+        <div class="field"><label for="pc-course">Course length</label><input class="input" id="pc-course" data-pk="course" value="${esc(d.protocol.course || d.protocol.duration || "")}"></div>
+        <div class="field"><label for="pc-doses">Doses in the course</label><input class="input" id="pc-doses" data-pk="totalDoses" value="${esc(d.protocol.totalDoses || "")}"></div>
+        <div class="field"><label for="pc-supply">Supply to dispense</label><input class="input" id="pc-supply" data-pk="supply" value="${esc(d.protocol.supply || "")}"></div>
         <div class="field"><label for="pc-time">Timing</label><input class="input" id="pc-time" data-pk="time" value="${esc(d.protocol.time || "")}"></div>
         <div class="field"><label for="pc-cycle">Cycle</label><input class="input" id="pc-cycle" data-pk="cycle" value="${esc(d.protocol.cycle || "")}"></div>
       </div>
@@ -1918,26 +1931,23 @@ function wizStepProgram() {
         <button class="btn btn-ghost btn-sm" id="pp-cancel-custom" type="button">Reset to standard</button>
       </div>
       <p class="hint">Edits apply to this consultation. "Save as my protocol" also stores it in your Program library for future use.</p>` : `
-      <div class="metric-strip">
-        <div class="metric"><b>${esc(d.protocol.strength)}</b>Strength</div>
-        <div class="metric"><b>${esc(d.protocol.doseAmount || d.protocol.doseVolume)}</b>Dose</div>
-        <div class="metric"><b>${esc(d.protocol.duration)}</b>Vial lasts</div>
-        <div class="metric"><b>${esc(d.protocol.cycle)}</b>Cycle</div>
-      </div>
-      <p class="hint">${esc(d.protocol.summary)}</p>
+      ${protocolFactsHTML(sel)}
       <button class="btn btn-ghost btn-sm" id="pp-customize" type="button">${icon("edit", 15)} Customize protocol</button>`}`;
 
-      det.querySelector("#pp-proto").addEventListener("change", (e) => {
-        d.protocol = protos[Number(e.target.value)];
-        d.protocolBase = d.protocol;
+      det.querySelectorAll("[data-vkey]").forEach((b) => b.addEventListener("click", () => {
+        const opt = opts.find((o) => o.key === b.dataset.vkey);
+        if (!opt) return;
+        d.protocolKey = opt.key;
+        d.protocol = opt.protocol;
+        d.protocolBase = opt.protocol;
         d.customizing = false;
         applyProtocolTo(d);
         wizStepProgram();
-      });
+      }));
 
       const custBtn = det.querySelector("#pp-customize");
       if (custBtn) custBtn.addEventListener("click", () => {
-        d.protocolBase = protos.includes(d.protocol) ? d.protocol : (protos[selIdx >= 0 ? selIdx : 0]);
+        d.protocolBase = d.protocol;
         d.protocol = { ...d.protocol, protocolType: d.protocol.protocolType.replace(/ \(customized\)$/, "") + " (customized)" };
         d.customizing = true;
         wizStepProgram();
@@ -1948,11 +1958,12 @@ function wizStepProgram() {
         // so focus is preserved); derived draft fields refresh on each input.
         det.querySelectorAll("#pp-custom [data-pk]").forEach((inp) => inp.addEventListener("input", () => {
           d.protocol[inp.dataset.pk] = inp.value;
+          if (inp.dataset.pk === "course") d.protocol.courseWeeks = weeksFromCourse(inp.value);
           d.protocol.summary = `${d.medication} ${d.protocol.doseVolume || d.protocol.doseAmount || ""} — ${d.protocol.time || ""}`.trim();
           applyProtocolTo(d);
         }));
         det.querySelector("#pp-cancel-custom").addEventListener("click", () => {
-          d.protocol = d.protocolBase || protos[0];
+          d.protocol = d.protocolBase || (sel && sel.protocol);
           d.customizing = false;
           applyProtocolTo(d);
           wizStepProgram();
@@ -2013,22 +2024,202 @@ function addDraftToCart() {
 
 function applyProtocolTo(d) {
   const pr = d.protocol;
-  d.dose = pr.doseVolume + (pr.doseAmount ? ` (${pr.doseAmount})` : "");
+  // doseVolume and doseAmount say the same thing on the clinic's older
+  // protocols ("0.15 ml (15 units)" twice over); only append the second when
+  // it adds something, as the guidebook's does ("300 mcg per injection").
+  const amt = pr.doseAmount && pr.doseAmount !== pr.doseVolume ? ` (${pr.doseAmount})` : "";
+  d.dose = (pr.doseVolume || pr.doseAmount || "") + (pr.doseVolume ? amt : "");
   d.route = pr.route.toLowerCase().includes("oral") ? "oral" : pr.route.toLowerCase().includes("nasal") ? "nasal" : pr.route.toLowerCase().includes("topical") ? "topical" : "injection";
-  d.frequency = inferFreqLabel(pr.time);
-  d.phases = [{ label: pr.protocolType, dose: d.dose, weeks: "", note: `${pr.time} — ${pr.cycle}` }];
+  d.frequency = inferFreqLabel(pr.frequency || pr.time);
+  // A guidebook variant is a whole course, so the phase carries its length
+  // and supply; the clinic's older protocols only know the timing and cycle.
+  const supplyNote = [pr.totalDoses, pr.supply].filter(Boolean).join(" · ");
+  d.phases = [{
+    label: pr.protocolType,
+    dose: d.dose,
+    weeks: pr.courseWeeks || "",
+    note: supplyNote || `${pr.time} — ${pr.cycle}`,
+  }];
 }
 
+// ── the prescriber's guidebook, in the Program step ───────────────
+// A guidebook dosing variant, expressed in the shape the wizard, the EMR
+// note and the patient guide already read protocols in. `course`, `supply`
+// and `totalDoses` are new: the guidebook prescribes a complete course, so
+// how long it runs and what it takes to dispense it are part of the choice.
+function guidebookProtocol(form, v) {
+  const clean = (s) => { const t = String(s == null ? "" : s).trim(); return (t === "n/a" || t === "-" || t === "—") ? "" : t; };
+  const course = clean(v.course);
+  const supply = [clean(v.vials), clean(v.pens)].filter(Boolean).join(" or ");
+  const name = clean(v.name).replace(/^variant\s+\d+\s*[-–—]\s*/i, "") || "Standard protocol";
+  const dose = clean(v.dose);
+  return {
+    protocolType: name.charAt(0).toUpperCase() + name.slice(1),
+    doseVolume: dose,
+    doseAmount: clean(v.delivered),
+    strength: clean(form.strength),
+    route: clean(form.route),
+    time: clean(form.timing) || clean(v.frequency),
+    cycle: clean(form.cycling),
+    duration: "",                       // the guidebook states supply, not how long a vial lasts
+    frequency: clean(v.frequency),
+    course,
+    courseWeeks: weeksFromCourse(course),
+    totalDoses: clean(v.doses),
+    supply,
+    note: clean(v.note),
+    ref: form.ref,
+    presentation: clean(form.presentation),
+    source: "guidebook",
+    summary: `${clean(form.name)} ${dose}${course ? ` — ${course}` : ""}${clean(v.frequency) ? `, ${clean(v.frequency).toLowerCase()}` : ""}`.trim(),
+  };
+}
+
+// "4 weeks (28 days)" → "4"; "30 day cycle" → "4"; "One month" → "4".
+// Feeds the dose-schedule row so the course length reaches the guide.
+function weeksFromCourse(course) {
+  const t = String(course || "").toLowerCase();
+  let m = t.match(/(\d+(?:\.\d+)?)\s*week/);
+  if (m) return String(Math.round(Number(m[1])));
+  m = t.match(/(\d+)\s*month/);
+  if (m) return String(Number(m[1]) * 4);
+  m = t.match(/(\d+)\s*day/);
+  if (m) return String(Math.max(1, Math.round(Number(m[1]) / 7)));
+  if (/\bone month\b/.test(t)) return "4";
+  return "";
+}
+
+// "4 weeks (28 days)" → "4 weeks" — the headline length, for the card.
+function shortCourse(course) {
+  return String(course || "").split("(")[0].trim();
+}
+
+// Every protocol this peptide can be prescribed on: the guidebook's approved
+// dosing variants for each of its presentations, then whatever the clinic's
+// own program library holds for it (the legacy standard protocol, plus any
+// protocol a doctor has saved). Each option carries a stable key so the
+// selection survives the step re-rendering.
+function peptideProtocolOptions(medication, template) {
+  const opts = [];
+  for (const form of (S.protocols[medication] || [])) {
+    (form.variants || []).forEach((v, i) => {
+      opts.push({ key: `gb:${form.ref}:${i}`, source: "guidebook", form, protocol: guidebookProtocol(form, v) });
+    });
+  }
+  ((template && template.config && template.config.protocols) || []).forEach((pr, i) => {
+    opts.push({ key: `tpl:${i}`, source: "clinic", form: null, protocol: { ...pr, source: "clinic" } });
+  });
+  return opts;
+}
+
+// How many dosing options a peptide card is offering, so the count on the
+// card matches the list that opens when it is chosen.
+function peptideCardSub(t) {
+  const med = (t.config && t.config.medication) || t.name;
+  const forms = S.protocols[med] || [];
+  const n = forms.reduce((sum, f) => sum + (f.variants || []).length, 0) +
+    ((t.config && t.config.protocols) || []).length;
+  if (!n) return "";
+  const presentations = forms.length > 1 ? ` · ${forms.length} presentations` : "";
+  return `${n} dosing option${n === 1 ? "" : "s"}${presentations}`;
+}
+
+// The protocol chooser: every variant laid out at once, grouped by the
+// presentation it belongs to, so a medication with several forms or several
+// course lengths shows all of them side by side rather than hiding them in
+// a dropdown.
+function protocolPickerHTML(opts, sel) {
+  if (!opts.length) return `<p class="hint">No dosing protocol on file for this medication — use "Custom program" to enter one.</p>`;
+  const groups = [];
+  for (const o of opts) {
+    const id = o.source === "guidebook" ? o.form.ref : "clinic";
+    let g = groups.find((x) => x.id === id);
+    if (!g) {
+      g = {
+        id, source: o.source, form: o.form, opts: [],
+        label: o.source === "guidebook" ? o.form.presentation : "From your program library",
+        sub: o.source === "guidebook" ? [o.form.strength, o.form.route].filter(Boolean).join(" · ") : "",
+      };
+      groups.push(g);
+    }
+    g.opts.push(o);
+  }
+  const gb = opts.filter((o) => o.source === "guidebook").length;
+  const clinic = opts.length - gb;
+  const count = [
+    gb ? `${gb} approved variant${gb === 1 ? "" : "s"}` : "",
+    clinic ? `${clinic} from your library` : "",
+  ].filter(Boolean).join(" · ");
+
+  return `
+  <div class="pick-head">
+    <span class="pick-lbl">${icon("layers", 16)} Dosing protocol</span>
+    <span class="pick-count">${esc(count)}</span>
+  </div>
+  ${groups.map((g) => `
+    ${groups.length > 1 ? `<div class="pick-group">${esc(g.label)}${g.sub ? `<span>${esc(g.sub)}</span>` : ""}</div>` : ""}
+    ${g.opts.map((o) => protocolOptionHTML(o, !!sel && o.key === sel.key)).join("")}`).join("")}`;
+}
+
+function protocolOptionHTML(o, on) {
+  const p = o.protocol;
+  const gb = o.source === "guidebook";
+  const dose = [p.doseVolume, p.doseAmount && p.doseAmount !== p.doseVolume ? p.doseAmount : ""].filter(Boolean).join(" · ");
+  const facts = (gb
+    ? [p.frequency, p.totalDoses, p.supply]
+    : [p.time, p.duration ? `vial lasts ${p.duration}` : "", p.cycle]
+  ).filter(Boolean);
+  const course = gb ? shortCourse(p.course) : "";
+  return `
+  <label class="pick-item ${on ? "on" : ""}">
+    <input type="radio" name="pp-variant" data-vkey="${esc(o.key)}" ${on ? "checked" : ""}>
+    <span class="pick-body">
+      <span class="pick-name">${esc(p.protocolType)}${course ? ` <span class="badge badge-gray">${esc(course)}</span>` : ""}</span>
+      ${dose ? `<span class="pick-detail">${esc(dose)}</span>` : ""}
+      ${facts.length ? `<span class="pick-facts">${esc(facts.join(" · "))}</span>` : ""}
+      ${p.note ? `<span class="ai-why">${esc(p.note)}</span>` : ""}
+    </span>
+  </label>`;
+}
+
+// The product-level facts the chosen variant inherits — the things that are
+// the same whichever variant is picked, and so belong under the list rather
+// than repeated on every card.
+function protocolFactsHTML(sel) {
+  if (!sel) return "";
+  const p = sel.protocol, f = sel.form;
+  const rows = [
+    ["Strength", p.strength],
+    ["Route", p.route],
+    ["Timing", p.time],
+    ["Cycling & breaks", p.cycle],
+    ["Dispensed as", f && f.containers],
+    ["Monitoring", f && f.monitoring],
+    ["Blood panels", f && f.panelRule],
+  ].filter((r) => r[1]);
+  const notes = [
+    f && f.prescriberNote ? { cls: "g-teal", ico: "info", text: f.prescriberNote } : null,
+    f && f.needsVerification ? { cls: "g-amber", ico: "alert", text: `Open in the guidebook: ${f.needsVerification}` } : null,
+  ].filter(Boolean);
+  return `
+  ${rows.length ? `<dl class="pfacts">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}
+  ${notes.map((n) => `<div class="g-callout ${n.cls}" style="margin-bottom:8px">${icon(n.ico, 17)}<div>${esc(n.text)}</div></div>`).join("")}`;
+}
+
+// Maps a protocol's own wording — the guidebook's "As needed, maximum twice
+// per week" as much as the clinic's older free text — onto the dosing
+// cadences the portal schedules reminders from. Tested most-specific first:
+// a PRN protocol with a weekly cap is still PRN, not weekly.
 function inferFreqLabel(time) {
   const t = String(time || "").toLowerCase();
-  if (t.includes("twice daily")) return "twice daily";
-  if (t.includes("daily")) return "daily";
-  if (t.includes("every 3 days")) return "every 3 days";
-  if (t.includes("5 days on")) return "5 days per week";
+  if (t.includes("as needed") || t.includes("on demand") || t.includes("on-demand")) return "as needed";
+  if (t.includes("twice daily") || t.includes("twice per day") || t.includes("2-3 times per day")) return "twice daily";
+  if (t.includes("every 3 days") || t.includes("every third day")) return "every 3 days";
+  if (t.includes("every other day") || t.includes("alternate day")) return "every other day";
+  if (t.includes("5 days on") || t.includes("5 days per week") || t.includes("5 of 7")) return "5 days per week";
   if (t.includes("3 times") || t.includes("3x")) return "3 times per week";
-  if (t.includes("twice a week") || t.includes("twice weekly")) return "twice a week";
-  if (t.includes("weekly")) return "weekly";
-  if (t.includes("on demand") || t.includes("as needed")) return "as needed";
+  if (t.includes("twice a week") || t.includes("twice weekly") || t.includes("twice per week")) return "twice a week";
+  if (t.includes("weekly") || t.includes("per week")) return "weekly";
   return "daily";
 }
 
@@ -2106,10 +2297,17 @@ function defaultInstructionsFor(item) {
     return `${base}\nEat slowly, stop when comfortably full, and prioritise protein at every meal.\nStay well hydrated (2–3 L water daily).`;
   }
   if (item.category === "peptide" && item.protocol) {
+    const pr = item.protocol;
     const info = (S.presets.peptideInfo || {})[item.medication];
     const storage = (info && info.storageNotes) || "Store vials refrigerated (2–8°C) away from light.";
     const missed = info && info.missedDose ? `\nMissed dose: ${info.missedDose}` : "";
-    return `${item.protocol.time}.\nRoute: ${item.protocol.route}.\nCycle: ${item.protocol.cycle}.\n${storage}${missed}`;
+    // A guidebook variant is a defined course, so the patient is told how
+    // long it runs and how many doses it holds. Guidebook prose already ends
+    // in a full stop where the clinic's fields don't, so only add one when
+    // it's missing rather than producing "No cycling required..".
+    const sentence = (s) => { const t = String(s || "").trim(); return !t ? "" : /[.!?]$/.test(t) ? t : t + "."; };
+    const course = pr.course ? `Course: ${sentence(`${pr.course}${pr.totalDoses ? ` — ${pr.totalDoses}` : ""}`)}\n` : "";
+    return `${sentence(pr.time)}\n${course}Route: ${sentence(pr.route)}\nCycle: ${sentence(pr.cycle)}\n${storage}${missed}`;
   }
   return "";
 }
@@ -2179,7 +2377,10 @@ function emrMedLine(it) {
   }
   if (it.category === "peptide" && it.protocol) {
     const pr = it.protocol;
-    return `${it.medication} — ${pr.doseAmount ? pr.doseAmount + " " : ""}${pr.doseVolume ? `(${pr.doseVolume})` : ""} — ${pr.time || freqPhrase(it.frequency)}, ${humanRoute(it.route)}${pr.duration ? `, for ${pr.duration} total cycle` : ""}`.replace(/ +/g, " ").trim();
+    const length = pr.course ? `, ${pr.course} course` : pr.duration ? `, for ${pr.duration} total cycle` : "";
+    // The guidebook's timing ends in a full stop; the line continues after it.
+    const timing = String(pr.time || freqPhrase(it.frequency)).replace(/\.\s*$/, "");
+    return `${it.medication} — ${pr.doseAmount ? pr.doseAmount + " " : ""}${pr.doseVolume ? `(${pr.doseVolume})` : ""} — ${timing}, ${humanRoute(it.route)}${length}`.replace(/ +/g, " ").trim();
   }
   return `${it.medication}${it.dose ? " " + it.dose : ""} — ${freqPhrase(it.frequency)}${it.route ? ", " + humanRoute(it.route) : ""}`;
 }
@@ -2192,7 +2393,12 @@ function emrMedExtra(it, goals) {
   const mech = info && info.howItWorks ? info.howItWorks.split(".")[0] + "." : "";
   const goalTxt = goals && goals.length ? goals[0] : "the patient's stated goals";
   const pr = it.protocol;
-  return `\n   Rationale: Selected for '${goalTxt}'.${mech ? " " + mech : ""}\n   Supply: ${pr.strength || ""}${pr.doseVolume ? `, ${pr.doseVolume}/dose` : ""}${pr.duration ? ` (vial lasts ~${pr.duration})` : ""}`;
+  // The guidebook dispenses a whole course (a count of vials, pens or
+  // bottles); the clinic's older protocols only say how long one vial lasts.
+  const dispense = pr.supply
+    ? ` — dispense ${pr.supply}${pr.totalDoses ? ` for ${pr.totalDoses}` : ""}`
+    : pr.duration ? ` (vial lasts ~${pr.duration})` : "";
+  return `\n   Rationale: Selected for '${goalTxt}'.${mech ? " " + mech : ""}\n   Supply: ${pr.strength || ""}${pr.doseVolume ? `, ${pr.doseVolume}/dose` : ""}${dispense}`;
 }
 
 // Builds the full structured clinical encounter record (EMR) for every

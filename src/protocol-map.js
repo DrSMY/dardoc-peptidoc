@@ -42,6 +42,48 @@ const PROTOCOL_ALIASES = {
   "SS-31": { any: "P31" },
 };
 
+// Every guidebook presentation an app medication can be prescribed as, in
+// the order the consultation offers them (the default first). More than one
+// entry means genuinely different products sit behind the same name — a
+// different route (Semax nasal or injection) or a different capsule strength
+// (Dihexa 2.5 mg or 20 mg) — each with its own dosing variants. Unlike
+// PROTOCOL_ALIASES, which resolves one product from the prescribed route,
+// this lists everything so the prescriber can compare and choose.
+const PROTOCOL_FORMS = {
+  "BPC-157": ["P01"],
+  "BPC-157 Capsules": ["P02"],
+  "Epitalon": ["P03"],
+  "CJC-1295": ["P04"],
+  "Ipamorelin": ["P05"],
+  "Sermorelin": ["P06"],
+  "Thymosin Alpha-1": ["P07"],
+  "Thymosin Beta-4": ["P08"],
+  "PT-141 Nasal": ["P09"],
+  "PT-141": ["P10", "P09"],
+  "CJC/Ipamorelin Blend": ["P11"],
+  "GHK-Cu": ["P12"],
+  "GHK-Cu Facial Serum": ["P13"],
+  "GHK-Cu Scalp Foam": ["P14"],
+  "MOTS-C": ["P15"],
+  "AOD-9604": ["P16"],
+  "Kisspeptin-10": ["P17"],
+  "Dihexa Capsules": ["P18", "P19"],
+  "DSIP": ["P20"],
+  "Semax": ["P21", "P22"],
+  "Selank": ["P23", "P24"],
+  "KPV": ["P25", "P26"],
+  "KPV + BPC-157": ["P27", "P28"],
+  "Tesamorelin": ["P29"],
+  "LR3-IGF1": ["P30"],
+  "SS-31": ["P31"],
+  // Names this app used before the guidebook renamed them. The seeder only
+  // ever upserts templates, so these rows still sit in existing databases
+  // and still appear in the picker — map them so they offer variants too.
+  "Semax Nasal": ["P21"],
+  "Selank Nasal": ["P23"],
+  "Thymosin Beta (TB-500)": ["P08"],
+};
+
 // Supplements this practice adds on top of the guidebook's own list. Kept
 // here rather than in the generated protocols module so regenerating from a
 // new guidebook never drops them.
@@ -114,6 +156,27 @@ function panelsForProduct(product, patient) {
         push(id, product.name, true);
       }
     }
+  }
+  return out;
+}
+
+// The guidebook as the consultation's Program step needs it: for every app
+// medication, each approved presentation with its full set of dosing
+// variants, plus the product-level facts a prescriber weighs one variant
+// against another with. Sent once when the dashboard loads, so choosing a
+// medication shows its variants immediately.
+function protocolCatalogue() {
+  const out = {};
+  for (const [medication, refs] of Object.entries(PROTOCOL_FORMS)) {
+    const forms = refs.map((ref) => BY_REF[ref]).filter(Boolean).map((p) => ({
+      ref: p.ref, name: p.name, presentation: p.presentation, category: p.category,
+      route: p.route, strength: p.strength, containers: p.containers,
+      timing: p.timing, cycling: p.cycling, indication: p.indication,
+      bestUseFor: p.bestUseFor, monitoring: p.monitoring, panelRule: p.panelRule,
+      prescriberNote: p.prescriberNote || "", needsVerification: p.needsVerification || "",
+      variants: p.variants || [],
+    }));
+    if (forms.length) out[medication] = forms;
   }
   return out;
 }
@@ -195,7 +258,9 @@ function protocolSafetyFindings(cart, patient) {
 
 module.exports = {
   PROTOCOL_ALIASES,
+  PROTOCOL_FORMS,
   PRACTICE_SUPPLEMENTS,
+  protocolCatalogue,
   matchProtocol,
   panelsForProduct,
   protocolSafetyFindings,
