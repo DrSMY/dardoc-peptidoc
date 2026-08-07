@@ -65,7 +65,35 @@ function getDoctor(req) {
   if (!token) return null;
   const s = db.prepare("SELECT * FROM sessions WHERE token = ? AND kind = 'doctor' AND expires_at > datetime('now')").get(token);
   if (!s) return null;
-  return db.prepare("SELECT id, email, name, role, credentials, signature, clinic, active FROM users WHERE id = ? AND active = 1").get(s.ref_id) || null;
+  const u = db.prepare(`SELECT u.id, u.email, u.name, u.role, u.credentials, u.signature, u.clinic, u.active,
+      u.org_id, u.platform_admin, o.name AS org_name, o.slug AS org_slug
+    FROM users u LEFT JOIN organizations o ON o.id = u.org_id
+    WHERE u.id = ? AND u.active = 1`).get(s.ref_id);
+  if (!u) return null;
+  // An organisation can be switched off without deleting anything; its staff
+  // then cannot sign in, exactly like a deactivated account.
+  const org = db.prepare("SELECT active FROM organizations WHERE id = ?").get(u.org_id);
+  if (org && !org.active) return null;
+  return u;
+}
+
+// Every patient belongs to exactly one organisation, and so does everything
+// hanging off a patient. This predicate scopes any table with a patient_id.
+const IN_ORG = "patient_id IN (SELECT id FROM patients WHERE org_id = ?)";
+
+// A patient, but only if the signed-in user's organisation owns them. Used
+// wherever a patient is reached by id, so one practice cannot read or write
+// another's records by guessing a number.
+function patientInOrg(id, user) {
+  const row = db.prepare("SELECT * FROM patients WHERE id = ?").get(id);
+  return row && row.org_id === user.org_id ? row : null;
+}
+const NOT_IN_ORG = { error: "Not found in your organisation." };
+
+// The platform owner: sets up organisations and can manage any of them.
+function requirePlatformAdmin(req) {
+  const user = getDoctor(req);
+  return user && user.platform_admin ? user : null;
 }
 
 // Super admin: manages the team, the clinical protocols and the knowledge base.
@@ -102,12 +130,13 @@ function normMobile(m) {
 // from the session, so a guide opened months later — or by a different
 // doctor, or by an admin — still shows who actually prescribed it.
 function signerFor(userId) {
-  const u = db.prepare("SELECT name, credentials, signature, clinic FROM users WHERE id = ?").get(userId);
+  const u = db.prepare(`SELECT u.name, u.credentials, u.signature, u.clinic, o.name AS org_name
+    FROM users u LEFT JOIN organizations o ON o.id = u.org_id WHERE u.id = ?`).get(userId);
   return {
     name: u ? u.name : "Your doctor",
     credentials: (u && u.credentials) || "",
     signature: (u && u.signature) || "",
-    clinic: (u && u.clinic) || "DarDoc Healthcare",
+    clinic: (u && (u.clinic || u.org_name)) || "",
   };
 }
 
@@ -189,6 +218,7 @@ function publicUser(u) {
     id: u.id, name: u.name, email: u.email, role: u.role,
     credentials: u.credentials || "", signature: u.signature || "",
     clinic: u.clinic || "DarDoc Healthcare", active: u.active === undefined ? 1 : u.active,
+    orgId: u.org_id || null, orgName: u.org_name || u.clinic || "", platformAdmin: !!u.platform_admin,
   };
 }
 
@@ -197,7 +227,7 @@ route("POST", "/api/auth/logout", (req, res) => { clearSession(req, res, "doctor
 route("GET", "/api/me", (req, res) => {
   const user = getDoctor(req);
   if (!user) return json(res, 401, { error: "Not signed in." });
-  json(res, 200, user);
+  json(res, 200, publicUser(user));
 });
 
 route("POST", "/api/auth/password", async (req, res, _p, body) => {
@@ -274,6 +304,82 @@ route("POST", "/api/admin/login", async (req, res, _p, body) => {
   json(res, 200, publicUser(user));
 });
 
+// ── platform: organisations ─────────────────────────────────────
+// Each organisation is a separate practice with its own staff and its own
+// patients. A new one starts empty — no patients, no programs, no history —
+// and shares only the clinical library (protocols, peptide info, the
+// knowledge base), which is the prescriber's guidebook rather than anyone's
+// patient data.
+function slugify(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "org";
+}
+
+route("GET", "/api/admin/orgs", (req, res) => {
+  if (!requirePlatformAdmin(req)) return json(res, 403, { error: "Only the platform owner can manage organisations." });
+  const rows = db.prepare("SELECT * FROM organizations ORDER BY active DESC, name").all();
+  const staff = db.prepare("SELECT org_id, COUNT(*) n FROM users WHERE active = 1 GROUP BY org_id").all();
+  const pats = db.prepare("SELECT org_id, COUNT(*) n FROM patients WHERE archived = 0 GROUP BY org_id").all();
+  const byOrgStaff = Object.fromEntries(staff.map((r) => [r.org_id, r.n]));
+  const byOrgPats = Object.fromEntries(pats.map((r) => [r.org_id, r.n]));
+  json(res, 200, rows.map((o) => ({ ...o, staff: byOrgStaff[o.id] || 0, patients: byOrgPats[o.id] || 0 })));
+});
+
+// Creating an organisation also creates its first super admin — otherwise
+// nobody could ever sign in to it.
+route("POST", "/api/admin/orgs", async (req, res, _p, body) => {
+  if (!requirePlatformAdmin(req)) return json(res, 403, { error: "Only the platform owner can manage organisations." });
+  const name = String(body.name || "").trim();
+  if (!name) return json(res, 400, { error: "Organisation name is required." });
+  let slug = String(body.slug || "").trim() || slugify(name);
+  if (db.prepare("SELECT id FROM organizations WHERE slug = ?").get(slug)) {
+    let n = 2;
+    while (db.prepare("SELECT id FROM organizations WHERE slug = ?").get(`${slug}-${n}`)) n++;
+    slug = `${slug}-${n}`;
+  }
+  const email = String(body.adminEmail || "").toLowerCase().trim();
+  const adminName = String(body.adminName || "").trim();
+  if (!email || !adminName) return json(res, 400, { error: "The first super admin's name and email are required." });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Enter a valid email address." });
+  if (String(body.adminPassword || "").length < 8) return json(res, 400, { error: "Password must be at least 8 characters." });
+  if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) return json(res, 409, { error: "That email already has an account." });
+
+  db.exec("BEGIN");
+  try {
+    const r = db.prepare("INSERT INTO organizations (name, slug, contact_email) VALUES (?,?,?)")
+      .run(name, slug, String(body.contactEmail || "").trim());
+    const orgId = Number(r.lastInsertRowid);
+    db.prepare(`INSERT INTO users (email, password_hash, name, role, org_id, clinic, credentials)
+      VALUES (?,?,?,'superadmin',?,?,?)`)
+      .run(email, hashSecret(body.adminPassword), adminName, orgId, name, String(body.adminCredentials || "").trim());
+    db.exec("COMMIT");
+    const org = db.prepare("SELECT * FROM organizations WHERE id = ?").get(orgId);
+    json(res, 200, { ...org, staff: 1, patients: 0 });
+  } catch (e) {
+    db.exec("ROLLBACK");
+    json(res, 500, { error: "Could not create the organisation: " + e.message });
+  }
+});
+
+route("PUT", "/api/admin/orgs/:id", async (req, res, p, body) => {
+  const me = requirePlatformAdmin(req);
+  if (!me) return json(res, 403, { error: "Only the platform owner can manage organisations." });
+  const org = db.prepare("SELECT * FROM organizations WHERE id = ?").get(Number(p.id));
+  if (!org) return json(res, 404, { error: "Organisation not found." });
+  const sets = [], vals = [];
+  if (body.name !== undefined) { sets.push("name = ?"); vals.push(String(body.name).trim()); }
+  if (body.contactEmail !== undefined) { sets.push("contact_email = ?"); vals.push(String(body.contactEmail).trim()); }
+  if (body.active !== undefined) {
+    const next = body.active ? 1 : 0;
+    // Switching off the organisation you are signed in to would lock you out.
+    if (!next && org.id === me.org_id) return json(res, 400, { error: "You cannot deactivate your own organisation." });
+    sets.push("active = ?"); vals.push(next);
+    if (!next) db.prepare("DELETE FROM sessions WHERE kind = 'doctor' AND ref_id IN (SELECT id FROM users WHERE org_id = ?)").run(org.id);
+  }
+  if (!sets.length) return json(res, 400, { error: "Nothing to update." });
+  db.prepare(`UPDATE organizations SET ${sets.join(", ")} WHERE id = ?`).run(...vals, org.id);
+  json(res, 200, db.prepare("SELECT * FROM organizations WHERE id = ?").get(org.id));
+});
+
 // ── super admin: the clinical team ──────────────────────────────
 // Doctors sign their own consultations, so each one is a real user with
 // their own login and signature. Admins get the same read access to
@@ -281,15 +387,22 @@ route("POST", "/api/admin/login", async (req, res, _p, body) => {
 const STAFF_ROLES = ["doctor", "admin", "superadmin"];
 
 route("GET", "/api/admin/users", (req, res) => {
-  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
-  const rows = db.prepare("SELECT * FROM users ORDER BY active DESC, role, name").all().map(publicUser);
-  const counts = db.prepare("SELECT doctor_id, COUNT(*) n FROM patients WHERE archived = 0 GROUP BY doctor_id").all();
+  const me = requireSuperadmin(req);
+  if (!me) return json(res, 401, { error: "Not signed in as super admin." });
+  // A super admin manages their own organisation's staff. The platform owner
+  // may look into another organisation by naming it.
+  const org = me.platform_admin && req.query && req.query.org ? Number(req.query.org) : me.org_id;
+  const rows = db.prepare(`SELECT u.*, o.name AS org_name FROM users u
+    LEFT JOIN organizations o ON o.id = u.org_id
+    WHERE u.org_id = ? ORDER BY u.active DESC, u.role, u.name`).all(org).map(publicUser);
+  const counts = db.prepare("SELECT doctor_id, COUNT(*) n FROM patients WHERE archived = 0 AND org_id = ? GROUP BY doctor_id").all(org);
   const byDoctor = Object.fromEntries(counts.map((c) => [c.doctor_id, c.n]));
   json(res, 200, rows.map((u) => ({ ...u, patients: byDoctor[u.id] || 0 })));
 });
 
 route("POST", "/api/admin/users", async (req, res, _p, body) => {
-  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const me = requireSuperadmin(req);
+  if (!me) return json(res, 401, { error: "Not signed in as super admin." });
   const email = String(body.email || "").toLowerCase().trim();
   const name = String(body.name || "").trim();
   const role = STAFF_ROLES.includes(body.role) ? body.role : "doctor";
@@ -297,10 +410,13 @@ route("POST", "/api/admin/users", async (req, res, _p, body) => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Enter a valid email address." });
   if (String(body.password || "").length < 8) return json(res, 400, { error: "Password must be at least 8 characters." });
   if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) return json(res, 409, { error: "That email already has an account." });
-  const r = db.prepare(`INSERT INTO users (email, password_hash, name, role, credentials, signature, clinic)
-    VALUES (?,?,?,?,?,?,?)`).run(email, hashSecret(body.password), name, role,
+  const org = me.platform_admin && body.orgId ? Number(body.orgId) : me.org_id;
+  const orgRow = db.prepare("SELECT * FROM organizations WHERE id = ?").get(org);
+  if (!orgRow) return json(res, 400, { error: "Unknown organisation." });
+  const r = db.prepare(`INSERT INTO users (email, password_hash, name, role, credentials, signature, clinic, org_id)
+    VALUES (?,?,?,?,?,?,?,?)`).run(email, hashSecret(body.password), name, role,
       String(body.credentials || "").trim(), String(body.signature || "").trim(),
-      String(body.clinic || "DarDoc Healthcare").trim());
+      String(body.clinic || orgRow.name).trim(), org);
   json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(Number(r.lastInsertRowid))));
 });
 
@@ -309,6 +425,7 @@ route("PUT", "/api/admin/users/:id", async (req, res, p, body) => {
   if (!me) return json(res, 401, { error: "Not signed in as super admin." });
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(Number(p.id));
   if (!user) return json(res, 404, { error: "User not found." });
+  if (user.org_id !== me.org_id && !me.platform_admin) return json(res, 404, NOT_IN_ORG);
 
   const sets = [], vals = [];
   const put = (col, v) => { sets.push(`${col} = ?`); vals.push(v); };
@@ -328,7 +445,7 @@ route("PUT", "/api/admin/users/:id", async (req, res, p, body) => {
   }
   // The last active super admin must keep the keys, or nobody can manage the
   // team again — the same reason they cannot deactivate themselves.
-  const activeSupers = db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'superadmin' AND active = 1").get().n;
+  const activeSupers = db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'superadmin' AND active = 1 AND org_id = ?").get(user.org_id).n;
   if (body.role !== undefined && STAFF_ROLES.includes(body.role) && body.role !== user.role) {
     if (user.role === "superadmin" && activeSupers <= 1) return json(res, 400, { error: "This is the only super admin — promote someone else first." });
     put("role", body.role);
@@ -351,14 +468,15 @@ route("PUT", "/api/me/signature", async (req, res, _p, body) => {
   if (!me) return json(res, 401, { error: "Not signed in." });
   db.prepare("UPDATE users SET name = ?, credentials = ?, signature = ?, clinic = ? WHERE id = ?")
     .run(String(body.name || me.name).trim(), String(body.credentials || "").trim(),
-      String(body.signature || "").trim(), String(body.clinic || "DarDoc Healthcare").trim(), me.id);
-  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(me.id)));
+      String(body.signature || "").trim(), String(body.clinic || me.org_name || "").trim(), me.id);
+  json(res, 200, publicUser(db.prepare(`SELECT u.*, o.name AS org_name FROM users u
+    LEFT JOIN organizations o ON o.id = u.org_id WHERE u.id = ?`).get(me.id)));
 });
 
 route("GET", "/api/admin/me", (req, res) => {
   const user = requireSuperadmin(req);
   if (!user) return json(res, 401, { error: "Not signed in as super admin." });
-  json(res, 200, user);
+  json(res, 200, publicUser(user));
 });
 
 // Protocols: builtin GLP-1 medications & peptide dosing ladders (the
@@ -470,51 +588,53 @@ route("DELETE", "/api/admin/kb/:id", (req, res, p) => {
 
 // ── dashboard ────────────────────────────────────────────────────
 route("GET", "/api/dashboard", (req, res) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
-  const activePatients = db.prepare("SELECT COUNT(DISTINCT patient_id) AS n FROM plans WHERE status = 'active'").get().n;
-  const totalPatients = db.prepare("SELECT COUNT(*) AS n FROM patients WHERE archived = 0").get().n;
-  const checkins7 = db.prepare("SELECT COUNT(*) AS n FROM checkins WHERE created_at > datetime('now','-7 days')").get().n;
-  const doses7 = db.prepare("SELECT COUNT(*) AS n FROM dose_logs WHERE created_at > datetime('now','-7 days')").get().n;
-  const unread = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE sender = 'patient' AND read_at IS NULL").get().n;
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  const org = me.org_id;
+  const activePatients = db.prepare(`SELECT COUNT(DISTINCT patient_id) AS n FROM plans WHERE status = 'active' AND ${IN_ORG}`).get(org).n;
+  const totalPatients = db.prepare("SELECT COUNT(*) AS n FROM patients WHERE archived = 0 AND org_id = ?").get(org).n;
+  const checkins7 = db.prepare(`SELECT COUNT(*) AS n FROM checkins WHERE created_at > datetime('now','-7 days') AND ${IN_ORG}`).get(org).n;
+  const doses7 = db.prepare(`SELECT COUNT(*) AS n FROM dose_logs WHERE created_at > datetime('now','-7 days') AND ${IN_ORG}`).get(org).n;
+  const unread = db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE sender = 'patient' AND read_at IS NULL AND ${IN_ORG}`).get(org).n;
   const alerts = db.prepare(`
     SELECT c.*, p.name AS patient_name, p.mobile FROM checkins c
     JOIN patients p ON p.id = c.patient_id
-    WHERE c.flagged = 1 AND c.reviewed = 0
-    ORDER BY c.created_at DESC LIMIT 30`).all()
+    WHERE c.flagged = 1 AND c.reviewed = 0 AND p.org_id = ?
+    ORDER BY c.created_at DESC LIMIT 30`).all(org)
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   const refillRequests = db.prepare(`
     SELECT pl.id, pl.medication, pl.dose, pl.refill_requested_at, p.id AS patient_id, p.name AS patient_name, p.mobile
     FROM plans pl JOIN patients p ON p.id = pl.patient_id
-    WHERE pl.needs_refill = 1
-    ORDER BY pl.refill_requested_at DESC LIMIT 30`).all();
+    WHERE pl.needs_refill = 1 AND p.org_id = ?
+    ORDER BY pl.refill_requested_at DESC LIMIT 30`).all(org);
   const dueFollowups = db.prepare(`
     SELECT pl.id, pl.title, pl.medication, pl.next_followup, p.id AS patient_id, p.name AS patient_name, p.mobile
     FROM plans pl JOIN patients p ON p.id = pl.patient_id
-    WHERE pl.status = 'active' AND pl.next_followup IS NOT NULL AND date(pl.next_followup) <= date('now','+3 days')
-    ORDER BY pl.next_followup ASC LIMIT 30`).all();
+    WHERE pl.status = 'active' AND pl.next_followup IS NOT NULL AND date(pl.next_followup) <= date('now','+3 days') AND p.org_id = ?
+    ORDER BY pl.next_followup ASC LIMIT 30`).all(org);
   const recent = db.prepare(`
     SELECT * FROM (
       SELECT 'checkin' AS type, c.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
              c.weight_kg AS detail, c.flagged AS flagged
-      FROM checkins c JOIN patients p ON p.id = c.patient_id
+      FROM checkins c JOIN patients p ON p.id = c.patient_id WHERE p.org_id = ?
       UNION ALL
       SELECT 'dose' AS type, d.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
              d.dose AS detail, 0 AS flagged
-      FROM dose_logs d JOIN patients p ON p.id = d.patient_id
-    ) ORDER BY created_at DESC LIMIT 20`).all();
+      FROM dose_logs d JOIN patients p ON p.id = d.patient_id WHERE p.org_id = ?
+    ) ORDER BY created_at DESC LIMIT 20`).all(org, org);
 
   // Practice statistics (prescriptions = every published plan; consultations
   // completed = every registered patient, since both are created together at
   // publish time in this app's flow).
-  const prescriptionsTotal = db.prepare("SELECT COUNT(*) AS n FROM plans").get().n;
+  const prescriptionsTotal = db.prepare(`SELECT COUNT(*) AS n FROM plans WHERE ${IN_ORG}`).get(org).n;
   const consultationsTotal = totalPatients;
-  const categoryBreakdown = db.prepare("SELECT category, COUNT(*) AS n FROM plans GROUP BY category").all();
+  const categoryBreakdown = db.prepare(`SELECT category, COUNT(*) AS n FROM plans WHERE ${IN_ORG} GROUP BY category`).all(org);
   const medBreakdown = db.prepare(`
-    SELECT medication, category, COUNT(*) AS n FROM plans
-    GROUP BY medication, category ORDER BY n DESC LIMIT 8`).all();
+    SELECT medication, category, COUNT(*) AS n FROM plans WHERE ${IN_ORG}
+    GROUP BY medication, category ORDER BY n DESC LIMIT 8`).all(org);
   const recentPlans = db.prepare(`
     SELECT created_at, category FROM plans
-    WHERE created_at > datetime('now','-14 days')`).all();
+    WHERE created_at > datetime('now','-14 days') AND ${IN_ORG}`).all(org);
 
   json(res, 200, {
     activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent, refillRequests,
@@ -524,7 +644,8 @@ route("GET", "/api/dashboard", (req, res) => {
 
 // ── doctor: full messages inbox (every patient thread, most recent first) ──
 route("GET", "/api/messages/inbox", (req, res) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
   const rows = db.prepare(`
     SELECT p.id AS patient_id, p.name AS patient_name, p.mobile,
       (SELECT body FROM messages m WHERE m.patient_id = p.id ORDER BY m.created_at DESC LIMIT 1) AS last_body,
@@ -532,31 +653,33 @@ route("GET", "/api/messages/inbox", (req, res) => {
       (SELECT created_at FROM messages m WHERE m.patient_id = p.id ORDER BY m.created_at DESC LIMIT 1) AS last_at,
       (SELECT COUNT(*) FROM messages m WHERE m.patient_id = p.id AND m.sender = 'patient' AND m.read_at IS NULL) AS unread
     FROM patients p
-    WHERE p.archived = 0 AND EXISTS (SELECT 1 FROM messages m WHERE m.patient_id = p.id)
-    ORDER BY last_at DESC`).all();
+    WHERE p.archived = 0 AND p.org_id = ? AND EXISTS (SELECT 1 FROM messages m WHERE m.patient_id = p.id)
+    ORDER BY last_at DESC`).all(me.org_id);
   json(res, 200, rows);
 });
 
 // Full recent-activity feed (dose logs + check-ins), for the dedicated
 // Recent activity page — the dashboard keeps its own 20-row slice.
 route("GET", "/api/activity", (req, res) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
   const rows = db.prepare(`
     SELECT * FROM (
       SELECT 'checkin' AS type, c.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
              c.weight_kg AS detail, c.flagged AS flagged
-      FROM checkins c JOIN patients p ON p.id = c.patient_id
+      FROM checkins c JOIN patients p ON p.id = c.patient_id WHERE p.org_id = ?
       UNION ALL
       SELECT 'dose' AS type, d.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
              d.dose AS detail, 0 AS flagged
-      FROM dose_logs d JOIN patients p ON p.id = d.patient_id
-    ) ORDER BY created_at DESC LIMIT 150`).all();
+      FROM dose_logs d JOIN patients p ON p.id = d.patient_id WHERE p.org_id = ?
+    ) ORDER BY created_at DESC LIMIT 150`).all(me.org_id, me.org_id);
   json(res, 200, rows);
 });
 
 // ── patients ─────────────────────────────────────────────────────
 route("GET", "/api/patients", (req, res) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
   const rows = db.prepare(`
     SELECT p.*,
       (SELECT COUNT(*) FROM plans pl WHERE pl.patient_id = p.id AND pl.status = 'active') AS active_plans,
@@ -568,8 +691,8 @@ route("GET", "/api/patients", (req, res) => {
       )) AS last_activity,
       (SELECT COUNT(*) FROM checkins c WHERE c.patient_id = p.id AND c.flagged = 1 AND c.reviewed = 0) AS open_alerts,
       (SELECT COUNT(*) FROM messages m WHERE m.patient_id = p.id AND m.sender = 'patient' AND m.read_at IS NULL) AS unread_msgs
-    FROM patients p WHERE p.archived = 0
-    ORDER BY p.created_at DESC`).all();
+    FROM patients p WHERE p.archived = 0 AND p.org_id = ?
+    ORDER BY p.created_at DESC`).all(me.org_id);
   json(res, 200, rows.map((r) => ({ ...r, pin_hash: undefined })));
 });
 
@@ -579,13 +702,19 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
   const name = String(body.name || "").trim();
   const mobile = normMobile(body.mobile);
   if (!name || !mobile) return json(res, 400, { error: "Name and mobile number are required." });
-  const dup = db.prepare("SELECT id FROM patients WHERE mobile = ?").get(mobile);
-  if (dup) return json(res, 409, { error: "A patient with this mobile number already exists.", patientId: dup.id });
+  const dup = db.prepare("SELECT id, org_id FROM patients WHERE mobile = ?").get(mobile);
+  // Mobile is the patient's portal login, so it has to stay unique across the
+  // whole install, not just within one organisation.
+  if (dup) {
+    return json(res, 409, dup.org_id === doc.org_id
+      ? { error: "A patient with this mobile number already exists.", patientId: dup.id }
+      : { error: "That mobile number is already registered to another organisation." });
+  }
   const pin = generatePin();
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(doc.id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
+    (doctor_id, org_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(doc.id, doc.org_id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
       body.heightCm || null, body.weightKg || null, body.activityLevel || "Sedentary",
       body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
       JSON.stringify(body.intake || {}), body.email || "", body.nationalId || "");
@@ -593,9 +722,10 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
 });
 
 route("GET", "/api/patients/:id", (req, res, p) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(p.id);
-  if (!patient) return json(res, 404, { error: "Patient not found." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
   const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(p.id).map(parsePlan);
   const doses = db.prepare("SELECT * FROM dose_logs WHERE patient_id = ? ORDER BY taken_at DESC LIMIT 200").all(p.id);
   const checkins = db.prepare("SELECT * FROM checkins WHERE patient_id = ? ORDER BY date DESC LIMIT 200").all(p.id)
@@ -608,9 +738,10 @@ route("GET", "/api/patients/:id", (req, res, p) => {
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(p.id);
-  if (!patient) return json(res, 404, { error: "Patient not found." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
   const fields = { name: "name", title: "title", age: "age", gender: "gender", heightCm: "height_cm",
     weightKg: "start_weight_kg", activityLevel: "activity_level", chronicIllnesses: "chronic_illnesses",
     medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email",
@@ -628,9 +759,10 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
 });
 
 route("POST", "/api/patients/:id/pin", (req, res, p) => {
-  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(p.id);
-  if (!patient) return json(res, 404, { error: "Patient not found." });
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
   const pin = generatePin();
   db.prepare("UPDATE patients SET pin_hash = ? WHERE id = ?").run(hashSecret(pin), p.id);
   db.prepare("DELETE FROM sessions WHERE kind = 'patient' AND ref_id = ?").run(p.id);
@@ -649,9 +781,9 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
   const doctorId = user.id;
 
   const insPatient = db.prepare(`INSERT INTO patients
-    (doctor_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level,
+    (doctor_id, org_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level,
      chronic_illnesses, medications, allergies, notes, intake_json, created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const insPlan = db.prepare(`INSERT INTO plans
     (patient_id, doctor_id, status, category, title, medication, dose, route, frequency,
      instructions, supplements, followup_days, next_followup, blood_test, clinical_note, clinical_suggestion, created_at)
@@ -663,7 +795,7 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
   try {
     let removed = 0;
     if (body.replace) {
-      const imported = db.prepare("SELECT id FROM patients WHERE intake_json LIKE '%\"imported\":true%'").all();
+      const imported = db.prepare("SELECT id FROM patients WHERE intake_json LIKE '%\"imported\":true%' AND org_id = ?").all(user.org_id);
       const delPlans = db.prepare("DELETE FROM plans WHERE patient_id = ?");
       const delPat = db.prepare("DELETE FROM patients WHERE id = ?");
       for (const p of imported) { delPlans.run(p.id); delPat.run(p.id); removed++; }
@@ -674,7 +806,7 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
       if (!mobile) mobile = "0000" + String(synth++).padStart(8, "0"); // clearly-synthetic key for no-phone records
       let m = mobile, g = 0;
       while (findMobile.get(m)) m = mobile + String(++g); // never overwrite an existing patient
-      const r = insPatient.run(doctorId, String(rec.name || "Unknown").trim() || "Unknown", m, null,
+      const r = insPatient.run(doctorId, user.org_id, String(rec.name || "Unknown").trim() || "Unknown", m, null,
         rec.title || "", rec.age ?? null, rec.gender || "", rec.heightCm ?? null, rec.weightKg ?? null,
         rec.activityLevel || "", rec.chronicIllnesses || "", rec.medications || "", rec.allergies || "",
         rec.notes || "", JSON.stringify({ imported: true, ...(rec.intake || {}) }),
@@ -717,9 +849,7 @@ route("POST", "/api/clinical/review", async (req, res, _p, body) => {
   const doc = getDoctor(req);
   if (!doc) return json(res, 401, { error: "Not signed in." });
   const items = Array.isArray(body.items) ? body.items : [];
-  const patient = body.patientId
-    ? db.prepare("SELECT * FROM patients WHERE id = ?").get(body.patientId)
-    : null;
+  const patient = body.patientId ? patientInOrg(body.patientId, doc) : null;
   const who = patient || body.patient || {};
 
   const panels = new Map();
@@ -793,8 +923,8 @@ route("POST", "/api/clinical/review", async (req, res, _p, body) => {
 route("POST", "/api/plans", async (req, res, _p, body) => {
   const doc = requireClinician(req);
   if (!doc) return json(res, 403, NOT_CLINICIAN);
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(body.patientId);
-  if (!patient) return json(res, 404, { error: "Patient not found." });
+  const patient = patientInOrg(body.patientId, doc);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
   if (!body.medication || !body.title) return json(res, 400, { error: "Program title and medication are required." });
   const followupDays = body.followupDays ?? 28;
   const r = db.prepare(`INSERT INTO plans
@@ -814,13 +944,15 @@ route("POST", "/api/plans", async (req, res, _p, body) => {
 
 // One program with the patient it belongs to — what the editor loads.
 route("GET", "/api/plans/:id", (req, res, p) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
   const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
   if (!plan) return json(res, 404, { error: "Plan not found." });
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(plan.patient_id);
+  const patient = patientInOrg(plan.patient_id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
   json(res, 200, {
     plan: parsePlan(plan),
-    patient: patient ? { ...patient, pin_hash: undefined, intake_json: undefined, intake: JSON.parse(patient.intake_json || "{}") } : null,
+    patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake: JSON.parse(patient.intake_json || "{}") },
   });
 });
 
@@ -829,6 +961,7 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
   if (!editor) return json(res, 403, NOT_CLINICIAN);
   const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
   if (!plan) return json(res, 404, { error: "Plan not found." });
+  if (!patientInOrg(plan.patient_id, editor)) return json(res, 404, NOT_IN_ORG);
   // Everything a published program can be revised on: a doctor may change
   // the medication itself, its protocol, the labs and the supplements —
   // treatment gets adjusted at follow-up, so the record has to move with it.
@@ -856,7 +989,10 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
 
 // ── doctor: review & messages ────────────────────────────────────
 route("POST", "/api/checkins/:id/review", (req, res, p) => {
-  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const c = db.prepare("SELECT patient_id FROM checkins WHERE id = ?").get(p.id);
+  if (!c || !patientInOrg(c.patient_id, me)) return json(res, 404, NOT_IN_ORG);
   db.prepare("UPDATE checkins SET reviewed = 1 WHERE id = ?").run(p.id);
   json(res, 200, { ok: true });
 });
@@ -864,6 +1000,7 @@ route("POST", "/api/checkins/:id/review", (req, res, p) => {
 route("POST", "/api/patients/:id/messages", async (req, res, p, body) => {
   const doc = requireClinician(req);
   if (!doc) return json(res, 403, NOT_CLINICIAN);
+  if (!patientInOrg(p.id, doc)) return json(res, 404, NOT_IN_ORG);
   if (!body.body || !String(body.body).trim()) return json(res, 400, { error: "Message is empty." });
   db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
     .run(p.id, "doctor", String(body.body).trim(), doc.id);
@@ -966,6 +1103,8 @@ route("POST", "/api/portal/messages", async (req, res, _p, body) => {
 
 // ── dispatcher ───────────────────────────────────────────────────
 async function handleApi(req, res, pathname) {
+  const qs = new URL(req.url, "http://localhost").searchParams;
+  req.query = Object.fromEntries(qs);
   for (const r of routes) {
     if (r.method !== req.method) continue;
     const m = pathname.match(r.rx);

@@ -173,8 +173,52 @@ addColumn("users", "signature", "TEXT DEFAULT ''");               // extra signa
 addColumn("users", "clinic", "TEXT DEFAULT 'DarDoc Healthcare'"); // organisation line on the note footer
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");       // deactivated staff keep their history but cannot sign in
 addColumn("messages", "sender_user_id", "INTEGER");               // which clinician wrote it — the patient sees their name
-addColumn("plans", "last_edited_by", "INTEGER");                    // who last revised a published program
+addColumn("plans", "last_edited_by", "INTEGER");                  // who last revised a published program
 addColumn("plans", "last_edited_at", "TEXT");
+
+// ── organisations ───────────────────────────────────────────────
+// The app serves more than one practice. An organisation owns its staff and
+// its patients, and sees nothing of any other organisation's. The clinical
+// library (protocols, peptide info, knowledge base) stays shared — it is
+// the prescriber's guidebook, not anyone's patient data.
+db.exec(`
+CREATE TABLE IF NOT EXISTS organizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  contact_email TEXT DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+addColumn("users", "org_id", "INTEGER");
+addColumn("users", "platform_admin", "INTEGER NOT NULL DEFAULT 0"); // may create organisations and cross into any of them
+addColumn("patients", "org_id", "INTEGER");
+db.exec("CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);");
+db.exec("CREATE INDEX IF NOT EXISTS idx_patients_org ON patients(org_id);");
+
+// Everything that existed before organisations belongs to the practice that
+// has been using the app: DarDoc Healthcare becomes organisation 1 and adopts
+// every existing user and patient. Runs once — afterwards nothing is orphaned.
+function seedOrganizations() {
+  const DEFAULT_ORG = process.env.DEFAULT_ORG_NAME || "DarDoc Healthcare";
+  let org = db.prepare("SELECT * FROM organizations WHERE slug = 'dardoc'").get();
+  if (!org) {
+    db.prepare("INSERT INTO organizations (name, slug) VALUES (?, 'dardoc')").run(DEFAULT_ORG);
+    org = db.prepare("SELECT * FROM organizations WHERE slug = 'dardoc'").get();
+    console.log(`Seeded default organisation: ${org.name}`);
+  }
+  const orphanUsers = db.prepare("UPDATE users SET org_id = ? WHERE org_id IS NULL").run(org.id).changes;
+  const orphanPatients = db.prepare("UPDATE patients SET org_id = ? WHERE org_id IS NULL").run(org.id).changes;
+  if (orphanUsers || orphanPatients) {
+    console.log(`Adopted into ${org.name}: ${orphanUsers} user(s), ${orphanPatients} patient(s)`);
+  }
+  // Whoever set the app up keeps the keys to the platform itself.
+  const adminEmail = (process.env.ADMIN_EMAIL || "drsamimoha2018@gmail.com").toLowerCase();
+  db.prepare("UPDATE users SET platform_admin = 1 WHERE email = ? AND role = 'superadmin'").run(adminEmail);
+  return org;
+}
+// Called after seed() below, so the super admin it creates on a fresh
+// install is adopted too.
 
 // ── password / pin hashing (scrypt) ─────────────────────────────
 function hashSecret(secret) {
@@ -332,5 +376,10 @@ function seedKnowledgeBase() {
 }
 
 seed();
+const DEFAULT_ORG = seedOrganizations();
 
-module.exports = { db, hashSecret, verifySecret };
+// The organisation a new record belongs to when none is named — the practice
+// this install was set up for.
+function defaultOrgId() { return DEFAULT_ORG.id; }
+
+module.exports = { db, hashSecret, verifySecret, defaultOrgId };

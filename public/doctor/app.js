@@ -9,6 +9,7 @@ const S = {
   patients: [],
   wizard: null,
   detailTab: "overview",
+  teamOrgId: null,   // platform owner viewing another organisation's team
 };
 
 const app = document.getElementById("app");
@@ -102,6 +103,7 @@ const NAV = [
   { hash: "#/templates", label: "Program library", ico: "layers" },
   { hash: "#/kb", label: "Knowledge Base", ico: "book" },
   { hash: "#/team", label: "Team", ico: "users", su: true },
+  { hash: "#/orgs", label: "Organisations", ico: "shield", pa: true },
   { hash: "#/settings", label: "Settings", ico: "settings" },
 ];
 
@@ -113,8 +115,12 @@ function canPrescribe() {
 function isSuperadmin() {
   return !!S.user && S.user.role === "superadmin";
 }
+// The platform owner set the app up: only they create organisations.
+function isPlatformAdmin() {
+  return !!S.user && !!S.user.platformAdmin;
+}
 function navForUser() {
-  return NAV.filter((n) => (!n.rx || canPrescribe()) && (!n.su || isSuperadmin()));
+  return NAV.filter((n) => (!n.rx || canPrescribe()) && (!n.su || isSuperadmin()) && (!n.pa || isPlatformAdmin()));
 }
 
 function renderShell() {
@@ -131,7 +137,7 @@ function renderShell() {
     <aside class="sidebar">
       <div class="sb-brand" style="flex-direction:column;align-items:flex-start;gap:7px">
         <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:56px;width:auto">
-        <div class="sb-sub">Doctor dashboard</div>
+        <div class="sb-sub">${esc(S.user.orgName || "Doctor dashboard")}</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
         ${navForUser().map((n) => `<a class="sb-link" href="${n.hash}">${icon(n.ico, 19)} ${esc(n.label)}</a>`).join("")}
@@ -168,6 +174,7 @@ function route() {
   if (h.startsWith("#/patients")) return viewPatients();
   if (h.startsWith("#/consult")) return canPrescribe() ? viewConsult() : viewNoAccess("New consultation");
   if (h.startsWith("#/team")) return isSuperadmin() ? viewTeam() : viewNoAccess("Team");
+  if (h.startsWith("#/orgs")) { S.teamOrgId = null; return isPlatformAdmin() ? viewOrgs() : viewNoAccess("Organisations"); }
   const pm = h.match(/^#\/plan\/(\d+)/);
   if (pm) return canPrescribe() ? viewEditPlan(Number(pm[1])) : viewNoAccess("Edit program");
   if (h.startsWith("#/templates")) return viewTemplates();
@@ -3492,18 +3499,127 @@ function viewNoAccess(pageLabel) {
   </div>`;
 }
 
+// ── organisations ────────────────────────────────────────────────
+// One install, several practices. Each organisation has its own staff and
+// its own patients and sees nothing of any other's; only the clinical
+// library — protocols, peptide info, the knowledge base — is shared.
+async function viewOrgs() {
+  view().innerHTML = `<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:280px"></div>`;
+  const orgs = await api("GET", "/api/admin/orgs");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>Organisations</h1><div class="sub">${orgs.filter((o) => o.active).length} active · ${orgs.reduce((n, o) => n + o.patients, 0)} patients in total</div></div>
+    <button class="btn btn-primary" id="og-add">${icon("plus", 17)} New organisation</button>
+  </div>
+  <div class="card">
+    ${orgs.map((o) => `
+      <div class="pt-row" style="cursor:default">
+        <div class="avatar">${esc(initials(o.name))}</div>
+        <div class="pt-info">
+          <div class="pt-name"><span>${esc(o.name)}</span>
+            ${o.id === S.user.orgId ? `<span class="badge badge-teal">yours</span>` : ""}
+            ${o.active ? "" : `<span class="badge badge-gray">deactivated</span>`}
+          </div>
+          <div class="pt-meta">${o.staff} staff · ${o.patients} patient${o.patients === 1 ? "" : "s"}${o.contact_email ? ` · ${esc(o.contact_email)}` : ""} · added ${esc(fmtDate(o.created_at))}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" data-og-team="${o.id}">${icon("users", 15)} Team</button>
+          <button class="btn btn-ghost btn-sm" data-og-edit="${o.id}">${icon("edit", 15)} Edit</button>
+          ${o.id === S.user.orgId ? "" : `<button class="btn btn-ghost btn-sm" data-og-active="${o.id}" data-next="${o.active ? 0 : 1}">${o.active ? "Deactivate" : "Reactivate"}</button>`}
+        </div>
+      </div>`).join("")}
+  </div>
+  <p class="hint" style="margin-top:14px">A new organisation starts with no patients and no history — only its first super admin, who then adds their own doctors and admins. Deactivating signs its staff out without deleting anything.</p>`;
+
+  document.getElementById("og-add").addEventListener("click", () => orgModal(null, viewOrgs));
+  view().querySelectorAll("[data-og-edit]").forEach((b) => b.addEventListener("click", () => {
+    orgModal(orgs.find((o) => o.id === Number(b.dataset.ogEdit)), viewOrgs);
+  }));
+  view().querySelectorAll("[data-og-team]").forEach((b) => b.addEventListener("click", () => {
+    S.teamOrgId = Number(b.dataset.ogTeam);
+    location.hash = "#/team";
+  }));
+  view().querySelectorAll("[data-og-active]").forEach((b) => b.addEventListener("click", async () => {
+    const o = orgs.find((x) => x.id === Number(b.dataset.ogActive));
+    const next = Number(b.dataset.next);
+    if (!next && !confirm(`Deactivate ${o.name}? Its ${o.staff} staff account${o.staff === 1 ? "" : "s"} will be signed out. Patient records are kept.`)) return;
+    try {
+      await api("PUT", `/api/admin/orgs/${o.id}`, { active: next });
+      toast(next ? "Organisation reactivated" : "Organisation deactivated");
+      viewOrgs();
+    } catch (e) { toast(e.message); }
+  }));
+}
+
+function orgModal(org, done) {
+  const isNew = !org;
+  const o = org || { name: "", contact_email: "" };
+  const scrim = modal(`
+    <div class="modal-head"><h3>${isNew ? "New organisation" : "Edit " + esc(o.name)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <form id="og-form">
+      <div class="field"><label for="og-name">Organisation name <span class="req">*</span></label><input class="input" id="og-name" value="${esc(o.name)}" placeholder="Meridian Wellness Clinic" required></div>
+      <div class="field"><label for="og-contact">Contact email</label><input class="input" id="og-contact" type="email" value="${esc(o.contact_email || "")}"></div>
+      ${isNew ? `
+      <hr class="divider">
+      <div class="card-title" style="font-size:14.5px">${icon("key", 17)} First super admin</div>
+      <p class="hint" style="margin:-6px 0 12px">They sign in and add the rest of the team. This account cannot be created later without you.</p>
+      <div class="form-grid">
+        <div class="field"><label for="og-an">Full name <span class="req">*</span></label><input class="input" id="og-an" required placeholder="Dr Karim Nassar"></div>
+        <div class="field"><label for="og-ac">Credentials</label><input class="input" id="og-ac" placeholder="MBBS"></div>
+        <div class="field"><label for="og-ae">Email <span class="req">*</span></label><input class="input" id="og-ae" type="email" required></div>
+        <div class="field"><label for="og-ap">Password <span class="req">*</span></label><input class="input" id="og-ap" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"></div>
+      </div>` : ""}
+      <p class="err-text" id="og-err" hidden role="alert"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost" type="button" id="og-cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit">${isNew ? "Create organisation" : "Save changes"}</button>
+      </div>
+    </form>`);
+  const g = (id) => scrim.querySelector("#" + id);
+  g("og-cancel").addEventListener("click", () => scrim.remove());
+  g("og-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = g("og-err");
+    err.hidden = true;
+    try {
+      if (isNew) {
+        await api("POST", "/api/admin/orgs", {
+          name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim(),
+          adminName: g("og-an").value.trim(), adminCredentials: g("og-ac").value.trim(),
+          adminEmail: g("og-ae").value.trim(), adminPassword: g("og-ap").value,
+        });
+      } else {
+        await api("PUT", `/api/admin/orgs/${o.id}`, { name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim() });
+      }
+      scrim.remove();
+      toast(isNew ? "Organisation created" : "Changes saved");
+      done && done();
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+}
+
 // ── team ─────────────────────────────────────────────────────────
 // The practice's staff accounts. Every doctor signs their own consultations,
 // so adding a doctor here is what makes their name appear on the guides and
 // messages they write.
 async function viewTeam() {
   view().innerHTML = `<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:280px"></div>`;
-  const users = await api("GET", "/api/admin/users");
+  // The platform owner can arrive here from the Organisations page to manage
+  // another practice's staff; everyone else sees their own.
+  const orgId = isPlatformAdmin() && S.teamOrgId ? S.teamOrgId : S.user.orgId;
+  const other = orgId !== S.user.orgId;
+  const users = await api("GET", `/api/admin/users?org=${orgId}`);
+  const orgName = other ? ((users[0] && users[0].orgName) || "another organisation") : (S.user.orgName || "");
+  const active = users.filter((u) => u.active).length;
   view().innerHTML = `
   <div class="page-head">
-    <div><h1>Team</h1><div class="sub">${users.filter((u) => u.active).length} active ${users.filter((u) => u.active).length === 1 ? "account" : "accounts"}</div></div>
-    <button class="btn btn-primary" id="tm-add">${icon("plus", 17)} Add team member</button>
+    <div><h1>Team</h1><div class="sub">${esc(orgName)} · ${active} active ${active === 1 ? "account" : "accounts"}</div></div>
+    <div style="display:flex;gap:8px">
+      ${other ? `<a class="btn btn-ghost" href="#/orgs" id="tm-back">${icon("chevL", 17)} All organisations</a>` : ""}
+      <button class="btn btn-primary" id="tm-add">${icon("plus", 17)} Add team member</button>
+    </div>
   </div>
+  ${other ? `<div class="g-callout g-amber" style="margin-bottom:16px">${icon("shield", 17)}<div>You are managing <b>${esc(orgName)}</b> as the platform owner. Their patients stay private to them.</div></div>` : ""}
   <div class="card">
     ${users.map((u) => `
       <div class="pt-row" style="cursor:default">
@@ -3523,7 +3639,9 @@ async function viewTeam() {
   </div>
   <p class="hint" style="margin-top:14px">Deactivating keeps every record that account signed — it only stops them signing in.</p>`;
 
-  document.getElementById("tm-add").addEventListener("click", () => teamMemberModal(null, viewTeam));
+  const backBtn = document.getElementById("tm-back");
+  if (backBtn) backBtn.addEventListener("click", () => { S.teamOrgId = null; });
+  document.getElementById("tm-add").addEventListener("click", () => teamMemberModal(null, viewTeam, orgId));
   view().querySelectorAll("[data-tm-edit]").forEach((b) => b.addEventListener("click", () => {
     teamMemberModal(users.find((u) => u.id === Number(b.dataset.tmEdit)), viewTeam);
   }));
@@ -3541,7 +3659,7 @@ async function viewTeam() {
 
 // Add or edit a staff account. Password is required when creating and
 // optional when editing (blank leaves the existing one alone).
-function teamMemberModal(user, done) {
+function teamMemberModal(user, done, orgId) {
   const isNew = !user;
   const u = user || { name: "", email: "", role: "doctor", credentials: "", signature: "", clinic: "DarDoc Healthcare" };
   const roles = ["doctor", "admin", "superadmin"];
@@ -3593,6 +3711,7 @@ function teamMemberModal(user, done) {
       credentials: g("tm-cred").value.trim(), signature: g("tm-sign").value.trim(), clinic: g("tm-clinic").value.trim(),
     };
     if (g("tm-pass").value) payload.password = g("tm-pass").value;
+    if (isNew && orgId) payload.orgId = orgId;
     try {
       if (isNew) await api("POST", "/api/admin/users", payload);
       else await api("PUT", `/api/admin/users/${u.id}`, payload);
