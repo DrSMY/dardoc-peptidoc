@@ -90,16 +90,32 @@ function renderLogin() {
 }
 
 // ── shell ────────────────────────────────────────────────────────
+// `rx: true` marks a page that prescribes or changes a patient's treatment.
+// An admin account sees the practice — patients, programs, guides, history —
+// but never these, and the server refuses them regardless (requireClinician).
 const NAV = [
   { hash: "#/dashboard", label: "Dashboard", ico: "grid" },
-  { hash: "#/consult", label: "New consultation", ico: "plus" },
+  { hash: "#/consult", label: "New consultation", ico: "plus", rx: true },
   { hash: "#/patients", label: "Patients", ico: "users" },
   { hash: "#/activity", label: "Recent activity", ico: "activity" },
   { hash: "#/messages", label: "Messages", ico: "message" },
   { hash: "#/templates", label: "Program library", ico: "layers" },
   { hash: "#/kb", label: "Knowledge Base", ico: "book" },
+  { hash: "#/team", label: "Team", ico: "users", su: true },
   { hash: "#/settings", label: "Settings", ico: "settings" },
 ];
+
+// Can the signed-in user prescribe? Mirrors requireClinician on the server —
+// the UI hides what the API would refuse, rather than offering dead buttons.
+function canPrescribe() {
+  return !!S.user && (S.user.role === "doctor" || S.user.role === "superadmin");
+}
+function isSuperadmin() {
+  return !!S.user && S.user.role === "superadmin";
+}
+function navForUser() {
+  return NAV.filter((n) => (!n.rx || canPrescribe()) && (!n.su || isSuperadmin()));
+}
 
 function renderShell() {
   document.title = "Doctor Dashboard — DoCare";
@@ -109,7 +125,7 @@ function renderShell() {
     <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
-    ${NAV.map((n) => `<a href="${n.hash}">${esc(n.label)}</a>`).join("")}
+    ${navForUser().map((n) => `<a href="${n.hash}">${esc(n.label)}</a>`).join("")}
   </nav>
   <div class="shell">
     <aside class="sidebar">
@@ -118,11 +134,11 @@ function renderShell() {
         <div class="sb-sub">Doctor dashboard</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
-        ${NAV.map((n) => `<a class="sb-link" href="${n.hash}">${icon(n.ico, 19)} ${esc(n.label)}</a>`).join("")}
+        ${navForUser().map((n) => `<a class="sb-link" href="${n.hash}">${icon(n.ico, 19)} ${esc(n.label)}</a>`).join("")}
       </nav>
       <div class="sb-user">
         <div class="avatar">${esc(initials(S.user.name))}</div>
-        <div><div class="sb-user-name">${esc(S.user.name)}</div><div class="sb-user-role">${esc(S.user.role)}</div></div>
+        <div><div class="sb-user-name">${esc(S.user.name)}</div><div class="sb-user-role">${esc(ROLE_LABEL[S.user.role] || S.user.role)}</div></div>
         <button class="icon-btn" id="sb-logout" aria-label="Sign out">${icon("logout", 19)}</button>
       </div>
     </aside>
@@ -150,7 +166,10 @@ function route() {
   const m = h.match(/^#\/patient\/(\d+)/);
   if (m) return viewPatient(Number(m[1]));
   if (h.startsWith("#/patients")) return viewPatients();
-  if (h.startsWith("#/consult")) return viewConsult();
+  if (h.startsWith("#/consult")) return canPrescribe() ? viewConsult() : viewNoAccess("New consultation");
+  if (h.startsWith("#/team")) return isSuperadmin() ? viewTeam() : viewNoAccess("Team");
+  const pm = h.match(/^#\/plan\/(\d+)/);
+  if (pm) return canPrescribe() ? viewEditPlan(Number(pm[1])) : viewNoAccess("Edit program");
   if (h.startsWith("#/templates")) return viewTemplates();
   if (h.startsWith("#/activity")) return viewActivity();
   if (h.startsWith("#/messages")) return viewInbox();
@@ -171,7 +190,7 @@ async function viewDashboard() {
       <h1>${greet}, ${esc(S.user.name)}</h1>
       <div class="sub">${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
     </div>
-    <a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>
+    ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
 
   <div id="practice-stats"></div>
@@ -458,7 +477,7 @@ async function viewPatients() {
   view().innerHTML = `
   <div class="page-head">
     <div><h1>Patients</h1><div class="sub">${S.patients.length} registered</div></div>
-    <a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>
+    ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
   <div class="field" style="max-width:420px">
     <label for="pt-search" style="position:absolute;left:-9999px">Search patients</label>
@@ -517,8 +536,9 @@ async function viewPatient(id) {
       </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${canPrescribe() ? `
       <button class="btn btn-secondary btn-sm" id="btn-share">${icon("key", 16)} Share access</button>
-      <a class="btn btn-primary btn-sm" href="#/consult?patient=${p.id}">${icon("plus", 16)} New program</a>
+      <a class="btn btn-primary btn-sm" href="#/consult?patient=${p.id}">${icon("plus", 16)} New program</a>` : ""}
     </div>
   </div>
 
@@ -541,7 +561,8 @@ async function viewPatient(id) {
     paintTab();
   }));
 
-  document.getElementById("btn-share").addEventListener("click", () => sharePinModal(p));
+  const shareBtn = document.getElementById("btn-share");
+  if (shareBtn) shareBtn.addEventListener("click", () => sharePinModal(p));
 
   function paintTab() {
     const box = document.getElementById("tab-body");
@@ -598,11 +619,13 @@ async function viewPatient(id) {
                   </div>
                   <div style="font-size:13px;color:var(--muted)">${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}${pl.quantity > 1 ? " × " + pl.quantity : ""} · ${esc(pl.frequency)} · started ${esc(fmtDate(pl.created_at))}${pl.needs_refill ? ' · <span class="badge badge-amber">refill requested</span>' : ""}</div>
                 </div>
-                <div style="display:flex;gap:6px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
                   <button class="btn btn-ghost btn-sm" data-open-guide="${pl.id}">${icon("book", 15)} Guide</button>
+                  ${canPrescribe() ? `
+                  <a class="btn btn-secondary btn-sm" href="#/plan/${pl.id}">${icon("edit", 15)} Edit program</a>
                   ${pl.status === "active" ? `
-                  <button class="btn btn-ghost btn-sm" data-edit-dose="${pl.id}">${icon("edit", 15)} Dose</button>
-                  <button class="btn btn-ghost btn-sm" data-stop="${pl.id}">Stop</button>` : ""}
+                  <button class="btn btn-ghost btn-sm" data-edit-dose="${pl.id}">Dose</button>
+                  <button class="btn btn-ghost btn-sm" data-stop="${pl.id}">Stop</button>` : ""}` : ""}
                 </div>
               </div>`).join("") : `<div class="empty">${icon("layers", 30)}<p>No programs yet. Start a consultation to publish one.</p></div>`}
           </div>
@@ -723,18 +746,20 @@ async function viewPatient(id) {
           ${messages.length ? messages.map((m) => `
             <div class="msg ${m.sender}">
               ${esc(m.body)}
-              <div class="msg-time">${timeAgo(m.created_at)}</div>
+              <div class="msg-time">${m.sender === "doctor" && m.senderName ? esc(m.senderName) + " · " : ""}${timeAgo(m.created_at)}</div>
             </div>`).join("") : `<div class="empty">${icon("message", 30)}<p>No messages yet. Send the first note below.</p></div>`}
         </div>
+        ${canPrescribe() ? `
         <form id="msg-form" style="display:flex;gap:8px;margin-top:14px">
           <label for="msg-input" style="position:absolute;left:-9999px">Message</label>
           <input class="input" id="msg-input" placeholder="Write a note to the patient…" autocomplete="off">
           <button class="btn btn-primary" type="submit" aria-label="Send">${icon("send", 18)}</button>
-        </form>
+        </form>` : `<p class="hint" style="margin-top:14px">${icon("shield", 14)} Your account can read this conversation but not reply.</p>`}
       </div>`;
       const list = document.getElementById("msg-list");
       list.scrollTop = list.scrollHeight;
-      document.getElementById("msg-form").addEventListener("submit", async (e) => {
+      const msgForm = document.getElementById("msg-form");
+      if (msgForm) msgForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const inp = document.getElementById("msg-input");
         if (!inp.value.trim()) return;
@@ -2250,8 +2275,11 @@ function phasesEditor() {
   return `<hr class="divider"><div class="card-title" style="font-size:14.5px">${icon("layers", 17)} Dose schedule <span class="hint" style="font-weight:400">(1 month by default — add more phases only if planning the escalation ahead)</span></div>${phasesRows()}`;
 }
 
-function phasesRows() {
-  const phases = S.wizard.draft.phases;
+// The schedule editor works on any phases array, so the consultation wizard
+// and the editor for an already-published program share it. Defaults to the
+// wizard's draft for the wizard's own call sites.
+function phasesRows(phases) {
+  phases = phases || S.wizard.draft.phases;
   return `<div id="phases-box">
     ${phases.map((ph, i) => `
     <div class="phase-row" data-i="${i}">
@@ -2265,8 +2293,8 @@ function phasesRows() {
   </div>`;
 }
 
-function wirePhases(scope) {
-  const phases = S.wizard.draft.phases;
+function wirePhases(scope, phases) {
+  phases = phases || S.wizard.draft.phases;
   const box = scope.querySelector("#phases-box");
   if (!box) return;
   box.querySelectorAll(".phase-row").forEach((row) => {
@@ -2276,13 +2304,13 @@ function wirePhases(scope) {
   });
   box.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
     phases.splice(Number(b.dataset.del), 1);
-    box.outerHTML = phasesRows();
-    wirePhases(scope);
+    box.outerHTML = phasesRows(phases);
+    wirePhases(scope, phases);
   }));
   box.querySelector("#add-phase").addEventListener("click", () => {
     phases.push({ label: "", dose: "", weeks: "", note: "" });
-    box.outerHTML = phasesRows();
-    wirePhases(scope);
+    box.outerHTML = phasesRows(phases);
+    wirePhases(scope, phases);
   });
 }
 
@@ -2306,7 +2334,10 @@ function defaultInstructionsFor(item) {
     // in a full stop where the clinic's fields don't, so only add one when
     // it's missing rather than producing "No cycling required..".
     const sentence = (s) => { const t = String(s || "").trim(); return !t ? "" : /[.!?]$/.test(t) ? t : t + "."; };
-    const course = pr.course ? `Course: ${sentence(`${pr.course}${pr.totalDoses ? ` — ${pr.totalDoses}` : ""}`)}\n` : "";
+    // Some guidebook courses already name the dose count ("6 weeks + 4 week
+    // maintenance (22 injections)"); don't say it twice.
+    const totals = pr.totalDoses && !String(pr.course).includes(pr.totalDoses) ? ` — ${pr.totalDoses}` : "";
+    const course = pr.course ? `Course: ${sentence(pr.course + totals)}\n` : "";
     return `${sentence(pr.time)}\n${course}Route: ${sentence(pr.route)}\nCycle: ${sentence(pr.cycle)}\n${storage}${missed}`;
   }
   return "";
@@ -2399,6 +2430,18 @@ function emrMedExtra(it, goals) {
     ? ` — dispense ${pr.supply}${pr.totalDoses ? ` for ${pr.totalDoses}` : ""}`
     : pr.duration ? ` (vial lasts ~${pr.duration})` : "";
   return `\n   Rationale: Selected for '${goalTxt}'.${mech ? " " + mech : ""}\n   Supply: ${pr.strength || ""}${pr.doseVolume ? `, ${pr.doseVolume}/dose` : ""}${dispense}`;
+}
+
+// The clinician's signature as it appears at the foot of a record: name and
+// credentials, then whatever extra lines they set (licence number, unit),
+// then the clinic. Each doctor signs in their own name.
+function signatureBlock(user) {
+  const u = user || {};
+  return [
+    `${u.name || ""}${u.credentials ? `, ${u.credentials}` : ""}`.trim(),
+    (u.signature || "").trim(),
+    (u.clinic || "DarDoc Healthcare").trim(),
+  ].filter(Boolean).join("\n");
 }
 
 // Builds the full structured clinical encounter record (EMR) for every
@@ -2541,7 +2584,7 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `INVESTIGATIONS\n\n${investigations}`,
     supplementsBlock,
     `PLAN\n\nFollow-up appointment scheduled for ${fmtDMY(followup)}.\n\n${planBullets.join("\n")}`,
-    `Physician:\n${S.user.name}\nDarDoc Healthcare`,
+    `Physician:\n${signatureBlock(S.user)}`,
   ].filter(Boolean);
   return [sections.join("\n\n"), note].filter(Boolean).join("\n\n");
 }
@@ -3121,11 +3164,468 @@ async function viewTemplates() {
   });
 }
 
+// ── edit a published program ─────────────────────────────────────
+// Treatment gets revised at follow-up: a different peptide, a longer course,
+// another panel, a supplement dropped. This edits a program that is already
+// live in the patient's portal — the same choices the consultation offered,
+// on a record that already exists. Saving republishes the guide.
+async function viewEditPlan(planId) {
+  view().innerHTML = `<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:420px"></div>`;
+  let loaded = null;
+  try { loaded = await api("GET", `/api/plans/${planId}`); } catch { /* handled below */ }
+  if (!loaded || !loaded.plan || !loaded.patient) {
+    return void (view().innerHTML = `<div class="empty">${icon("alert", 32)}<div class="empty-title">Program not found</div></div>`);
+  }
+  const { plan, patient } = loaded;
+  // A local draft in the same shape the consultation uses, so the protocol
+  // picker, the schedule editor and applyProtocolTo all work unchanged.
+  const d = {
+    category: plan.category, template: null, protocol: null, protocolBase: null, protocolKey: null, customizing: false,
+    medication: plan.medication, dose: plan.dose || "", quantity: plan.quantity || 1,
+    route: plan.route || "injection", frequency: plan.frequency || "weekly", halfLifeHours: plan.half_life_hours,
+    phases: (plan.phases || []).map((p) => ({ ...p })),
+  };
+  const state = {
+    title: plan.title, status: plan.status,
+    instructions: plan.instructions || "", warnings: plan.warnings || "",
+    labTests: (plan.labTests || []).map((l) => ({ ...l, on: true })),
+    suppList: (plan.suppList || []).map((s) => ({ ...s, on: true })),
+    changedMedication: false,
+  };
+  d.template = S.templates.find((t) => t.category === plan.category && (t.config.medication || t.name) === plan.medication) || null;
+
+  paint();
+
+  function paint() {
+    const cats = [
+      { key: "glp1", label: "GLP-1 / Weight loss" },
+      { key: "peptide", label: "Peptide therapy" },
+      { key: "custom", label: "Custom program" },
+    ];
+    view().innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>Edit program</h1>
+        <div class="sub">${esc(patient.name)} · published ${esc(fmtDate(plan.created_at))}${plan.updated_at && plan.updated_at !== plan.created_at ? ` · last edited ${esc(fmtDate(plan.updated_at))}` : ""}</div>
+      </div>
+      <a class="btn btn-ghost" href="#/patient/${patient.id}">${icon("chevL", 17)} Back to patient</a>
+    </div>
+
+    <div class="g-callout g-teal" style="margin-bottom:18px">${icon("info", 17)}
+      <div>This program is live in ${esc(patient.name)}&rsquo;s portal. Saving updates what they see straight away, including their guide.</div></div>
+
+    <div class="two-col">
+      <div style="display:flex;flex-direction:column;gap:18px">
+        <div class="card card-pad">
+          <div class="card-title">${icon("layers", 19)} Medication &amp; protocol</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+            ${cats.map((c) => `<button class="chip ${d.category === c.key ? "on" : ""}" data-cat="${c.key}">${esc(c.label)}</button>`).join("")}
+          </div>
+          <div id="ep-med"></div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-title">${icon("clipboard", 19)} Instructions &amp; warnings</div>
+          <div class="field"><label for="ep-instr">Instructions for the patient</label><textarea class="input" id="ep-instr" rows="6">${esc(state.instructions)}</textarea></div>
+          <div class="field"><label for="ep-warn">Warnings — when to contact you</label><textarea class="input" id="ep-warn" rows="4">${esc(state.warnings)}</textarea></div>
+          ${state.changedMedication ? `<div class="g-callout g-amber">${icon("alert", 17)}<div>The medication changed. Check these still match — <button type="button" class="btn btn-ghost btn-sm" id="ep-regen" style="margin-left:4px">regenerate from the new protocol</button></div></div>` : ""}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:18px">
+        <div class="card card-pad">
+          <div class="card-title">${icon("droplet", 19)} Lab tests <span class="badge badge-gray" id="ep-lab-n">${state.labTests.filter((l) => l.on).length}</span></div>
+          <div id="ep-labs"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <input class="input" id="ep-lab-add" placeholder="Add another test">
+            <button class="btn btn-secondary btn-sm" id="ep-lab-btn" type="button">${icon("plus", 15)}</button>
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-title">${icon("leaf", 19)} Supplements <span class="badge badge-gray" id="ep-supp-n">${state.suppList.filter((s) => s.on).length}</span></div>
+          <div id="ep-supps"></div>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field" style="margin:0"><input class="input" id="ep-supp-add" placeholder="Supplement"></div>
+            <div class="field" style="margin:0"><input class="input" id="ep-supp-dose" placeholder="Dose"></div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="ep-supp-btn" type="button" style="margin-top:8px">${icon("plus", 15)} Add supplement</button>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-title">${icon("settings", 19)} Program</div>
+          <div class="field"><label for="ep-title">Title</label><input class="input" id="ep-title" value="${esc(state.title)}"></div>
+          <div class="field" style="margin-bottom:0"><label for="ep-status">Status</label>
+            <select class="input" id="ep-status">
+              ${["active", "completed", "stopped"].map((s) => `<option value="${s}" ${state.status === s ? "selected" : ""}>${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="err-text" id="ep-err" hidden role="alert" style="margin-top:14px"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <a class="btn btn-ghost" href="#/patient/${patient.id}">Cancel</a>
+      <button class="btn btn-primary" id="ep-save">${icon("check", 17)} Save changes</button>
+    </div>`;
+
+    paintMedication();
+    paintLabs();
+    paintSupps();
+
+    view().querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
+      if (d.category === b.dataset.cat) return;
+      d.category = b.dataset.cat;
+      d.template = null; d.protocol = null; d.protocolKey = null; d.customizing = false;
+      state.changedMedication = true;
+      paint();
+    }));
+    document.getElementById("ep-instr").addEventListener("input", (e) => { state.instructions = e.target.value; });
+    document.getElementById("ep-warn").addEventListener("input", (e) => { state.warnings = e.target.value; });
+    document.getElementById("ep-title").addEventListener("input", (e) => { state.title = e.target.value; });
+    document.getElementById("ep-status").addEventListener("change", (e) => { state.status = e.target.value; });
+    const regen = document.getElementById("ep-regen");
+    if (regen) regen.addEventListener("click", () => {
+      const item = { ...d, category: d.category, template: d.template, protocol: d.protocol };
+      state.instructions = defaultInstructionsFor(item) || state.instructions;
+      state.warnings = defaultWarningsFor(item) || state.warnings;
+      paint();
+      toast("Instructions and warnings regenerated");
+    });
+
+    document.getElementById("ep-lab-btn").addEventListener("click", () => {
+      const name = document.getElementById("ep-lab-add").value.trim();
+      if (!name) return;
+      state.labTests.push({ name, detail: "As requested by your doctor.", fasting: false, required: false, on: true });
+      paint();
+    });
+    document.getElementById("ep-supp-btn").addEventListener("click", () => {
+      const name = document.getElementById("ep-supp-add").value.trim();
+      if (!name) return;
+      state.suppList.push({ name, dose: document.getElementById("ep-supp-dose").value.trim(), benefit: "", on: true });
+      paint();
+    });
+    document.getElementById("ep-save").addEventListener("click", save);
+  }
+
+  // The medication block mirrors the consultation's Program step: a template
+  // grid, then the guidebook's dosing variants for whatever is chosen.
+  function paintMedication() {
+    const box = document.getElementById("ep-med");
+    if (d.category === "custom") {
+      box.innerHTML = `
+      <div class="form-grid">
+        <div class="field"><label for="ep-cu-med">Medication</label><input class="input" id="ep-cu-med" value="${esc(d.medication)}"></div>
+        <div class="field"><label for="ep-cu-dose">Dose</label><input class="input" id="ep-cu-dose" value="${esc(d.dose)}"></div>
+        <div class="field"><label for="ep-cu-route">Route</label><select class="input" id="ep-cu-route">${["injection", "oral", "nasal", "topical"].map((r) => `<option ${d.route === r ? "selected" : ""}>${r}</option>`).join("")}</select></div>
+        <div class="field"><label for="ep-cu-freq">Frequency</label><select class="input" id="ep-cu-freq">${["daily", "twice daily", "weekly", "twice a week", "every 3 days", "every other day", "as needed"].map((f) => `<option ${d.frequency === f ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+      </div>
+      ${phasesEditorFor(d.phases)}`;
+      ["ep-cu-med", "ep-cu-dose", "ep-cu-route", "ep-cu-freq"].forEach((id) => box.querySelector("#" + id).addEventListener("input", () => {
+        if (box.querySelector("#ep-cu-med").value !== d.medication) state.changedMedication = true;
+        d.medication = box.querySelector("#ep-cu-med").value;
+        d.dose = box.querySelector("#ep-cu-dose").value;
+        d.route = box.querySelector("#ep-cu-route").value;
+        d.frequency = box.querySelector("#ep-cu-freq").value;
+      }));
+      wirePhases(box, d.phases);
+      return;
+    }
+
+    const tpls = S.templates.filter((t) => t.category === d.category);
+    box.innerHTML = `
+    <div class="tpl-grid">
+      ${tpls.map((t) => `
+        <button class="tpl-card ${d.template && d.template.id === t.id ? "sel" : ""}" data-tpl="${t.id}">
+          ${icon(routeIcon(t.config.route || (t.config.protocols && t.config.protocols[0] && t.config.protocols[0].route)), 20)}
+          <div class="tpl-name">${esc(t.name)}</div>
+          <div class="tpl-sub">${d.category === "glp1" ? esc(t.config.generic || "") + " · " + esc(t.config.frequency) : esc(peptideCardSub(t))}</div>
+        </button>`).join("")}
+    </div>
+    <div id="ep-tpl-detail" style="margin-top:18px"></div>`;
+
+    box.querySelectorAll("[data-tpl]").forEach((b) => b.addEventListener("click", () => {
+      const t = S.templates.find((x) => x.id === Number(b.dataset.tpl));
+      if (d.template && d.template.id === t.id) return;
+      d.template = t;
+      d.medication = t.config.medication || t.name;
+      state.changedMedication = true;
+      if (d.category === "glp1") {
+        d.route = t.config.route; d.frequency = t.config.frequency;
+        d.halfLifeHours = t.config.halfLifeHours; d.dose = t.config.doses[0];
+        d.phases = suggestTitration(t.config.doses, d.dose, t.config.titration);
+      } else {
+        const first = peptideProtocolOptions(d.medication, t)[0];
+        d.protocolKey = first ? first.key : null;
+        d.protocol = first ? first.protocol : (t.config.protocols || [])[0];
+        d.protocolBase = d.protocol;
+        if (d.protocol) applyProtocolTo(d);
+      }
+      paint();
+    }));
+
+    const det = document.getElementById("ep-tpl-detail");
+    if (!d.template) { det.innerHTML = `<p class="hint">Pick a medication above to change this program.</p>`; return; }
+
+    if (d.category === "glp1") {
+      const doses = d.template.config.doses;
+      det.innerHTML = `
+      <hr class="divider">
+      <div class="form-grid">
+        <div class="field"><label for="ep-g-dose">Dose</label><select class="input" id="ep-g-dose">${doses.map((dd) => `<option ${d.dose === dd ? "selected" : ""}>${esc(dd)}</option>`).join("")}</select></div>
+        <div class="field"><label for="ep-g-qty">Quantity (pens/units)</label><input class="input" id="ep-g-qty" type="number" min="1" step="1" value="${esc(d.quantity || 1)}"></div>
+      </div>
+      ${phasesEditorFor(d.phases)}`;
+      det.querySelector("#ep-g-dose").addEventListener("change", (e) => {
+        d.dose = e.target.value;
+        d.phases = suggestTitration(doses, d.dose, d.template.config.titration);
+        paint();
+      });
+      det.querySelector("#ep-g-qty").addEventListener("input", (e) => { d.quantity = Number(e.target.value) || 1; });
+      wirePhases(det, d.phases);
+      return;
+    }
+
+    const opts = peptideProtocolOptions(d.medication, d.template);
+    const sel = opts.find((o) => o.key === d.protocolKey) || opts[0];
+    if (sel && d.protocol !== sel.protocol && !d.customizing) { d.protocol = sel.protocol; d.protocolBase = sel.protocol; }
+    det.innerHTML = `
+    <hr class="divider">
+    ${protocolPickerHTML(opts, sel)}
+    ${protocolFactsHTML(sel)}
+    ${phasesEditorFor(d.phases)}`;
+    det.querySelectorAll("[data-vkey]").forEach((b) => b.addEventListener("click", () => {
+      const opt = opts.find((o) => o.key === b.dataset.vkey);
+      if (!opt) return;
+      d.protocolKey = opt.key; d.protocol = opt.protocol; d.protocolBase = opt.protocol;
+      applyProtocolTo(d);
+      state.changedMedication = true;
+      paint();
+    }));
+    wirePhases(det, d.phases);
+  }
+
+  function phasesEditorFor(phases) {
+    return `<hr class="divider"><div class="card-title" style="font-size:14.5px">${icon("layers", 17)} Dose schedule</div>${phasesRows(phases)}`;
+  }
+
+  function paintLabs() {
+    const box = document.getElementById("ep-labs");
+    box.innerHTML = state.labTests.length ? state.labTests.map((l, i) => `
+      <label class="pick-item ${l.on ? "on" : ""}">
+        <input type="checkbox" data-eplab="${i}" ${l.on ? "checked" : ""}>
+        <span class="pick-body">
+          <span class="pick-name">${esc(l.name)}${l.required ? ` <span class="badge badge-red">required</span>` : ""}${l.fasting ? ` <span class="badge badge-gray">fasting</span>` : ""}</span>
+          ${l.detail ? `<span class="pick-detail">${esc(l.detail)}</span>` : ""}
+        </span>
+      </label>`).join("") : `<p class="hint">No lab tests on this program.</p>`;
+    box.querySelectorAll("[data-eplab]").forEach((cb) => cb.addEventListener("change", () => {
+      state.labTests[Number(cb.dataset.eplab)].on = cb.checked;
+      cb.closest(".pick-item").classList.toggle("on", cb.checked);
+      document.getElementById("ep-lab-n").textContent = state.labTests.filter((l) => l.on).length;
+    }));
+  }
+
+  function paintSupps() {
+    const box = document.getElementById("ep-supps");
+    box.innerHTML = state.suppList.length ? state.suppList.map((s, i) => `
+      <label class="pick-item ${s.on ? "on" : ""}">
+        <input type="checkbox" data-epsupp="${i}" ${s.on ? "checked" : ""}>
+        <span class="pick-body">
+          <span class="pick-name">${esc(s.name)}</span>
+          ${s.dose ? `<span class="pick-detail">${esc(s.dose)}</span>` : ""}
+        </span>
+      </label>`).join("") : `<p class="hint">No supplements on this program.</p>`;
+    box.querySelectorAll("[data-epsupp]").forEach((cb) => cb.addEventListener("change", () => {
+      state.suppList[Number(cb.dataset.epsupp)].on = cb.checked;
+      cb.closest(".pick-item").classList.toggle("on", cb.checked);
+      document.getElementById("ep-supp-n").textContent = state.suppList.filter((s) => s.on).length;
+    }));
+  }
+
+  async function save() {
+    const err = document.getElementById("ep-err");
+    err.hidden = true;
+    if (!d.medication) { err.textContent = "Choose a medication before saving."; err.hidden = false; return; }
+    const labs = state.labTests.filter((l) => l.on);
+    const supps = state.suppList.filter((s) => s.on);
+    try {
+      await api("PATCH", `/api/plans/${plan.id}`, {
+        title: state.title, status: state.status, category: d.category,
+        medication: d.medication, dose: d.dose, quantity: d.quantity,
+        route: d.route, frequency: d.frequency, halfLifeHours: d.halfLifeHours || null,
+        phases: d.phases.filter((p) => p.label || p.dose),
+        instructions: state.instructions, warnings: state.warnings,
+        labTests: labs.map((l) => ({ name: l.name, detail: l.detail || "", fasting: !!l.fasting, required: !!l.required, link: l.link || "" })),
+        suppList: supps.map((s) => ({ name: s.name, dose: s.dose || "", benefit: s.benefit || "" })),
+        supplements: supps.map((s) => s.name + (s.dose ? ` (${s.dose})` : "")).join(", "),
+        bloodTest: labs.length ? (labs.some((l) => l.required) ? "required" : "recommended") : "none",
+      });
+      toast("Program updated — the patient's guide is live");
+      location.hash = `#/patient/${patient.id}`;
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  }
+}
+
+// ── roles ────────────────────────────────────────────────────────
+const ROLE_LABEL = { superadmin: "Super admin", doctor: "Doctor", admin: "Admin" };
+const ROLE_BLURB = {
+  superadmin: "Full access, plus the team, the protocol library and the knowledge base.",
+  doctor: "Runs consultations, prescribes, and signs guides and messages in their own name.",
+  admin: "Sees patients, their programs and guides. Cannot start a consultation or change a program.",
+};
+
+// Shown instead of a page the signed-in role may not open. The server refuses
+// these routes too — this is so the answer is an explanation rather than a
+// failed request.
+function viewNoAccess(pageLabel) {
+  view().innerHTML = `
+  <div class="page-head"><div><h1>${esc(pageLabel)}</h1><div class="sub">Not available on your account</div></div></div>
+  <div class="card card-pad" style="max-width:560px">
+    <div class="g-callout g-amber">${icon("shield", 18)}
+      <div><strong>Your account is ${esc(ROLE_LABEL[S.user.role] || S.user.role)}.</strong>
+      <div style="margin-top:3px">${esc(ROLE_BLURB[S.user.role] || "")}</div></div>
+    </div>
+    <p class="hint" style="margin-top:12px">Ask a super admin if you need this changed.</p>
+    <a class="btn btn-secondary btn-sm" href="#/patients" style="margin-top:14px;display:inline-flex">${icon("users", 15)} Go to patients</a>
+  </div>`;
+}
+
+// ── team ─────────────────────────────────────────────────────────
+// The practice's staff accounts. Every doctor signs their own consultations,
+// so adding a doctor here is what makes their name appear on the guides and
+// messages they write.
+async function viewTeam() {
+  view().innerHTML = `<div class="skel" style="height:110px;margin-bottom:16px"></div><div class="skel" style="height:280px"></div>`;
+  const users = await api("GET", "/api/admin/users");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>Team</h1><div class="sub">${users.filter((u) => u.active).length} active ${users.filter((u) => u.active).length === 1 ? "account" : "accounts"}</div></div>
+    <button class="btn btn-primary" id="tm-add">${icon("plus", 17)} Add team member</button>
+  </div>
+  <div class="card">
+    ${users.map((u) => `
+      <div class="pt-row" style="cursor:default">
+        <div class="avatar">${esc(initials(u.name))}</div>
+        <div class="pt-info">
+          <div class="pt-name"><span>${esc(u.name)}${u.credentials ? `<span style="font-weight:400;color:var(--muted)">, ${esc(u.credentials)}</span>` : ""}</span>
+            <span class="badge ${u.role === "superadmin" ? "badge-teal" : u.role === "doctor" ? "badge-cyan" : "badge-gray"}">${esc(ROLE_LABEL[u.role] || u.role)}</span>
+            ${u.active ? "" : `<span class="badge badge-gray">deactivated</span>`}
+          </div>
+          <div class="pt-meta">${esc(u.email)}${u.patients ? ` · ${u.patients} patient${u.patients === 1 ? "" : "s"}` : ""}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" data-tm-edit="${u.id}">${icon("edit", 15)} Edit</button>
+          ${u.id === S.user.id ? "" : `<button class="btn btn-ghost btn-sm" data-tm-active="${u.id}" data-next="${u.active ? 0 : 1}">${u.active ? "Deactivate" : "Reactivate"}</button>`}
+        </div>
+      </div>`).join("")}
+  </div>
+  <p class="hint" style="margin-top:14px">Deactivating keeps every record that account signed — it only stops them signing in.</p>`;
+
+  document.getElementById("tm-add").addEventListener("click", () => teamMemberModal(null, viewTeam));
+  view().querySelectorAll("[data-tm-edit]").forEach((b) => b.addEventListener("click", () => {
+    teamMemberModal(users.find((u) => u.id === Number(b.dataset.tmEdit)), viewTeam);
+  }));
+  view().querySelectorAll("[data-tm-active]").forEach((b) => b.addEventListener("click", async () => {
+    const u = users.find((x) => x.id === Number(b.dataset.tmActive));
+    const next = Number(b.dataset.next);
+    if (!next && !confirm(`Deactivate ${u.name}? They will be signed out and cannot sign in again until reactivated.`)) return;
+    try {
+      await api("PUT", `/api/admin/users/${u.id}`, { active: next });
+      toast(next ? "Account reactivated" : "Account deactivated");
+      viewTeam();
+    } catch (e) { toast(e.message); }
+  }));
+}
+
+// Add or edit a staff account. Password is required when creating and
+// optional when editing (blank leaves the existing one alone).
+function teamMemberModal(user, done) {
+  const isNew = !user;
+  const u = user || { name: "", email: "", role: "doctor", credentials: "", signature: "", clinic: "DarDoc Healthcare" };
+  const roles = ["doctor", "admin", "superadmin"];
+  const scrim = modal(`
+    <div class="modal-head"><h3>${isNew ? "Add team member" : "Edit " + esc(u.name)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin-bottom:16px">Their name and credentials sign every guide, record and message they write.</p>
+    <form id="tm-form">
+      <div class="form-grid">
+        <div class="field"><label for="tm-name">Full name <span class="req">*</span></label><input class="input" id="tm-name" value="${esc(u.name)}" placeholder="Dr Amina Haddad" required></div>
+        <div class="field"><label for="tm-cred">Credentials</label><input class="input" id="tm-cred" value="${esc(u.credentials)}" placeholder="MBBS, MRCP"></div>
+        <div class="field"><label for="tm-email">Email (their login) <span class="req">*</span></label><input class="input" id="tm-email" type="email" value="${esc(u.email)}" required></div>
+        <div class="field"><label for="tm-pass">${isNew ? "Password" : "New password"} ${isNew ? '<span class="req">*</span>' : ""}</label><input class="input" id="tm-pass" type="password" autocomplete="new-password" minlength="8" ${isNew ? "required" : ""} placeholder="${isNew ? "At least 8 characters" : "Leave blank to keep current"}"></div>
+        <div class="field full"><label for="tm-role">Role</label>
+          <select class="input" id="tm-role">${roles.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${ROLE_LABEL[r]}</option>`).join("")}</select>
+          <span class="hint" id="tm-role-blurb">${esc(ROLE_BLURB[u.role])}</span>
+        </div>
+        <div class="field full"><label for="tm-sign">Extra signature lines</label><textarea class="input" id="tm-sign" rows="2" placeholder="DHA licence 12345&#10;Endocrinology">${esc(u.signature)}</textarea></div>
+        <div class="field full"><label for="tm-clinic">Clinic</label><input class="input" id="tm-clinic" value="${esc(u.clinic)}"></div>
+      </div>
+      <div class="card" style="background:var(--bg);padding:12px 14px;margin:4px 0 14px">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700;margin-bottom:5px">Signature preview</div>
+        <pre id="tm-preview" style="font-size:12.5px;color:var(--muted);white-space:pre-wrap;font-family:var(--font-body)"></pre>
+      </div>
+      <p class="err-text" id="tm-err" hidden role="alert"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost" type="button" id="tm-cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit">${isNew ? "Create account" : "Save changes"}</button>
+      </div>
+    </form>`);
+
+  const g = (id) => scrim.querySelector("#" + id);
+  const refresh = () => {
+    g("tm-role-blurb").textContent = ROLE_BLURB[g("tm-role").value] || "";
+    g("tm-preview").textContent = signatureBlock({
+      name: g("tm-name").value || "Name", credentials: g("tm-cred").value,
+      signature: g("tm-sign").value, clinic: g("tm-clinic").value,
+    });
+  };
+  ["tm-name", "tm-cred", "tm-sign", "tm-clinic", "tm-role"].forEach((id) => g(id).addEventListener("input", refresh));
+  g("tm-role").addEventListener("change", refresh);
+  refresh();
+  g("tm-cancel").addEventListener("click", () => scrim.remove());
+  g("tm-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = g("tm-err");
+    err.hidden = true;
+    const payload = {
+      name: g("tm-name").value.trim(), email: g("tm-email").value.trim(), role: g("tm-role").value,
+      credentials: g("tm-cred").value.trim(), signature: g("tm-sign").value.trim(), clinic: g("tm-clinic").value.trim(),
+    };
+    if (g("tm-pass").value) payload.password = g("tm-pass").value;
+    try {
+      if (isNew) await api("POST", "/api/admin/users", payload);
+      else await api("PUT", `/api/admin/users/${u.id}`, payload);
+      scrim.remove();
+      toast(isNew ? "Team member added" : "Changes saved");
+      done && done();
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
+}
+
 // ── settings ─────────────────────────────────────────────────────
 function viewSettings() {
+  const u = S.user;
   view().innerHTML = `
-  <div class="page-head"><div><h1>Settings</h1><div class="sub">Account &amp; security</div></div></div>
-  <div class="card card-pad" style="max-width:480px">
+  <div class="page-head"><div><h1>Settings</h1><div class="sub">Your signature, account &amp; security</div></div></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px;align-items:start;max-width:1000px">
+  <div class="card card-pad">
+    <div class="card-title">${icon("edit", 19)} Your signature</div>
+    <p class="hint" style="margin:-6px 0 14px">Signs every clinical record, patient guide and message you write. You are signed in as <b>${esc(ROLE_LABEL[u.role] || u.role)}</b>.</p>
+    <form id="sig-form">
+      <div class="field"><label for="sg-name">Full name</label><input class="input" id="sg-name" value="${esc(u.name || "")}" required></div>
+      <div class="field"><label for="sg-cred">Credentials</label><input class="input" id="sg-cred" value="${esc(u.credentials || "")}" placeholder="MBBS, MSc"></div>
+      <div class="field"><label for="sg-sign">Extra signature lines</label><textarea class="input" id="sg-sign" rows="2" placeholder="DHA licence 12345">${esc(u.signature || "")}</textarea></div>
+      <div class="field"><label for="sg-clinic">Clinic</label><input class="input" id="sg-clinic" value="${esc(u.clinic || "DarDoc Healthcare")}"></div>
+      <div class="card" style="background:var(--bg);padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700;margin-bottom:5px">Preview</div>
+        <pre id="sg-preview" style="font-size:12.5px;color:var(--muted);white-space:pre-wrap;font-family:var(--font-body)"></pre>
+      </div>
+      <p class="err-text" id="sg-err" hidden role="alert"></p>
+      <button class="btn btn-primary" type="submit">Save signature</button>
+    </form>
+  </div>
+  <div class="card card-pad">
     <div class="card-title">${icon("key", 19)} Change password</div>
     <form id="pw-form">
       <div class="field"><label for="pw-cur">Current password</label><input class="input" id="pw-cur" type="password" autocomplete="current-password" required></div>
@@ -3133,7 +3633,35 @@ function viewSettings() {
       <p class="err-text" id="pw-err" hidden role="alert"></p>
       <button class="btn btn-primary" type="submit">Update password</button>
     </form>
+  </div>
   </div>`;
+
+  const sigPreview = () => {
+    document.getElementById("sg-preview").textContent = signatureBlock({
+      name: document.getElementById("sg-name").value,
+      credentials: document.getElementById("sg-cred").value,
+      signature: document.getElementById("sg-sign").value,
+      clinic: document.getElementById("sg-clinic").value,
+    });
+  };
+  ["sg-name", "sg-cred", "sg-sign", "sg-clinic"].forEach((id) => document.getElementById(id).addEventListener("input", sigPreview));
+  sigPreview();
+  document.getElementById("sig-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = document.getElementById("sg-err");
+    err.hidden = true;
+    try {
+      S.user = await api("PUT", "/api/me/signature", {
+        name: document.getElementById("sg-name").value.trim(),
+        credentials: document.getElementById("sg-cred").value.trim(),
+        signature: document.getElementById("sg-sign").value.trim(),
+        clinic: document.getElementById("sg-clinic").value.trim(),
+      });
+      renderShell();
+      route();
+      toast("Signature saved");
+    } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+  });
   document.getElementById("pw-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const err = document.getElementById("pw-err");

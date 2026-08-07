@@ -899,7 +899,7 @@ async function paintMessages(v) {
   <div class="hello"><h1>Messages</h1><div class="sub">Direct line to ${esc(S.me.doctorName)}. Not for emergencies.</div></div>
   <div class="msg-list" id="p-msgs" style="padding-bottom:70px">
     ${msgs.length ? msgs.map((m) => `
-      <div class="msg ${m.sender}">${esc(m.body)}<div class="msg-time">${m.sender === "doctor" ? esc(S.me.doctorName) + " · " : ""}${timeAgo(m.created_at)}</div></div>`).join("")
+      <div class="msg ${m.sender}">${esc(m.body)}<div class="msg-time">${m.sender === "doctor" ? esc(m.senderName || S.me.doctorName) + " · " : ""}${timeAgo(m.created_at)}</div></div>`).join("")
     : `<div class="empty">${icon("message", 32)}<div class="empty-title">No messages yet</div><p>Questions about your treatment? Write to your doctor below.</p></div>`}
   </div>
   <form class="msg-bar" id="p-msg-form">

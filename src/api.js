@@ -54,20 +54,33 @@ function clearSession(req, res, kind) {
   res.setHeader("Set-Cookie", `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
+// Any signed-in staff user. Three roles share this session:
+//   superadmin — everything, plus managing the team, protocols and the KB
+//   doctor     — consults, prescribes, and signs in their own name
+//   admin      — sees patients and their programs, but prescribes nothing
+// getDoctor answers "is someone signed in"; use requireClinician for anything
+// that writes to a patient's record.
 function getDoctor(req) {
   const token = getCookies(req).pdsid;
   if (!token) return null;
   const s = db.prepare("SELECT * FROM sessions WHERE token = ? AND kind = 'doctor' AND expires_at > datetime('now')").get(token);
   if (!s) return null;
-  return db.prepare("SELECT id, email, name, role FROM users WHERE id = ?").get(s.ref_id) || null;
+  return db.prepare("SELECT id, email, name, role, credentials, signature, clinic, active FROM users WHERE id = ? AND active = 1").get(s.ref_id) || null;
 }
 
-// Super admin: a distinct role (not "doctor"/"admin") dedicated to managing
-// clinical protocols and the knowledge base — separate login, no patient access.
+// Super admin: manages the team, the clinical protocols and the knowledge base.
 function requireSuperadmin(req) {
   const user = getDoctor(req);
   return user && user.role === "superadmin" ? user : null;
 }
+
+// Only a clinician may create or change anything a patient will act on. An
+// admin can read the same records but never writes to them.
+function requireClinician(req) {
+  const user = getDoctor(req);
+  return user && (user.role === "doctor" || user.role === "superadmin") ? user : null;
+}
+const NOT_CLINICIAN = { error: "Your account can view records but cannot prescribe or change a program." };
 
 function getPatient(req) {
   const token = getCookies(req).pdpat;
@@ -85,11 +98,43 @@ function normMobile(m) {
   return String(m || "").replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
 }
 
+// The clinician who signed a program. Looked up per plan rather than taken
+// from the session, so a guide opened months later — or by a different
+// doctor, or by an admin — still shows who actually prescribed it.
+function signerFor(userId) {
+  const u = db.prepare("SELECT name, credentials, signature, clinic FROM users WHERE id = ?").get(userId);
+  return {
+    name: u ? u.name : "Your doctor",
+    credentials: (u && u.credentials) || "",
+    signature: (u && u.signature) || "",
+    clinic: (u && u.clinic) || "DarDoc Healthcare",
+  };
+}
+
+// Messages carry the name of the clinician who sent them, so a practice with
+// more than one doctor does not sign every reply with the same name. Messages
+// written before the column existed fall back to the patient's own doctor.
+function withSender(messages, fallbackDoctorId) {
+  const names = new Map();
+  const nameOf = (id) => {
+    if (!names.has(id)) {
+      const u = db.prepare("SELECT name FROM users WHERE id = ?").get(id);
+      names.set(id, u ? u.name : "Your doctor");
+    }
+    return names.get(id);
+  };
+  return messages.map((m) => (m.sender === "doctor"
+    ? { ...m, senderName: nameOf(m.sender_user_id || fallbackDoctorId) }
+    : m));
+}
+
 function parsePlan(row) {
   if (!row) return null;
   const safe = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
   return {
     ...row,
+    signedBy: signerFor(row.doctor_id),
+    revisedBy: row.last_edited_by && row.last_edited_by !== row.doctor_id ? signerFor(row.last_edited_by) : null,
     phases: JSON.parse(row.phases_json || "[]"),
     diet: JSON.parse(row.diet_json || "{}"),
     labTests: safe(row.lab_tests_json || "[]", []),
@@ -133,9 +178,19 @@ route("POST", "/api/auth/login", async (req, res, _p, body) => {
   if (!user || !verifySecret(body.password || "", user.password_hash)) {
     return json(res, 401, { error: "Invalid email or password." });
   }
+  if (!user.active) return json(res, 403, { error: "This account has been deactivated." });
   setSession(res, "doctor", user.id);
-  json(res, 200, { id: user.id, name: user.name, email: user.email, role: user.role });
+  json(res, 200, publicUser(user));
 });
+
+// The staff fields the dashboard may see — never the password hash.
+function publicUser(u) {
+  return {
+    id: u.id, name: u.name, email: u.email, role: u.role,
+    credentials: u.credentials || "", signature: u.signature || "",
+    clinic: u.clinic || "DarDoc Healthcare", active: u.active === undefined ? 1 : u.active,
+  };
+}
 
 route("POST", "/api/auth/logout", (req, res) => { clearSession(req, res, "doctor"); json(res, 200, { ok: true }); });
 
@@ -201,7 +256,7 @@ route("GET", "/api/templates", (req, res) => {
 });
 
 route("POST", "/api/templates", async (req, res, _p, body) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
   if (!body.name) return json(res, 400, { error: "Template name is required." });
   const r = db.prepare("INSERT INTO templates (name, category, config_json) VALUES (?,?,?)")
     .run(body.name, body.category || "custom", JSON.stringify(body.config || {}));
@@ -212,11 +267,92 @@ route("POST", "/api/templates", async (req, res, _p, body) => {
 route("POST", "/api/admin/login", async (req, res, _p, body) => {
   const email = String(body.email || "").toLowerCase().trim();
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
-  if (!user || !verifySecret(body.password || "", user.password_hash) || user.role !== "superadmin") {
+  if (!user || !verifySecret(body.password || "", user.password_hash) || user.role !== "superadmin" || !user.active) {
     return json(res, 401, { error: "Invalid email or password." });
   }
   setSession(res, "doctor", user.id);
-  json(res, 200, { id: user.id, name: user.name, email: user.email, role: user.role });
+  json(res, 200, publicUser(user));
+});
+
+// ── super admin: the clinical team ──────────────────────────────
+// Doctors sign their own consultations, so each one is a real user with
+// their own login and signature. Admins get the same read access to
+// patients and programs but cannot prescribe — see requireClinician.
+const STAFF_ROLES = ["doctor", "admin", "superadmin"];
+
+route("GET", "/api/admin/users", (req, res) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const rows = db.prepare("SELECT * FROM users ORDER BY active DESC, role, name").all().map(publicUser);
+  const counts = db.prepare("SELECT doctor_id, COUNT(*) n FROM patients WHERE archived = 0 GROUP BY doctor_id").all();
+  const byDoctor = Object.fromEntries(counts.map((c) => [c.doctor_id, c.n]));
+  json(res, 200, rows.map((u) => ({ ...u, patients: byDoctor[u.id] || 0 })));
+});
+
+route("POST", "/api/admin/users", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const email = String(body.email || "").toLowerCase().trim();
+  const name = String(body.name || "").trim();
+  const role = STAFF_ROLES.includes(body.role) ? body.role : "doctor";
+  if (!name || !email) return json(res, 400, { error: "Name and email are required." });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Enter a valid email address." });
+  if (String(body.password || "").length < 8) return json(res, 400, { error: "Password must be at least 8 characters." });
+  if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) return json(res, 409, { error: "That email already has an account." });
+  const r = db.prepare(`INSERT INTO users (email, password_hash, name, role, credentials, signature, clinic)
+    VALUES (?,?,?,?,?,?,?)`).run(email, hashSecret(body.password), name, role,
+      String(body.credentials || "").trim(), String(body.signature || "").trim(),
+      String(body.clinic || "DarDoc Healthcare").trim());
+  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(Number(r.lastInsertRowid))));
+});
+
+route("PUT", "/api/admin/users/:id", async (req, res, p, body) => {
+  const me = requireSuperadmin(req);
+  if (!me) return json(res, 401, { error: "Not signed in as super admin." });
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(Number(p.id));
+  if (!user) return json(res, 404, { error: "User not found." });
+
+  const sets = [], vals = [];
+  const put = (col, v) => { sets.push(`${col} = ?`); vals.push(v); };
+  if (body.name !== undefined) put("name", String(body.name).trim());
+  if (body.credentials !== undefined) put("credentials", String(body.credentials).trim());
+  if (body.signature !== undefined) put("signature", String(body.signature).trim());
+  if (body.clinic !== undefined) put("clinic", String(body.clinic).trim());
+  if (body.email !== undefined) {
+    const email = String(body.email).toLowerCase().trim();
+    const clash = db.prepare("SELECT id FROM users WHERE email = ? AND id != ?").get(email, user.id);
+    if (clash) return json(res, 409, { error: "That email already has an account." });
+    put("email", email);
+  }
+  if (body.password) {
+    if (String(body.password).length < 8) return json(res, 400, { error: "Password must be at least 8 characters." });
+    put("password_hash", hashSecret(body.password));
+  }
+  // The last active super admin must keep the keys, or nobody can manage the
+  // team again — the same reason they cannot deactivate themselves.
+  const activeSupers = db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'superadmin' AND active = 1").get().n;
+  if (body.role !== undefined && STAFF_ROLES.includes(body.role) && body.role !== user.role) {
+    if (user.role === "superadmin" && activeSupers <= 1) return json(res, 400, { error: "This is the only super admin — promote someone else first." });
+    put("role", body.role);
+  }
+  if (body.active !== undefined) {
+    const next = body.active ? 1 : 0;
+    if (!next && user.id === me.id) return json(res, 400, { error: "You cannot deactivate your own account." });
+    if (!next && user.role === "superadmin" && activeSupers <= 1) return json(res, 400, { error: "This is the only super admin — promote someone else first." });
+    put("active", next);
+    if (!next) db.prepare("DELETE FROM sessions WHERE kind = 'doctor' AND ref_id = ?").run(user.id);
+  }
+  if (!sets.length) return json(res, 400, { error: "Nothing to update." });
+  db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...vals, user.id);
+  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(user.id)));
+});
+
+// A clinician edits their own signature without needing the super admin.
+route("PUT", "/api/me/signature", async (req, res, _p, body) => {
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  db.prepare("UPDATE users SET name = ?, credentials = ?, signature = ?, clinic = ? WHERE id = ?")
+    .run(String(body.name || me.name).trim(), String(body.credentials || "").trim(),
+      String(body.signature || "").trim(), String(body.clinic || "DarDoc Healthcare").trim(), me.id);
+  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(me.id)));
 });
 
 route("GET", "/api/admin/me", (req, res) => {
@@ -438,8 +574,8 @@ route("GET", "/api/patients", (req, res) => {
 });
 
 route("POST", "/api/patients", async (req, res, _p, body) => {
-  const doc = getDoctor(req);
-  if (!doc) return json(res, 401, { error: "Not signed in." });
+  const doc = requireClinician(req);
+  if (!doc) return json(res, 403, NOT_CLINICIAN);
   const name = String(body.name || "").trim();
   const mobile = normMobile(body.mobile);
   if (!name || !mobile) return json(res, 400, { error: "Name and mobile number are required." });
@@ -467,7 +603,8 @@ route("GET", "/api/patients/:id", (req, res, p) => {
   const messages = db.prepare("SELECT * FROM messages WHERE patient_id = ? ORDER BY created_at ASC").all(p.id);
   db.prepare("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND sender = 'patient' AND read_at IS NULL").run(p.id);
   const intake = JSON.parse(patient.intake_json || "{}");
-  json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake }, plans, doses, checkins, messages });
+  json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake },
+    plans, doses, checkins, messages: withSender(messages, patient.doctor_id) });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
@@ -491,7 +628,7 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
 });
 
 route("POST", "/api/patients/:id/pin", (req, res, p) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
   const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(p.id);
   if (!patient) return json(res, 404, { error: "Patient not found." });
   const pin = generatePin();
@@ -654,8 +791,8 @@ route("POST", "/api/clinical/review", async (req, res, _p, body) => {
 });
 
 route("POST", "/api/plans", async (req, res, _p, body) => {
-  const doc = getDoctor(req);
-  if (!doc) return json(res, 401, { error: "Not signed in." });
+  const doc = requireClinician(req);
+  if (!doc) return json(res, 403, NOT_CLINICIAN);
   const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(body.patientId);
   if (!patient) return json(res, 404, { error: "Patient not found." });
   if (!body.medication || !body.title) return json(res, 400, { error: "Program title and medication are required." });
@@ -675,39 +812,61 @@ route("POST", "/api/plans", async (req, res, _p, body) => {
   json(res, 200, { id: Number(r.lastInsertRowid) });
 });
 
-route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
+// One program with the patient it belongs to — what the editor loads.
+route("GET", "/api/plans/:id", (req, res, p) => {
   if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
   const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
   if (!plan) return json(res, 404, { error: "Plan not found." });
-  const fields = { status: "status", title: "title", medication: "medication", dose: "dose", quantity: "quantity", route: "route",
-    frequency: "frequency", instructions: "instructions", warnings: "warnings", bloodTest: "blood_test",
-    clinicalNote: "clinical_note", nextFollowup: "next_followup", followupDays: "followup_days",
-    needsRefill: "needs_refill" };
+  const patient = db.prepare("SELECT * FROM patients WHERE id = ?").get(plan.patient_id);
+  json(res, 200, {
+    plan: parsePlan(plan),
+    patient: patient ? { ...patient, pin_hash: undefined, intake_json: undefined, intake: JSON.parse(patient.intake_json || "{}") } : null,
+  });
+});
+
+route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
+  const editor = requireClinician(req);
+  if (!editor) return json(res, 403, NOT_CLINICIAN);
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
+  if (!plan) return json(res, 404, { error: "Plan not found." });
+  // Everything a published program can be revised on: a doctor may change
+  // the medication itself, its protocol, the labs and the supplements —
+  // treatment gets adjusted at follow-up, so the record has to move with it.
+  const fields = { status: "status", title: "title", category: "category", medication: "medication",
+    dose: "dose", quantity: "quantity", route: "route", frequency: "frequency", halfLifeHours: "half_life_hours",
+    instructions: "instructions", warnings: "warnings", bloodTest: "blood_test", supplements: "supplements",
+    clinicalNote: "clinical_note", clinicalSuggestion: "clinical_suggestion",
+    nextFollowup: "next_followup", followupDays: "followup_days", needsRefill: "needs_refill" };
   const sets = [], vals = [];
   for (const [k, col] of Object.entries(fields)) {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }
   }
   if (body.phases !== undefined) { sets.push("phases_json = ?"); vals.push(JSON.stringify(body.phases)); }
   if (body.diet !== undefined) { sets.push("diet_json = ?"); vals.push(JSON.stringify(body.diet)); }
+  if (body.labTests !== undefined) { sets.push("lab_tests_json = ?"); vals.push(JSON.stringify(body.labTests)); }
+  if (body.suppList !== undefined) { sets.push("supplements_json = ?"); vals.push(JSON.stringify(body.suppList)); }
   if (!sets.length) return json(res, 400, { error: "Nothing to update." });
-  sets.push("updated_at = datetime('now')");
-  vals.push(p.id);
+  // The prescriber stays the prescriber; whoever revised it is recorded
+  // separately, so the guide can say who changed what the patient is doing.
+  sets.push("updated_at = datetime('now')", "last_edited_by = ?", "last_edited_at = datetime('now')");
+  vals.push(editor.id, p.id);
   db.prepare(`UPDATE plans SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   json(res, 200, { ok: true });
 });
 
 // ── doctor: review & messages ────────────────────────────────────
 route("POST", "/api/checkins/:id/review", (req, res, p) => {
-  if (!getDoctor(req)) return json(res, 401, { error: "Not signed in." });
+  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
   db.prepare("UPDATE checkins SET reviewed = 1 WHERE id = ?").run(p.id);
   json(res, 200, { ok: true });
 });
 
 route("POST", "/api/patients/:id/messages", async (req, res, p, body) => {
-  const doc = getDoctor(req);
-  if (!doc) return json(res, 401, { error: "Not signed in." });
+  const doc = requireClinician(req);
+  if (!doc) return json(res, 403, NOT_CLINICIAN);
   if (!body.body || !String(body.body).trim()) return json(res, 400, { error: "Message is empty." });
-  db.prepare("INSERT INTO messages (patient_id, sender, body) VALUES (?,?,?)").run(p.id, "doctor", String(body.body).trim());
+  db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
+    .run(p.id, "doctor", String(body.body).trim(), doc.id);
   json(res, 200, { ok: true });
 });
 
@@ -728,11 +887,12 @@ route("GET", "/api/portal/me", (req, res) => {
   const patient = getPatient(req);
   if (!patient) return json(res, 401, { error: "Not signed in." });
   const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(patient.id).map(parsePlanPublic);
-  const doctor = db.prepare("SELECT name FROM users WHERE id = ?").get(patient.doctor_id);
+  const doctor = signerFor(patient.doctor_id);
   json(res, 200, {
     patient: { ...patient, pin_hash: undefined },
     plans,
-    doctorName: doctor ? doctor.name : "Your doctor",
+    doctor,
+    doctorName: doctor.name,
     presets: {
       symptoms: presets.SYMPTOMS,
       phasesWeekly: presets.PK_PHASES_WEEKLY,
@@ -793,7 +953,7 @@ route("GET", "/api/portal/messages", (req, res) => {
   if (!patient) return json(res, 401, { error: "Not signed in." });
   const messages = db.prepare("SELECT * FROM messages WHERE patient_id = ? ORDER BY created_at ASC").all(patient.id);
   db.prepare("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND sender = 'doctor' AND read_at IS NULL").run(patient.id);
-  json(res, 200, messages);
+  json(res, 200, withSender(messages, patient.doctor_id));
 });
 
 route("POST", "/api/portal/messages", async (req, res, _p, body) => {

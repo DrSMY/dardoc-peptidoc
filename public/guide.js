@@ -120,6 +120,15 @@ function buildGuide(plan, patient, doctorName, opts) {
   // opts.portal — render as an in-app page (no print letterhead / footer),
   // so the portal Guide tab can lead with a home-style hero header instead.
   const portal = opts && opts.portal;
+  // The program is signed by whoever prescribed it, which is not always the
+  // person reading it — another doctor in the practice, or an admin.
+  const signer = plan.signedBy || {};
+  const signerName = signer.name || doctorName || "your doctor";
+  // A program revised later says so, naming who changed it — the prescriber
+  // on record stays the prescriber.
+  const revisedLine = plan.revisedBy
+    ? `Revised by ${esc(plan.revisedBy.name)}${plan.revisedBy.credentials ? `, ${esc(plan.revisedBy.credentials)}` : ""}${plan.updated_at ? ` on ${esc(fmtDate(plan.updated_at))}` : ""}`
+    : "";
   const diet = plan.diet || {};
   const phases = plan.phases || [];
   const routeLabel = {
@@ -195,7 +204,7 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div>
         <div class="g-hello">Prepared for</div>
         <h2>${esc(patient.title ? patient.title + " " : "")}${esc(patient.name)}</h2>
-        <div class="g-doc">by ${esc(doctorName || "your doctor")}</div>
+        <div class="g-doc">by ${esc(signerName)}${signer.credentials ? " · " + esc(signer.credentials) : ""}</div>
       </div>
       <div class="g-med-pill">${(() => {
         const photo = typeof medPhoto === "function" ? medPhoto(plan.medication, plan.category) : null;
@@ -254,12 +263,18 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div class="g-callout g-teal">
         ${icon("calendar", 18)}
         <div>Your next follow-up is due around <strong>${esc(fmtDate(plan.next_followup))}</strong>.
-        Log your doses and check in regularly in this app so ${esc(doctorName || "your doctor")} can track your progress.</div>
+        Log your doses and check in regularly in this app so ${esc(signerName)} can track your progress.</div>
       </div>
     </section>
 
     ${portal ? "" : `
     <footer class="g-foot">
+      <div class="g-sign">Prescribed and signed by<br>
+        <b>${esc(signerName)}</b>${signer.credentials ? `, ${esc(signer.credentials)}` : ""}
+        ${signer.signature ? `<br>${esc(signer.signature).replace(/\n/g, "<br>")}` : ""}
+        <br>${esc(signer.clinic || "DarDoc Healthcare")}
+        ${revisedLine ? `<div style="margin-top:6px">${revisedLine}</div>` : ""}
+      </div>
       This guide was prepared personally for ${esc(patient.name)} and is not general medical advice.
       If you feel seriously unwell, seek urgent medical care immediately.
     </footer>`}
@@ -329,6 +344,8 @@ const GUIDE_CSS = `
 .g-teal { background: var(--brand-soft); color: var(--brand-strong); }
 .g-teal svg { color: var(--brand); }
 .g-foot { padding: 14px 22px 20px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--border); margin-top: 8px; }
+.g-sign { margin-bottom: 10px; color: var(--muted); line-height: 1.5; }
+.g-sign b { font-family: var(--font-head); color: var(--text); }
 .g-divider { border: none; border-top: 1.5px dashed var(--border-strong); margin: 20px 22px 4px; }
 .g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
 .g-emoji { font-size: 16px; }

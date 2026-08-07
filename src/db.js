@@ -165,6 +165,16 @@ addColumn("plans", "first_dose_at", "TEXT");                      // cached from
 addColumn("plans", "lab_tests_json", "TEXT DEFAULT '[]'");        // chosen lab tests [{name, detail, fasting, required, link}] — shown in the guide
 addColumn("plans", "supplements_json", "TEXT DEFAULT '[]'");      // chosen supplements [{name, dose, benefit}] — shown in the guide
 addColumn("templates", "is_customized", "INTEGER NOT NULL DEFAULT 0"); // edited via super admin panel
+// Staff identity — every clinical document is signed by the clinician who
+// wrote it, not by whoever is looking at it, so the signature travels with
+// the user record.
+addColumn("users", "credentials", "TEXT DEFAULT ''");             // "MBBS, MSc" — printed under the name
+addColumn("users", "signature", "TEXT DEFAULT ''");               // extra signature lines (licence no., department)
+addColumn("users", "clinic", "TEXT DEFAULT 'DarDoc Healthcare'"); // organisation line on the note footer
+addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");       // deactivated staff keep their history but cannot sign in
+addColumn("messages", "sender_user_id", "INTEGER");               // which clinician wrote it — the patient sees their name
+addColumn("plans", "last_edited_by", "INTEGER");                    // who last revised a published program
+addColumn("plans", "last_edited_at", "TEXT");
 
 // ── password / pin hashing (scrypt) ─────────────────────────────
 function hashSecret(secret) {
