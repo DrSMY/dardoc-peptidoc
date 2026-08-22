@@ -21,3 +21,8 @@ services:
       # public deploy instead of shipping the default password. Min 8 chars.
       - key: ADMIN_PASSWORD
         sync: false
+      # Optional — turns on AI-assisted intake quick fill (see README). Leave
+      # blank in the Render dashboard to skip it; quick fill still works via
+      # its local parser, just less reliably on messy pasted text.
+      - key: ANTHROPIC_API_KEY
+        sync: false

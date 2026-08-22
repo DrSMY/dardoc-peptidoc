@@ -27,6 +27,8 @@ Requires Node.js ≥ 22.5 (uses the built-in `node:sqlite`). **No npm install ne
 
 First run seeds a doctor account — email `drsamimoha2018@gmail.com`, password `DarDoc@2026` (**change it in Settings after first login**), plus all built-in GLP-1 and peptide program templates. Override with env vars `ADMIN_EMAIL` / `ADMIN_PASSWORD` on first boot.
 
+Optional — **`ANTHROPIC_API_KEY`**: turns on AI-assisted intake quick fill (paste a freeform patient note and Claude extracts name/age/gender/height/weight/etc. far more reliably than the built-in regex parser, especially on messy real-world text). Without it, quick fill silently falls back to the local parser — nothing breaks, it's just less reliable on messy input.
+
 ## Deploy (Render)
 
 A [`render.yaml`](render.yaml) blueprint is included — one-click deploy:

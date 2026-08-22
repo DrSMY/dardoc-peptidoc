@@ -170,7 +170,7 @@ addColumn("templates", "is_customized", "INTEGER NOT NULL DEFAULT 0"); // edited
 // the user record.
 addColumn("users", "credentials", "TEXT DEFAULT ''");             // "MBBS, MSc" — printed under the name
 addColumn("users", "signature", "TEXT DEFAULT ''");               // extra signature lines (licence no., department)
-addColumn("users", "clinic", "TEXT DEFAULT 'DarDoc Healthcare'"); // organisation line on the note footer
+addColumn("users", "clinic", "TEXT DEFAULT ''"); // organisation line on the note footer — blank falls back to the user's org name, never a hardcoded practice
 addColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");       // deactivated staff keep their history but cannot sign in
 addColumn("messages", "sender_user_id", "INTEGER");               // which clinician wrote it — the patient sees their name
 addColumn("plans", "last_edited_by", "INTEGER");                  // who last revised a published program

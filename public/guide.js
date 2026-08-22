@@ -272,7 +272,7 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div class="g-sign">Prescribed and signed by<br>
         <b>${esc(signerName)}</b>${signer.credentials ? `, ${esc(signer.credentials)}` : ""}
         ${signer.signature ? `<br>${esc(signer.signature).replace(/\n/g, "<br>")}` : ""}
-        <br>${esc(signer.clinic || "DarDoc Healthcare")}
+        <br>${esc(signer.clinic || "")}
         ${revisedLine ? `<div style="margin-top:6px">${revisedLine}</div>` : ""}
       </div>
       This guide was prepared personally for ${esc(patient.name)} and is not general medical advice.

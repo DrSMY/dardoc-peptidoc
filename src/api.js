@@ -1,5 +1,6 @@
 // JSON API for both the doctor dashboard and the patient portal.
 const crypto = require("node:crypto");
+const https = require("node:https");
 const { db, hashSecret, verifySecret } = require("./db");
 const presets = require("./presets");
 const protocolMap = require("./protocol-map.js");
@@ -203,7 +204,7 @@ function route(method, pattern, handler) {
 // ── auth: doctor ─────────────────────────────────────────────────
 route("POST", "/api/auth/login", async (req, res, _p, body) => {
   const email = String(body.email || "").toLowerCase().trim();
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  const user = userWithOrg("u.email = ?", email);
   if (!user || !verifySecret(body.password || "", user.password_hash)) {
     return json(res, 401, { error: "Invalid email or password." });
   }
@@ -212,14 +213,24 @@ route("POST", "/api/auth/login", async (req, res, _p, body) => {
   json(res, 200, publicUser(user));
 });
 
-// The staff fields the dashboard may see — never the password hash.
+// The staff fields the dashboard may see — never the password hash. Every
+// caller must pass a row that carries org_name (see userWithOrg below); the
+// clinic/orgName fields fall back to that organisation's real name, never
+// to a name that belongs to a different tenant.
 function publicUser(u) {
   return {
     id: u.id, name: u.name, email: u.email, role: u.role,
     credentials: u.credentials || "", signature: u.signature || "",
-    clinic: u.clinic || "DarDoc Healthcare", active: u.active === undefined ? 1 : u.active,
+    clinic: u.clinic || u.org_name || "", active: u.active === undefined ? 1 : u.active,
     orgId: u.org_id || null, orgName: u.org_name || u.clinic || "", platformAdmin: !!u.platform_admin,
   };
+}
+
+// A single user row with its organisation's name attached — the only shape
+// publicUser() should ever be given.
+function userWithOrg(where, ...vals) {
+  return db.prepare(`SELECT u.*, o.name AS org_name FROM users u
+    LEFT JOIN organizations o ON o.id = u.org_id WHERE ${where}`).get(...vals);
 }
 
 route("POST", "/api/auth/logout", (req, res) => { clearSession(req, res, "doctor"); json(res, 200, { ok: true }); });
@@ -296,7 +307,7 @@ route("POST", "/api/templates", async (req, res, _p, body) => {
 // ── super admin: protocols & knowledge base ─────────────────────
 route("POST", "/api/admin/login", async (req, res, _p, body) => {
   const email = String(body.email || "").toLowerCase().trim();
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  const user = userWithOrg("u.email = ?", email);
   if (!user || !verifySecret(body.password || "", user.password_hash) || user.role !== "superadmin" || !user.active) {
     return json(res, 401, { error: "Invalid email or password." });
   }
@@ -417,7 +428,7 @@ route("POST", "/api/admin/users", async (req, res, _p, body) => {
     VALUES (?,?,?,?,?,?,?,?)`).run(email, hashSecret(body.password), name, role,
       String(body.credentials || "").trim(), String(body.signature || "").trim(),
       String(body.clinic || orgRow.name).trim(), org);
-  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(Number(r.lastInsertRowid))));
+  json(res, 200, publicUser(userWithOrg("u.id = ?", Number(r.lastInsertRowid))));
 });
 
 route("PUT", "/api/admin/users/:id", async (req, res, p, body) => {
@@ -459,7 +470,7 @@ route("PUT", "/api/admin/users/:id", async (req, res, p, body) => {
   }
   if (!sets.length) return json(res, 400, { error: "Nothing to update." });
   db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...vals, user.id);
-  json(res, 200, publicUser(db.prepare("SELECT * FROM users WHERE id = ?").get(user.id)));
+  json(res, 200, publicUser(userWithOrg("u.id = ?", user.id)));
 });
 
 // A clinician edits their own signature without needing the super admin.
@@ -469,8 +480,7 @@ route("PUT", "/api/me/signature", async (req, res, _p, body) => {
   db.prepare("UPDATE users SET name = ?, credentials = ?, signature = ?, clinic = ? WHERE id = ?")
     .run(String(body.name || me.name).trim(), String(body.credentials || "").trim(),
       String(body.signature || "").trim(), String(body.clinic || me.org_name || "").trim(), me.id);
-  json(res, 200, publicUser(db.prepare(`SELECT u.*, o.name AS org_name FROM users u
-    LEFT JOIN organizations o ON o.id = u.org_id WHERE u.id = ?`).get(me.id)));
+  json(res, 200, publicUser(userWithOrg("u.id = ?", me.id)));
 });
 
 route("GET", "/api/admin/me", (req, res) => {
@@ -827,6 +837,98 @@ route("POST", "/api/admin/import-history", async (req, res, _p, body) => {
   } catch (e) {
     db.exec("ROLLBACK");
     json(res, 500, { error: "Import failed: " + e.message });
+  }
+});
+
+// ── AI-assisted intake quick fill ───────────────────────────────
+// A doctor pastes a freeform note (a WhatsApp forward, an EMR export, a
+// referral letter) and it becomes structured patient fields. The
+// deterministic regex parser in public/doctor/app.js handles the clean,
+// predictable case ("Ahmed Ali, 0501234567, 35y Male, 180cm, 95kg") well
+// enough, but real pasted text is messier than that — a name buried after
+// a clinic sign-off, weight given in lbs, a positional list with no units
+// at all — which is exactly where a regex reaches its ceiling. This calls
+// Claude to do the same extraction properly; the client falls back to the
+// deterministic parser when this isn't configured or fails, so quick fill
+// never regresses to broken, only to "as good as it always was."
+//
+// Requires ANTHROPIC_API_KEY in the environment. Without it this route
+// answers 503 and the client silently uses its local parser instead.
+function anthropicMessages(payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const req = https.request({
+      hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-length": Buffer.byteLength(body),
+      },
+      timeout: 15000,
+    }, (res) => {
+      let raw = "";
+      res.on("data", (c) => { raw += c; });
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
+        catch (e) { reject(e); }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("Anthropic API request timed out")));
+    req.write(body);
+    req.end();
+  });
+}
+
+// Forcing tool use (rather than asking for prose JSON and parsing it back
+// out) is what makes this reliable — the response is a validated object
+// matching this shape, never a stray sentence or markdown fence to strip.
+const QUICKFILL_TOOL = {
+  name: "extract_patient_intake",
+  description: "Extract structured patient-intake fields from a doctor's freeform note. Omit any field the text doesn't actually state — never guess, infer, or invent a value.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "The PATIENT's full name only — never the doctor's, clinic's, or anyone else mentioned in passing (a sign-off, a referring physician, a clinic name)." },
+      title: { type: "string", description: "Mr, Mrs, Ms, Dr, etc. — only if the text actually gives the patient one." },
+      mobile: { type: "string", description: "Digits only, no spaces, symbols or country-code plus sign." },
+      email: { type: "string" },
+      nationalId: { type: "string", description: "Emirates ID or passport number." },
+      age: { type: "string", description: "Age in whole years, digits only." },
+      gender: { type: "string", enum: ["Male", "Female"] },
+      heightCm: { type: "string", description: "Height in centimetres. Convert from feet/inches if that's what's given." },
+      weightKg: { type: "string", description: "Weight in kilograms. Convert from pounds/lbs if that's what's given." },
+      conditionsNote: { type: "string", description: "Chronic illnesses actually mentioned, short comma-separated list (e.g. 'Diabetes, Hypertension')." },
+      allergyNote: { type: "string", description: "Allergies actually mentioned, in short form." },
+    },
+    additionalProperties: false,
+  },
+};
+
+route("POST", "/api/intake/quickfill", async (req, res, _p, body) => {
+  if (!requireClinician(req)) return json(res, 403, NOT_CLINICIAN);
+  const text = String(body.text || "").trim().slice(0, 4000);
+  if (!text) return json(res, 400, { error: "Nothing to parse." });
+  if (!process.env.ANTHROPIC_API_KEY) return json(res, 503, { error: "AI quick fill isn't configured on this server.", unconfigured: true });
+  try {
+    const { status, data } = await anthropicMessages({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 500,
+      system: "You extract patient-intake fields from a doctor's pasted note for a telehealth consultation. Call extract_patient_intake exactly once with only the fields the text actually states. Never invent a value. The name field is always the PATIENT being registered for this consultation — not the doctor, the clinic, or anyone else the text happens to mention.",
+      messages: [{ role: "user", content: text }],
+      tools: [QUICKFILL_TOOL],
+      tool_choice: { type: "tool", name: "extract_patient_intake" },
+    });
+    if (status !== 200) {
+      console.error("Anthropic quickfill error", status, JSON.stringify(data).slice(0, 500));
+      return json(res, 502, { error: "AI quick fill failed — used basic parsing instead." });
+    }
+    const toolUse = (data.content || []).find((b) => b.type === "tool_use");
+    json(res, 200, { source: "ai", fields: (toolUse && toolUse.input) || {} });
+  } catch (e) {
+    console.error("Anthropic quickfill exception", e.message);
+    json(res, 502, { error: "AI quick fill failed — used basic parsing instead." });
   }
 });
 

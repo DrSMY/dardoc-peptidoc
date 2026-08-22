@@ -1099,10 +1099,25 @@ function validateGoals() {
 // blurb like "Ahmed Ali, 0501234567, 35y Male, 180cm, 95kg, diabetic,
 // allergic to penicillin". Runs entirely client-side; the doctor confirms
 // everything before continuing.
-function parseIntakeText(text) {
+function parseIntakeText(text, opts) {
   const t = String(text || "").trim();
   const out = {};
   if (!t) return out;
+  // A pasted note often ends with the sender's own sign-off ("— Dr Sami")
+  // or opens with a clinic/referrer name — reject those as name candidates
+  // so the doctor's own name doesn't get filled in as the patient's.
+  // Normalised the same way on both sides — letters and spaces only,
+  // lowercased — so "Dr. Sami" (the stored name, title-cased with a
+  // period) matches a candidate "Dr Sami" (title-stripped, no period)
+  // rather than silently failing to exclude it.
+  const bareName = (x) => String(x).replace(/[^\p{L}\s]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const excludeNames = new Set(((opts && opts.excludeNames) || []).map(bareName).filter(Boolean));
+  // Individual words of an excluded name ("dr sami" → "dr", "sami") — tier 4
+  // below only ever proposes a single bare word, so the full-string check
+  // above can't catch it there; "Sami" alone has to be excluded too, or a
+  // sign-off ending in just the doctor's first name slips through as if it
+  // were the patient's.
+  const excludeParts = new Set([...excludeNames].flatMap((n) => n.split(" ").filter((w) => w.length >= 2)));
 
   const emailMatch = t.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   if (emailMatch) out.email = emailMatch[0];
@@ -1128,18 +1143,29 @@ function parseIntakeText(text) {
     if (bare) out.age = bare;
   }
 
-  // Gender — words, a lone M/F segment, or an age-adjacent M/F.
+  // Gender — words, a lone M/F segment, an age-adjacent M/F, or a leading
+  // slash-shorthand token ("M/35/95kg/180cm").
   const lone = segsAll.map((s) => s.toLowerCase());
   if (/\bfemale\b/i.test(t) || lone.includes("f")) out.gender = "Female";
   else if (/\bmale\b/i.test(t) || lone.includes("m")) out.gender = "Male";
   else if (/\d\s*[/,-]?\s*f\b/i.test(t)) out.gender = "Female";
   else if (/\d\s*[/,-]?\s*m\b/i.test(t)) out.gender = "Male";
+  else if (/^\s*f\s*\//i.test(t)) out.gender = "Female";
+  else if (/^\s*m\s*\//i.test(t)) out.gender = "Male";
 
   const hMatch = t.match(/(?:height|ht)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*cm\b/i);
   if (hMatch) out.heightCm = hMatch[1];
 
-  const wMatch = t.match(/(?:weight|wt)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*kgs?\b/i);
-  if (wMatch) out.weightKg = wMatch[1];
+  const wKgMatch = t.match(/(?:weight|wt)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)\s*kgs?\b/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*kgs?\b/i);
+  const wLbsMatch = t.match(/(?:weight|wt)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)\s*(?:lbs?|pounds?)\b/i) || t.match(/\b(\d{2,3}(?:\.\d+)?)\s*(?:lbs?|pounds?)\b/i);
+  if (wKgMatch) {
+    out.weightKg = wKgMatch[1];
+  } else if (wLbsMatch) {
+    out.weightKg = String(Math.round(Number(wLbsMatch[1]) * 0.453592 * 10) / 10);
+  } else {
+    const wBareMatch = t.match(/(?:weight|wt)\s*[:#-]?\s*(\d{2,3}(?:\.\d+)?)\b/i);
+    if (wBareMatch) out.weightKg = wBareMatch[1];
+  }
 
   const eidMatch = t.match(/(?:emirates\s*id|eid|national\s*id|passport)\s*(?:no\.?|number|#)?\s*[:#-]?\s*([\dA-Z-]{6,20})/i);
   if (eidMatch) out.nationalId = eidMatch[1].trim();
@@ -1156,27 +1182,35 @@ function parseIntakeText(text) {
     "wt", "ht", "yr", "obesity", "obese", "pcos", "pcod",
     "needs", "need", "wants", "want", "requesting", "request", "please", "taking", "on", "of", "to",
     "medication", "med", "meds", "mounjaro", "wegovy", "ozempic", "rybelsus", "saxenda", "zepbound",
-    "glp", "glp1", "peptides", "bpc", "semaglutide", "tirzepatide"]);
-  const looksLikeName = (seg) => {
+    "glp", "glp1", "peptides", "bpc", "semaglutide", "tirzepatide",
+    "lbs", "lb", "pounds", "pound", "referral", "consult", "consultation", "review", "checkup",
+    "regards", "thanks", "thank", "sincerely", "best", "cheers", "yours", "kindly", "warmly",
+    "respectfully", "greetings", "follow", "up", "needed", "notes", "prepared", "discussed"]);
+  const looksLikeName = (seg, strict = true) => {
     const words = seg.trim().replace(/[.,]+$/, "").split(/\s+/).filter(Boolean);
     if (!words.length || words.length > 5) return null;
     const kept = [];
     for (const w0 of words) {
+      if (/\d/.test(w0)) return null;                        // any digit in this token → not a clean name
       const w = w0.replace(/[^\p{L}'-]/gu, "");
-      if (!w) return null;                                   // had a digit/symbol → not a clean name
+      if (!w) return null;                                   // nothing alphabetic left → not a clean name
       if (TITLES.test(w)) { kept.push(w0.replace(/[^\p{L}]/gu, "")); continue; }
       if (STOP.has(w.toLowerCase())) return null;            // a keyword → this segment isn't the name
       if (w.length < 2) return null;
+      if (strict && !/^[A-Z]/.test(w)) return null;          // an inferred candidate must be capitalised word for word
       kept.push(w0);
     }
-    return kept.length ? kept.join(" ") : null;
+    if (!kept.length) return null;
+    const full = kept.join(" ");
+    if (excludeNames.has(bareName(full))) return null;
+    return full;
   };
 
   // 1) Explicit label wins: "Name: X" / "Patient: X" / "name is X" / "named X".
   const nameLabel = t.match(/(?:patient\s*name|patient|name)\s*[:#-]\s*([^\n,;|]+)/i)
     || t.match(/\b(?:name\s+is|named|called|patient\s+is)\s+([A-Za-z][\p{L}'’.\s-]{1,40})/iu);
   if (nameLabel) {
-    const cand = looksLikeName(nameLabel[1]);
+    const cand = looksLikeName(nameLabel[1], false);
     if (cand) out.name = cand;
   }
   // 2) Otherwise scan comma / newline / pipe segments for the first name-like one.
@@ -1188,17 +1222,26 @@ function parseIntakeText(text) {
       if (cand) { out.name = cand; break; }
     }
   }
-  // 3) The first 2–3 consecutive capitalised words anywhere.
+  // 3) A run of 2–4 consecutive capitalised words, anywhere in the text —
+  //    tries every such run in order (not just the first), since a real
+  //    name often sits after a greeting or an explanatory clause that has
+  //    its own capitalised words ("Hi Dr Sami, ... her father Khalid
+  //    Rahman, 62 years old...": the first run is the greeting, and would
+  //    wrongly stop the search here without trying the rest of the text).
   if (!out.name) {
-    const capRun = t.match(/\b([A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,3})\b/);
-    if (capRun) { const cand = looksLikeName(capRun[1]); if (cand) out.name = cand; }
+    const capRuns = t.match(/\b[A-Z][a-z'’-]+(?:\s+[A-Z][a-z'’-]+){1,3}\b/g) || [];
+    for (const run of capRuns) {
+      const cand = looksLikeName(run);
+      if (cand) { out.name = cand; break; }
+    }
   }
   // 4) Last resort — the first standalone word that isn't a keyword/unit/title
-  //    (catches a lone first name like "Meera 20 female").
-  if (!out.name) {
+  //    (catches a lone first name like "Meera 20 female"). Only for short,
+  //    bare inputs — see note above.
+  if (!out.name && t.split(/\s+/).length <= 6) {
     for (const word of t.split(/[\s,;|\n]+/)) {
       const w = word.replace(/[^\p{L}'-]/gu, "");
-      if (w.length >= 2 && w.length <= 20 && !/\d/.test(word) && !TITLES.test(w) && !STOP.has(w.toLowerCase())) {
+      if (w.length >= 2 && w.length <= 20 && !/\d/.test(word) && !TITLES.test(w) && !STOP.has(w.toLowerCase()) && /^[A-Za-z]/.test(w) && !excludeParts.has(w.toLowerCase())) {
         out.name = w.charAt(0).toUpperCase() + w.slice(1);
         break;
       }
@@ -1227,10 +1270,28 @@ function parseIntakeText(text) {
   return out;
 }
 
-// Applies a parsed quick-fill result onto the wizard patient/intake state.
-// Returns a list of human-readable labels for what changed (for a toast).
-function applyQuickFill(text) {
-  const w = S.wizard, r = parseIntakeText(text), changed = [];
+// Tries the AI-assisted extractor first — it handles messy real-world
+// pasted text far better than a regex ever will (a name buried after a
+// clinic sign-off, weight given in lbs, a positional list with no units at
+// all). Falls back to the local parser when the server route isn't
+// configured (no ANTHROPIC_API_KEY) or the request fails for any reason,
+// so quick fill always produces a result — just a better one when AI is
+// available.
+async function quickFillParse(text) {
+  try {
+    const res = await api("POST", "/api/intake/quickfill", { text });
+    return { fields: res.fields || {}, source: "ai" };
+  } catch {
+    return { fields: parseIntakeText(text, { excludeNames: [S.user.name] }), source: "local" };
+  }
+}
+
+// Applies an already-parsed quick-fill result (from either the AI route or
+// the local parser — same shape either way) onto the wizard patient/intake
+// state. Returns a list of human-readable labels for what changed, for a
+// toast.
+function applyQuickFillFields(r) {
+  const w = S.wizard, changed = [];
   if (r.name) { w.patient.name = r.name; changed.push("name"); }
   if (r.title) { w.patient.title = r.title; }
   if (r.nationalId) { w.patient.nationalId = r.nationalId; changed.push("ID"); }
@@ -1368,7 +1429,7 @@ function wizIntakeIdentity() {
       <label>${icon("sparkle", 15)} Quick fill — paste patient details</label>
       <div style="display:flex;gap:8px">
         <input class="input" id="qf-input" placeholder="Ahmed Ali, 0501234567, 35y Male, 180cm, 95kg, diabetic...">
-        <button class="btn btn-secondary" id="qf-parse" type="button">Parse</button>
+        <button class="btn btn-secondary" id="qf-parse" type="button"><span class="spin"></span><span class="btn-label">Parse</span></button>
       </div>
       <span class="hint">Paste a quick note and the fields below fill in automatically — always confirm before continuing.</span>
     </div>
@@ -1450,13 +1511,19 @@ function wizIntakeIdentity() {
     wizIntakeIdentity();
   }));
 
-  document.getElementById("qf-parse").addEventListener("click", () => {
+  document.getElementById("qf-parse").addEventListener("click", async () => {
     commitDemo();
     const inp = document.getElementById("qf-input");
-    if (!inp.value.trim()) return;
-    const changed = applyQuickFill(inp.value);
+    const text = inp.value.trim();
+    if (!text) return;
+    const btn = document.getElementById("qf-parse");
+    btn.classList.add("loading");
+    const { fields, source } = await quickFillParse(text);
+    btn.classList.remove("loading");
+    const changed = applyQuickFillFields(fields);
     wizIntakeIdentity();
-    toast(changed.length ? `Filled in: ${changed.join(", ")}` : "Nothing recognised — please fill in manually", changed.length ? "ok" : "bad");
+    const tag = source === "ai" ? " · AI" : "";
+    toast(changed.length ? `Filled in: ${changed.join(", ")}${tag}` : "Nothing recognised — please fill in manually", changed.length ? "ok" : "bad");
   });
   document.getElementById("qf-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); document.getElementById("qf-parse").click(); }
@@ -2446,10 +2513,13 @@ function emrMedExtra(it, goals) {
 // then the clinic. Each doctor signs in their own name.
 function signatureBlock(user) {
   const u = user || {};
+  // Falls back to the signer's organisation name, never to a hardcoded
+  // practice name — a signature must never claim to be from a clinic the
+  // signer doesn't belong to.
   return [
     `${u.name || ""}${u.credentials ? `, ${u.credentials}` : ""}`.trim(),
     (u.signature || "").trim(),
-    (u.clinic || "DarDoc Healthcare").trim(),
+    (u.clinic || u.orgName || "").trim(),
   ].filter(Boolean).join("\n");
 }
 
@@ -2998,6 +3068,12 @@ function wizStepReview() {
   const createdAt = new Date().toISOString().slice(0, 10);
   const previewLabs = (w.labTests || []).filter((l) => l.on);
   const previewSupps = (w.suppList || []).filter((s) => s.on);
+  // Preview-only plans (nothing is saved yet), so they carry no server-side
+  // signedBy — without one the guide preview would fall through to a
+  // hardcoded practice name. Sign the preview the same way the server signs
+  // the real thing once published: with the doctor actually running this
+  // consultation.
+  const previewSigner = { name: S.user.name, credentials: S.user.credentials, signature: S.user.signature, clinic: S.user.clinic || S.user.orgName || "" };
   const fakePlans = w.cart.map((c) => ({
     title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
     category: c.category, medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
@@ -3005,6 +3081,7 @@ function wizStepReview() {
     diet: c.category === "glp1" ? w.diet : {}, blood_test: c.bloodTest, supplements: w.supplements,
     labTests: previewLabs, suppList: previewSupps,
     created_at: createdAt, next_followup: nextFollowup,
+    signedBy: previewSigner,
   }));
   // A hand-edited record from the Clinical step is the doctor's final word
   // on it and is published as-is; otherwise it's regenerated fresh here so
@@ -3713,9 +3790,9 @@ async function viewTeam() {
 
   const backBtn = document.getElementById("tm-back");
   if (backBtn) backBtn.addEventListener("click", () => { S.teamOrgId = null; });
-  document.getElementById("tm-add").addEventListener("click", () => teamMemberModal(null, viewTeam, orgId));
+  document.getElementById("tm-add").addEventListener("click", () => teamMemberModal(null, viewTeam, orgId, orgName));
   view().querySelectorAll("[data-tm-edit]").forEach((b) => b.addEventListener("click", () => {
-    teamMemberModal(users.find((u) => u.id === Number(b.dataset.tmEdit)), viewTeam);
+    teamMemberModal(users.find((u) => u.id === Number(b.dataset.tmEdit)), viewTeam, orgId, orgName);
   }));
   view().querySelectorAll("[data-tm-active]").forEach((b) => b.addEventListener("click", async () => {
     const u = users.find((x) => x.id === Number(b.dataset.tmActive));
@@ -3731,9 +3808,12 @@ async function viewTeam() {
 
 // Add or edit a staff account. Password is required when creating and
 // optional when editing (blank leaves the existing one alone).
-function teamMemberModal(user, done, orgId) {
+function teamMemberModal(user, done, orgId, orgName) {
   const isNew = !user;
-  const u = user || { name: "", email: "", role: "doctor", credentials: "", signature: "", clinic: "DarDoc Healthcare" };
+  // A brand-new account's Clinic field defaults to the organisation it's
+  // being added into — never a name that happens to belong to a different
+  // practice.
+  const u = user || { name: "", email: "", role: "doctor", credentials: "", signature: "", clinic: orgName || S.user.orgName || "" };
   const roles = ["doctor", "admin", "superadmin"];
   const scrim = modal(`
     <div class="modal-head"><h3>${isNew ? "Add team member" : "Edit " + esc(u.name)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
@@ -3807,7 +3887,7 @@ function viewSettings() {
       <div class="field"><label for="sg-name">Full name</label><input class="input" id="sg-name" value="${esc(u.name || "")}" required></div>
       <div class="field"><label for="sg-cred">Credentials</label><input class="input" id="sg-cred" value="${esc(u.credentials || "")}" placeholder="MBBS, MSc"></div>
       <div class="field"><label for="sg-sign">Extra signature lines</label><textarea class="input" id="sg-sign" rows="2" placeholder="DHA licence 12345">${esc(u.signature || "")}</textarea></div>
-      <div class="field"><label for="sg-clinic">Clinic</label><input class="input" id="sg-clinic" value="${esc(u.clinic || "DarDoc Healthcare")}"></div>
+      <div class="field"><label for="sg-clinic">Clinic</label><input class="input" id="sg-clinic" value="${esc(u.clinic || u.orgName || "")}"></div>
       <div class="card" style="background:var(--bg);padding:12px 14px;margin-bottom:14px">
         <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:700;margin-bottom:5px">Preview</div>
         <pre id="sg-preview" style="font-size:12.5px;color:var(--muted);white-space:pre-wrap;font-family:var(--font-body)"></pre>
