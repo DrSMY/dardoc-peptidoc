@@ -926,6 +926,8 @@ async function viewConsult() {
     suppList: [],          // chosen supplements (structured) — shown in the guide
     labsAnalyzed: false,   // whether the AI analysis has been auto-run for the current cart
     diet: {},              // shared metabolic targets — only relevant while a glp1 program is in the cart
+    clinicalSuggestion: "",
+    emrCustomized: false,  // doctor has hand-edited the EMR text — stop overwriting it from field changes
   };
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
@@ -2455,6 +2457,34 @@ function signatureBlock(user) {
 // program added this consultation — Date of Encounter / PATIENT /
 // CLINICAL SUMMARY / MEDICATION(S) PRESCRIBED / INVESTIGATIONS / PLAN /
 // Physician, matching DarDoc's standard consultation-note format.
+// Every free-text note actually written during intake: "Other, please
+// specify" write-ins, the optional notes box under a question, and the
+// closing "anything else for the doctor" box. These used to reach only a
+// summary card on the patient's dashboard page and never the EMR itself, so
+// what the patient told the practice at intake was invisible in their
+// clinical record. Chronic-illness and allergy notes are skipped here —
+// they already flow into the PATIENT block's Chronic Illnesses / Allergies
+// lines (see intakeText() / prefillFromIntake()) and would otherwise appear
+// twice.
+function intakeNotesText(intake) {
+  const qs = (S.presets && S.presets.intakeQuestions) || [];
+  const skip = new Set(["health_conditions", "allergies"]);
+  const lines = [];
+  for (const q of qs) {
+    if (skip.has(q.id)) continue;
+    if (q.type === "text") {
+      const v = String(intake[q.id] || "").trim();
+      if (v) lines.push(`${q.question} — ${v}`);
+      continue;
+    }
+    const other = String(intake[q.id + "__other"] || "").trim();
+    const notes = String(intake[q.id + "__notes"] || "").trim();
+    const bits = [other && `Other: ${other}`, notes].filter(Boolean).join(" — ");
+    if (bits) lines.push(`${q.question} — ${bits}`);
+  }
+  return lines;
+}
+
 function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays, labTests, suppList) {
   if (!items.length || !patient.name) return "";
   const m = metrics || {};
@@ -2491,6 +2521,10 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `Cancer / Tumor History: ${cancerHistory}`,
     goals.length ? `Health Goals: ${goals.join(", ")}` : null,
   ].filter((l) => l !== null).join("\n");
+
+  // ── ADDITIONAL NOTES FROM INTAKE ──
+  const notesLines = intakeNotesText(intake);
+  const notesBlock = notesLines.length ? `ADDITIONAL NOTES FROM INTAKE\n\n${notesLines.join("\n")}` : "";
 
   // ── CLINICAL SUMMARY ──
   const bmiCatLc = m.bmiCat ? m.bmiCat.charAt(0).toLowerCase() + m.bmiCat.slice(1) : "";
@@ -2586,6 +2620,7 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
   const sections = [
     `Date of Encounter: ${fmtDMY(encounterDate)}`,
     patientBlock,
+    notesBlock,
     `CLINICAL SUMMARY\n\n${paras.join("\n\n")}`,
     `${medHeader}\n\n${medLines.join("\n\n")}\n\n${counsel}`,
     `INVESTIGATIONS\n\n${investigations}`,
@@ -2593,7 +2628,11 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `PLAN\n\nFollow-up appointment scheduled for ${fmtDMY(followup)}.\n\n${planBullets.join("\n")}`,
     `Physician:\n${signatureBlock(S.user)}`,
   ].filter(Boolean);
-  return [sections.join("\n\n"), note].filter(Boolean).join("\n\n");
+  // The doctor's private consultation note — kept as its own labelled
+  // section (previously tacked on with no heading, reading like a stray
+  // paragraph) so it's unmistakably part of the record.
+  const noteBlock = String(note || "").trim() ? `CLINICAL NOTES\n\n${String(note).trim()}` : "";
+  return [sections.join("\n\n"), noteBlock].filter(Boolean).join("\n\n");
 }
 
 // Step 3 — AI-analysed lab tests + supplements. On first entry for the
@@ -2675,7 +2714,7 @@ async function loadProtocolReview(cartKey) {
         fasting: (p.tests || []).some((t) => /fasting/i.test(t)),
         required: !!p.required,
         reasons: p.reasons || [],
-        on: !!p.suggested,
+        on: false,   // nothing pre-ticked — the doctor chooses what to order
         suggested: true,
       });
       seenL.add(name);
@@ -2695,7 +2734,7 @@ async function loadProtocolReview(cartKey) {
         for (const r of s.reasons || []) if (!existing.reasons.includes(r)) existing.reasons.push(r);
         continue;
       }
-      w.suppList.push({ name: s.name, dose: s.dose || "", benefit: "", reasons: s.reasons || [], on: true, suggested: true });
+      w.suppList.push({ name: s.name, dose: s.dose || "", benefit: "", reasons: s.reasons || [], on: false, suggested: true });
     }
     for (const a of res.advice || []) {
       if (!w.protocolAdvice) w.protocolAdvice = [];
@@ -2716,9 +2755,9 @@ function wizStepLabs() {
     const res = analyzeClinicalExtras(w.cart, w.patient);
     // Merge: keep anything the doctor already added, pre-select suggestions.
     const seenL = new Set(w.labTests.map((l) => l.name));
-    res.labs.forEach((l) => { if (!seenL.has(l.name)) w.labTests.push({ ...l, on: true, suggested: true }); });
+    res.labs.forEach((l) => { if (!seenL.has(l.name)) w.labTests.push({ ...l, on: false, suggested: true }); });
     const seenS = new Set(w.suppList.map((s) => s.name));
-    res.supps.forEach((s) => { if (!seenS.has(s.name)) w.suppList.push({ ...s, on: true, suggested: true }); });
+    res.supps.forEach((s) => { if (!seenS.has(s.name)) w.suppList.push({ ...s, on: false, suggested: true }); });
     w.labsAnalyzed = cartKey;
     w.review = null;
     loadProtocolReview(cartKey);   // guidebook layer arrives and re-renders
@@ -2763,7 +2802,7 @@ function wizStepLabs() {
   view().innerHTML = `${wizHead()}
   <div class="card card-pad" style="max-width:820px">
     <div class="card-title">${icon("sparkles", 19)} AI clinical analysis — labs &amp; supplements</div>
-    <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings and the prescriber&rsquo;s protocol guidebook. Suggestions are pre-selected — untick anything you don&rsquo;t want, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
+    <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings and the prescriber&rsquo;s protocol guidebook. Nothing is pre-selected — tick anything you want to order or advise, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
 
     ${safetyBlock}
 
@@ -2870,11 +2909,16 @@ function wizStepClinical() {
     </div>
 
     <div class="card" style="background:var(--bg);margin-top:6px">
-      <div class="card-title" style="padding:16px 16px 0;justify-content:space-between">
+      <div class="card-title" style="padding:16px 16px 0;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record &amp; suggestion (EMR)</span>
-        <button class="btn btn-secondary btn-sm" id="cl-copy" type="button">${icon("copy", 15)} Copy record</button>
+        <span style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" id="cl-regen" type="button" title="Rebuild from the details above, discarding any hand edits">${icon("activity", 15)} Regenerate</button>
+          <button class="btn btn-secondary btn-sm" id="cl-copy" type="button">${icon("copy", 15)} Copy record</button>
+        </span>
       </div>
-      <pre id="cl-emr" style="margin:12px 16px 16px;padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);font-family:ui-monospace,Menlo,monospace;font-size:12.5px;white-space:pre-wrap;line-height:1.5"></pre>
+      <p class="hint" style="margin:8px 16px 0">Every section — patient details, summary, medications, investigations, supplements, plan — is generated below and free to edit directly. Your edits are kept as you fill in the fields above; use Regenerate to start over.</p>
+      <textarea id="cl-emr" rows="18" style="margin:10px 16px 16px;width:calc(100% - 32px);padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.5;resize:vertical"></textarea>
+      <p class="hint" id="cl-custom-flag" style="margin:0 16px 16px" hidden>${icon("edit", 13)} Hand-edited — further changes above won&rsquo;t overwrite your edits here.</p>
     </div>
 
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px">
@@ -2883,22 +2927,47 @@ function wizStepClinical() {
     </div>
   </div>`;
 
+  // The EMR box starts populated from every field on this page (and the two
+  // steps before it), and stays in sync with them — until the doctor types
+  // into the box directly. From that point on, field edits are collected as
+  // usual but never overwrite what the doctor wrote; only "Regenerate"
+  // (an explicit, confirmed action) discards hand edits and starts over.
+  const emrBox = document.getElementById("cl-emr");
+  const customFlag = document.getElementById("cl-custom-flag");
+  const computeAutoEmr = () => buildMultiClinicalSuggestion(
+    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
+      age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
+      chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
+      intake: w.patient.intake },
+    w.cart, wizMetrics(), w.clinicalNote, w.followupDays,
+    (w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on)
+  ) || "Add a medication and patient details to generate the clinical record.";
   const refreshEmr = () => {
     collect();
-    document.getElementById("cl-emr").textContent = buildMultiClinicalSuggestion(
-      { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
-        age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
-        chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
-        intake: w.patient.intake },
-      w.cart, wizMetrics(), w.clinicalNote, w.followupDays,
-      (w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on)
-    ) || "Add a medication and patient details to generate the clinical record.";
+    if (w.emrCustomized) return;
+    emrBox.value = computeAutoEmr();
+    w.clinicalSuggestion = emrBox.value;
   };
-  view().querySelectorAll("input, select, textarea").forEach((el) => el.addEventListener("input", refreshEmr));
+  view().querySelectorAll("input, select, textarea").forEach((el) => { if (el !== emrBox) el.addEventListener("input", refreshEmr); });
   refreshEmr();
+  if (w.emrCustomized) { emrBox.value = w.clinicalSuggestion || computeAutoEmr(); customFlag.hidden = false; }
+
+  emrBox.addEventListener("input", () => {
+    w.emrCustomized = true;
+    w.clinicalSuggestion = emrBox.value;
+    customFlag.hidden = false;
+  });
+  document.getElementById("cl-regen").addEventListener("click", () => {
+    if (w.emrCustomized && !confirm("Replace your edits with a freshly generated clinical record? This can\u2019t be undone.")) return;
+    collect();
+    w.emrCustomized = false;
+    emrBox.value = computeAutoEmr();
+    w.clinicalSuggestion = emrBox.value;
+    customFlag.hidden = true;
+  });
 
   document.getElementById("cl-copy").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(document.getElementById("cl-emr").textContent);
+    await navigator.clipboard.writeText(emrBox.value);
     toast("Clinical record copied");
   });
   document.getElementById("wz-back").addEventListener("click", () => { collect(); w.step = 2; paintWizard(); });
@@ -2937,7 +3006,10 @@ function wizStepReview() {
     labTests: previewLabs, suppList: previewSupps,
     created_at: createdAt, next_followup: nextFollowup,
   }));
-  const clinicalSuggestion = buildMultiClinicalSuggestion(
+  // A hand-edited record from the Clinical step is the doctor's final word
+  // on it and is published as-is; otherwise it's regenerated fresh here so
+  // late changes (e.g. going back and adjusting labs) are reflected.
+  const clinicalSuggestion = w.emrCustomized ? (w.clinicalSuggestion || "") : buildMultiClinicalSuggestion(
     { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
       age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
       chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
