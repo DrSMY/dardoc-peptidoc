@@ -557,6 +557,7 @@ function paintGuide(v) {
 
   ${guideMedChooser(plans, activeId)}
   <div class="g-toolbar">
+    <button class="btn btn-secondary btn-sm" id="g-copytext">${icon("copy", 15)} Copy guide text</button>
     <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Save PDF</button>
   </div>
 
@@ -579,6 +580,12 @@ function paintGuide(v) {
   wireGuidePicker(v, plans, renderWithHero, activeId);
   v.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
   v.querySelector("#g-print").addEventListener("click", () => window.print());
+  v.querySelector("#g-copytext").addEventListener("click", async () => {
+    const currentId = S.guidePlanId && plans.some((p) => p.id === S.guidePlanId) ? S.guidePlanId : activeId;
+    const plan = plans.find((p) => p.id === currentId) || plans[0];
+    await navigator.clipboard.writeText(buildGuideText(plan, S.me.patient, S.me.doctorName));
+    toast("Guide text copied");
+  });
 }
 
 // ── log (injection/dose + check-in) ──────────────────────────────

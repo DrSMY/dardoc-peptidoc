@@ -281,6 +281,145 @@ function buildGuide(plan, patient, doctorName, opts) {
   </div>`;
 }
 
+// ── plain-text guide (for the "Copy guide text" button) ───────────
+// A comprehensive plain-text mirror of buildGuide()/buildComboGuide() —
+// every section the patient sees, in the same order, as paste-anywhere
+// text (WhatsApp, email, another EMR, a printed handout) rather than a
+// rendered page. `**bold**` markers are stripped rather than converted,
+// since plain text has no bold.
+function guideProseText(text) {
+  return String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").trim();
+}
+
+const GT_RULE = "─".repeat(48);
+
+function guideFooterText(plan, patient, doctorName) {
+  const signer = plan.signedBy || {};
+  const signerName = signer.name || doctorName || "your doctor";
+  const lines = [GT_RULE, `Prescribed and signed by ${signerName}${signer.credentials ? `, ${signer.credentials}` : ""}`];
+  if (signer.signature) lines.push(signer.signature);
+  if (signer.clinic) lines.push(signer.clinic);
+  if (plan.revisedBy) {
+    lines.push(`Revised by ${plan.revisedBy.name}${plan.revisedBy.credentials ? `, ${plan.revisedBy.credentials}` : ""}${plan.updated_at ? ` on ${fmtDate(plan.updated_at)}` : ""}`);
+  }
+  lines.push("", `This guide was prepared personally for ${patient.name} and is not general medical advice.`,
+    "If you feel seriously unwell, seek urgent medical care immediately.");
+  return lines.join("\n");
+}
+
+// opts.skipFooter — buildComboGuideText appends one shared footer after
+// every program instead of one per medication.
+function buildGuideText(plan, patient, doctorName, opts) {
+  const signer = plan.signedBy || {};
+  const signerName = signer.name || doctorName || "your doctor";
+  const diet = plan.diet || {};
+  const phases = plan.phases || [];
+  const routeLabel = {
+    injection: "Subcutaneous injection", oral: "By mouth (oral)",
+    nasal: "Nasal spray", topical: "Applied to skin (topical)",
+  }[plan.route] || plan.route;
+
+  const lines = [];
+  const push = (s) => lines.push(s === undefined ? "" : s);
+  const heading = (s) => { push(); push(s.toUpperCase()); push(GT_RULE); };
+
+  push("PERSONAL TREATMENT GUIDE");
+  push(`Issued ${fmtDate(plan.created_at)}`);
+  push();
+  push(`Prepared for: ${patient.title ? patient.title + " " : ""}${patient.name}`);
+  push(`By: ${signerName}${signer.credentials ? `, ${signer.credentials}` : ""}`);
+
+  heading("Your program");
+  push(`Medication: ${plan.medication}`);
+  if (plan.dose) push(`Starting dose: ${plan.dose}`);
+  push(`How to take it: ${routeLabel}`);
+  push(`Frequency: ${plan.frequency}`);
+  if (plan.quantity > 1) push(`Quantity dispensed: ${plan.quantity}`);
+
+  if (phases.length) {
+    heading("Dose schedule");
+    phases.forEach((ph, i) => push(
+      `${i + 1}. ${ph.label || `Phase ${i + 1}`}${ph.weeks ? ` (${ph.weeks} week${ph.weeks == 1 ? "" : "s"})` : ""} — ${ph.dose || "—"}${ph.note ? ` — ${ph.note}` : ""}`
+    ));
+  }
+
+  if (plan.instructions) { heading("Instructions from your doctor"); push(guideProseText(plan.instructions)); }
+
+  const dietItems = [];
+  if (diet.calories) dietItems.push(`Daily calorie target: ${diet.calories} kcal`);
+  if (diet.proteinMin) dietItems.push(`Daily protein: ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g`);
+  if (diet.water) dietItems.push(`Water: ${diet.water}`);
+  if (dietItems.length) { heading("Nutrition targets"); dietItems.forEach(push); }
+
+  const suppItems = Array.isArray(plan.suppList) ? plan.suppList : [];
+  if (suppItems.length) {
+    heading("Recommended supplements");
+    suppItems.forEach((s) => push(`• ${s.name}${s.dose ? ` — ${s.dose}` : ""}${s.benefit ? ` (${s.benefit})` : ""}`));
+  } else if (plan.supplements) {
+    heading("Supplements"); push(plan.supplements);
+  }
+
+  if (plan.warnings) { heading("When to contact your doctor"); push(guideProseText(plan.warnings)); }
+
+  const labList = Array.isArray(plan.labTests) ? plan.labTests : [];
+  if (labList.length) {
+    heading("Lab tests to complete");
+    labList.forEach((l) => {
+      push(`• ${l.name} — ${l.required ? "REQUIRED" : "recommended"}${l.fasting ? ", fasting" : ""}`);
+      if (l.detail) push(`  ${l.detail}`);
+      if (l.link) push(`  Book: ${l.link}`);
+    });
+  } else if (plan.blood_test && plan.blood_test !== "none") {
+    heading("Blood test");
+    push(`Blood test ${plan.blood_test === "required" ? "REQUIRED" : "recommended"}. Please complete as advised by your doctor.`);
+  }
+
+  if (typeof guideContentFor === "function") {
+    const content = guideContentFor(plan.medication, plan.route);
+    if (content) {
+      heading("Your complete medication guide");
+      content.sections.forEach((s) => { push(); push(s.head); push(guideProseText(s.body)); });
+      if (plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length) {
+        push(); push(PEPTIDE_GENERAL_GUIDE[0].head); push(guideProseText(PEPTIDE_GENERAL_GUIDE[0].body));
+      }
+    }
+  }
+
+  heading("Follow-up");
+  push(`Your next follow-up is due around ${fmtDate(plan.next_followup)}.`);
+  push(`Log your doses and check in regularly in the DoCare portal so ${signerName} can track your progress.`);
+
+  if (!(opts && opts.skipFooter)) { push(); push(guideFooterText(plan, patient, doctorName)); }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// Plain-text mirror of buildComboGuide() — the primary program's full guide,
+// every other active program summarised the same way the HTML does, and one
+// shared footer at the end.
+function buildComboGuideText(plans, patient, doctorName) {
+  if (!plans || !plans.length) return "";
+  if (plans.length === 1) return buildGuideText(plans[0], patient, doctorName);
+  const primary = plans.find((p) => p.category === "glp1") || plans[0];
+  const others = plans.filter((p) => p !== primary);
+  const mainText = buildGuideText(primary, patient, doctorName, { skipFooter: true });
+  if (!others.length) return [mainText, guideFooterText(primary, patient, doctorName)].join("\n\n");
+
+  const otherBlocks = others.map((plan) => {
+    const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
+    const how = content && content.sections.find((s) => /^HOW TO /i.test(s.head));
+    const works = content && content.sections.find((s) => /WORKS|PROTOCOL AT A GLANCE/i.test(s.head));
+    const block = [`${plan.medication}${plan.dose ? ` — ${plan.dose}` : ""}`,
+      `${plan.frequency}${plan.quantity > 1 ? ` × ${plan.quantity}` : ""}`];
+    if (works) block.push("What to expect: " + guideProseText(works.body));
+    if (how) block.push("How to take it: " + guideProseText(how.body));
+    if (plan.instructions) block.push("Instructions from your doctor: " + guideProseText(plan.instructions));
+    return block.join("\n");
+  }).join("\n\n");
+
+  return [mainText, `ALSO ON YOUR PROGRAM\n${GT_RULE}\n\n${otherBlocks}`, guideFooterText(primary, patient, doctorName)].join("\n\n");
+}
+
 // Guide styles are injected once wherever the guide is shown.
 const GUIDE_CSS = `
 .guide { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-md); }

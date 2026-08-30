@@ -605,7 +605,7 @@ async function viewPatient(id) {
           <div class="card card-pad">
             <div class="card-title" style="justify-content:space-between">
               <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
-              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy</button>
+              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy record</button>
             </div>
             <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(activePlan.clinical_suggestion)}</pre>
           </div>` : ""}
@@ -708,7 +708,8 @@ async function viewPatient(id) {
       const activeId = S.guidePlanId && guidePlans.some((pl) => pl.id === S.guidePlanId) ? S.guidePlanId : (primaryPl && primaryPl.id);
       const renderOne = (pl) => buildGuide(pl, p, S.user.name);
       box.innerHTML = guidePlans.length ? `
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
           <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send via WhatsApp</button>
         </div>
@@ -718,6 +719,16 @@ async function viewPatient(id) {
       if (guidePlans.length) {
         wireGuidePicker(box, guidePlans, renderOne, activeId);
         box.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
+        document.getElementById("btn-copytext").addEventListener("click", async () => {
+          // Whichever medication's guide is currently on screen — the picker
+          // keeps S.guidePlanId in sync, so re-reading it here (rather than
+          // the activeId captured at render time) copies what's actually
+          // displayed even after switching chips.
+          const currentId = S.guidePlanId && guidePlans.some((pl) => pl.id === S.guidePlanId) ? S.guidePlanId : activeId;
+          const pl = guidePlans.find((x) => x.id === currentId) || guidePlans[0];
+          await navigator.clipboard.writeText(buildGuideText(pl, p, S.user.name));
+          toast("Guide text copied");
+        });
         document.getElementById("btn-print").addEventListener("click", () => window.print());
         document.getElementById("btn-wa").addEventListener("click", () => {
           const link = `${location.origin}/portal`;
@@ -3094,11 +3105,13 @@ function wizStepReview() {
     w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs, previewSupps
   );
   w.clinicalSuggestion = clinicalSuggestion;
+  const guideText = buildComboGuideText(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name);
   view().innerHTML = `${wizHead()}
   <div class="two-col" style="grid-template-columns:1fr 340px">
     <div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
         <div class="card-title" style="margin:0">${icon("file", 19)} Guide preview — what the patient sees</div>
+        <button class="btn btn-secondary btn-sm" id="rv-guide-copy" type="button">${icon("copy", 15)} Copy guide text</button>
       </div>
       <div id="guide-preview" style="display:flex;flex-direction:column;gap:18px">
         ${buildComboGuide(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name)}
@@ -3121,13 +3134,14 @@ function wizStepReview() {
       ${clinicalSuggestion ? `<div class="card card-pad">
         <div class="card-title" style="justify-content:space-between">
           <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record (EMR)</span>
-          <button class="btn btn-secondary btn-sm" id="rv-copy" type="button">${icon("copy", 15)} Copy</button>
+          <button class="btn btn-secondary btn-sm" id="rv-copy" type="button">${icon("copy", 15)} Copy record</button>
         </div>
         <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(clinicalSuggestion)}</pre>
       </div>` : ""}
     </div>
   </div>`;
   if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
+  document.getElementById("rv-guide-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
 
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 3; paintWizard(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
