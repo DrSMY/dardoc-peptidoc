@@ -365,6 +365,53 @@ function initials(name) {
   return String(name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 }
 
+// ── unit conversion (metric is always what's stored — these only help entry) ──
+function cmToFtIn(cm) {
+  const totalIn = Number(cm) / 2.54;
+  if (!isFinite(totalIn) || totalIn <= 0) return null;
+  let ft = Math.floor(totalIn / 12);
+  let inch = Math.round((totalIn - ft * 12) * 10) / 10;
+  if (inch >= 12) { ft += 1; inch -= 12; }
+  return { ft, inch };
+}
+function ftInToCm(ft, inch) {
+  const total = (Number(ft) || 0) * 12 + (Number(inch) || 0);
+  return total > 0 ? Math.round(total * 2.54 * 10) / 10 : null;
+}
+function kgToLbs(kg) {
+  const n = Number(kg);
+  return isFinite(n) && n > 0 ? Math.round(n * 2.20462 * 10) / 10 : null;
+}
+function lbsToKg(lbs) {
+  const n = Number(lbs);
+  return isFinite(n) && n > 0 ? Math.round((n / 2.20462) * 10) / 10 : null;
+}
+
+// Wires a metric input (cm or kg) to one or two imperial helper inputs so a
+// doctor or patient can type in whichever unit they think in — the metric
+// field stays the one value that's actually collected/stored. `toImperial`
+// fills the helper field(s) from the metric value; `toMetric` computes the
+// metric value from the helper field(s). Typing in either direction updates
+// the other; the metric field's own existing listeners (BMI live-calc, etc.)
+// still fire normally since we dispatch a real "input" event on it.
+function wireUnitHelper(metricEl, helperEls, toImperial, toMetric) {
+  if (!metricEl || helperEls.some((el) => !el)) return;
+  const fillHelpers = () => {
+    const vals = toImperial(metricEl.value);
+    if (!vals) return;
+    helperEls.forEach((el, i) => { el.value = vals[i] ?? ""; });
+  };
+  fillHelpers();
+  metricEl.addEventListener("input", fillHelpers);
+  const fillMetric = () => {
+    const v = toMetric(...helperEls.map((el) => el.value));
+    if (v == null) return;
+    metricEl.value = v;
+    metricEl.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  helperEls.forEach((el) => el.addEventListener("input", fillMetric));
+}
+
 function fmtDate(iso, withTime = false) {
   if (!iso) return "—";
   const d = new Date(iso.includes("T") || iso.includes(" ") ? iso.replace(" ", "T") + (iso.endsWith("Z") ? "" : "Z") : iso + "T12:00:00");

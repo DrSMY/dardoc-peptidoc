@@ -1460,8 +1460,25 @@ function wizIntakeIdentity() {
     <div class="form-grid">
       <div class="field"><label for="wp-age">Age <span class="req">*</span></label><input class="input" id="wp-age" type="number" inputmode="numeric" min="12" max="110" value="${esc(w.patient.age)}"></div>
       <div class="field"><label>Gender <span class="req">*</span></label><div class="chip-row">${genderChips.map((g) => `<button type="button" class="chip ${w.patient.gender === g ? "on" : ""}" data-demochip="gender" data-v="${g}">${g}</button>`).join("")}</div></div>
-      <div class="field"><label for="wp-height">Height (cm) <span class="req">*</span></label><input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}"></div>
-      <div class="field"><label for="wp-weight">Weight (kg) <span class="req">*</span></label><input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}"></div>
+      <div class="field">
+        <label for="wp-height">Height (cm) <span class="req">*</span></label>
+        <input class="input" id="wp-height" type="number" inputmode="decimal" min="100" max="250" value="${esc(w.patient.heightCm)}">
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <span class="hint">or</span>
+          <input class="input" id="wp-height-ft" type="number" inputmode="numeric" min="3" max="8" placeholder="ft" style="width:64px" aria-label="Height, feet">
+          <input class="input" id="wp-height-in" type="number" inputmode="decimal" min="0" max="11.9" step="0.1" placeholder="in" style="width:64px" aria-label="Height, inches">
+          <span class="hint">ft / in</span>
+        </div>
+      </div>
+      <div class="field">
+        <label for="wp-weight">Weight (kg) <span class="req">*</span></label>
+        <input class="input" id="wp-weight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.weightKg)}">
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <span class="hint">or</span>
+          <input class="input" id="wp-weight-lbs" type="number" inputmode="decimal" min="55" max="770" step="0.1" placeholder="lbs" style="width:80px" aria-label="Weight, pounds">
+          <span class="hint">lbs</span>
+        </div>
+      </div>
       <div class="field full"><label>Activity level</label><div class="chip-row">${Object.keys(S.presets.activityLevels || {}).map((a) => `<button type="button" class="chip ${w.patient.activityLevel === a ? "on" : ""}" data-demochip="activityLevel" data-v="${a}">${a}</button>`).join("")}</div></div>
       <div class="field full"><label>Body shape</label><div class="chip-row">${(S.presets.bodyShapes || []).map((b) => `<button type="button" class="chip ${w.patient.intake.body_shape === b ? "on" : ""}" data-demochip="intake.body_shape" data-v="${b}">${b}</button>`).join("")}</div></div>
     </div>
@@ -1477,6 +1494,18 @@ function wizIntakeIdentity() {
     document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
   };
   Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
+
+  // Height/weight can be typed in whichever unit the doctor has in front of
+  // them (a US-format referral in lbs, a patient who knows their height in
+  // feet) — the cm/kg fields above stay the values actually collected.
+  wireUnitHelper(document.getElementById("wp-height"),
+    [document.getElementById("wp-height-ft"), document.getElementById("wp-height-in")],
+    (cm) => { const r = cmToFtIn(cm); return r && [r.ft, r.inch]; },
+    (ft, inch) => ftInToCm(ft, inch));
+  wireUnitHelper(document.getElementById("wp-weight"),
+    [document.getElementById("wp-weight-lbs")],
+    (kg) => { const lbs = kgToLbs(kg); return lbs != null && [lbs]; },
+    (lbs) => lbsToKg(lbs));
 
   // Look up the mobile number against existing records as the doctor types,
   // so a returning patient's history is one click away instead of requiring
@@ -3093,6 +3122,10 @@ function wizStepReview() {
     labTests: previewLabs, suppList: previewSupps,
     created_at: createdAt, next_followup: nextFollowup,
     signedBy: previewSigner,
+    // Same reference data the server attaches once published (see
+    // doseOptionsFor in src/api.js) — the guidebook's approved dose ladder,
+    // not a commitment to where the doctor plans to titrate this patient.
+    doseOptions: c.category === "glp1" && c.template ? (c.template.config.doses || []) : [],
   }));
   // A hand-edited record from the Clinical step is the doctor's final word
   // on it and is published as-is; otherwise it's regenerated fresh here so

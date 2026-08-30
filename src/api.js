@@ -158,6 +158,16 @@ function withSender(messages, fallbackDoctorId) {
     : m));
 }
 
+// The full approved dose ladder for a GLP-1 medication (e.g. Mounjaro's
+// 2.5mg → 15mg) — reference data, not a commitment to where this patient's
+// dose is headed. The guide shows this list plus the patient's current
+// dose, rather than a week-by-week schedule the doctor might revise.
+function doseOptionsFor(category, medication) {
+  if (category !== "glp1") return [];
+  const cfg = presets.GLP1_MEDICATIONS[medication];
+  return (cfg && cfg.doses) || [];
+}
+
 function parsePlan(row) {
   if (!row) return null;
   const safe = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
@@ -169,6 +179,7 @@ function parsePlan(row) {
     diet: JSON.parse(row.diet_json || "{}"),
     labTests: safe(row.lab_tests_json || "[]", []),
     suppList: safe(row.supplements_json || "[]", []),
+    doseOptions: doseOptionsFor(row.category, row.medication),
     phases_json: undefined,
     diet_json: undefined,
     lab_tests_json: undefined,

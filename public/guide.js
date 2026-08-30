@@ -140,13 +140,27 @@ function buildGuide(plan, patient, doctorName, opts) {
 
   const routeIco = routeIcon(plan.route);
 
-  const scheduleRows = phases.map((ph, i) => `
-    <tr>
-      <td><span class="g-step">${i + 1}</span></td>
-      <td><strong>${esc(ph.label || `Phase ${i + 1}`)}</strong>${ph.weeks ? `<div class="g-sub">${esc(String(ph.weeks))} week${ph.weeks == 1 ? "" : "s"}</div>` : ""}</td>
-      <td>${esc(ph.dose || "—")}</td>
-      <td>${esc(ph.note || "")}</td>
-    </tr>`).join("");
+  // Deliberately not a week-by-week schedule — a doctor can revise a future
+  // phase before it's ever reached, so the guide states only the dose the
+  // patient is on right now and how long it's valid for. `phases[0]` is
+  // that current phase (the wizard only ever auto-fills one phase at a
+  // time — see suggestTitration — and any phase beyond it is a plan, not
+  // a promise).
+  const currentPhase = phases[0] || null;
+  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  const doseNoteLines = [];
+  if (currentPhase && currentPhase.weeks) {
+    doseNoteLines.push(`This is your current dose for ${esc(String(currentPhase.weeks))} week${currentPhase.weeks == 1 ? "" : "s"}.`);
+  }
+  if (doseOptions.length) {
+    doseNoteLines.push(`Approved doses for ${esc(plan.medication)}: ${doseOptions.map(esc).join(" → ")}. Your current dose is <strong>${esc(plan.dose || "—")}</strong>.`);
+  }
+  if (doseNoteLines.length) doseNoteLines.push("Your doctor may adjust this at your next review.");
+  const doseNoteHtml = doseNoteLines.length ? `
+    <div class="g-callout g-teal">
+      ${icon("info", 18)}
+      <div>${doseNoteLines.join("<br>")}</div>
+    </div>` : "";
 
   const dietItems = [];
   if (diet.calories) dietItems.push({ ico: "flame", label: "Daily calorie target", val: `${diet.calories} kcal` });
@@ -222,23 +236,13 @@ function buildGuide(plan, patient, doctorName, opts) {
       })()}
       <div class="g-facts">
         <div class="g-fact"><div class="g-fact-lbl">Medication</div><div class="g-fact-val">${esc(plan.medication)}</div></div>
-        ${plan.dose ? `<div class="g-fact"><div class="g-fact-lbl">Starting dose</div><div class="g-fact-val">${esc(plan.dose)}</div></div>` : ""}
+        ${plan.dose ? `<div class="g-fact"><div class="g-fact-lbl">Current dose</div><div class="g-fact-val">${esc(plan.dose)}</div></div>` : ""}
         <div class="g-fact"><div class="g-fact-lbl">How to take it</div><div class="g-fact-val">${esc(routeLabel)}</div></div>
         <div class="g-fact"><div class="g-fact-lbl">Frequency</div><div class="g-fact-val">${esc(plan.frequency)}</div></div>
         ${plan.quantity && plan.quantity > 1 ? `<div class="g-fact"><div class="g-fact-lbl">Quantity dispensed</div><div class="g-fact-val">${esc(plan.quantity)}</div></div>` : ""}
       </div>
+      ${doseNoteHtml}
     </section>
-
-    ${phases.length ? `
-    <section class="g-sec">
-      <h3>${icon("layers", 18)} Dose schedule</h3>
-      <div class="table-scroll">
-        <table class="g-table">
-          <thead><tr><th></th><th>Phase</th><th>Dose</th><th>Notes</th></tr></thead>
-          <tbody>${scheduleRows}</tbody>
-        </table>
-      </div>
-    </section>` : ""}
 
     <section class="g-sec">
       <div class="g-acc-group">
@@ -275,8 +279,7 @@ function buildGuide(plan, patient, doctorName, opts) {
         <br>${esc(signer.clinic || "")}
         ${revisedLine ? `<div style="margin-top:6px">${revisedLine}</div>` : ""}
       </div>
-      This guide was prepared personally for ${esc(patient.name)} and is not general medical advice.
-      If you feel seriously unwell, seek urgent medical care immediately.
+      You can message ${esc(signerName)} anytime through your patient portal. If you need to speak to a doctor urgently, please contact our customer care team directly.
     </footer>`}
   </div>`;
 }
@@ -302,8 +305,7 @@ function guideFooterText(plan, patient, doctorName) {
   if (plan.revisedBy) {
     lines.push(`Revised by ${plan.revisedBy.name}${plan.revisedBy.credentials ? `, ${plan.revisedBy.credentials}` : ""}${plan.updated_at ? ` on ${fmtDate(plan.updated_at)}` : ""}`);
   }
-  lines.push("", `This guide was prepared personally for ${patient.name} and is not general medical advice.`,
-    "If you feel seriously unwell, seek urgent medical care immediately.");
+  lines.push("", `You can message ${signerName} anytime through your patient portal. If you need to speak to a doctor urgently, please contact our customer care team directly.`);
   return lines.join("\n");
 }
 
@@ -331,17 +333,23 @@ function buildGuideText(plan, patient, doctorName, opts) {
 
   heading("Your program");
   push(`Medication: ${plan.medication}`);
-  if (plan.dose) push(`Starting dose: ${plan.dose}`);
+  if (plan.dose) push(`Current dose: ${plan.dose}`);
   push(`How to take it: ${routeLabel}`);
   push(`Frequency: ${plan.frequency}`);
   if (plan.quantity > 1) push(`Quantity dispensed: ${plan.quantity}`);
 
-  if (phases.length) {
-    heading("Dose schedule");
-    phases.forEach((ph, i) => push(
-      `${i + 1}. ${ph.label || `Phase ${i + 1}`}${ph.weeks ? ` (${ph.weeks} week${ph.weeks == 1 ? "" : "s"})` : ""} — ${ph.dose || "—"}${ph.note ? ` — ${ph.note}` : ""}`
-    ));
+  // Not a week-by-week schedule — see buildGuide()'s matching note. Just the
+  // dose the patient is on right now, how long it's valid for, and (for a
+  // GLP-1) the full approved dose ladder for context.
+  const currentPhase = phases[0] || null;
+  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  if (currentPhase && currentPhase.weeks) {
+    push(`This is your current dose for ${currentPhase.weeks} week${currentPhase.weeks == 1 ? "" : "s"}.`);
   }
+  if (doseOptions.length) {
+    push(`Approved doses for ${plan.medication}: ${doseOptions.join(" → ")}. Your current dose is ${plan.dose || "—"}.`);
+  }
+  if ((currentPhase && currentPhase.weeks) || doseOptions.length) push("Your doctor may adjust this at your next review.");
 
   if (plan.instructions) { heading("Instructions from your doctor"); push(guideProseText(plan.instructions)); }
 

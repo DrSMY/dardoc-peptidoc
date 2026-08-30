@@ -811,13 +811,25 @@ function paintLogCheckin(body, v) {
     <div class="ci-head"><span class="ci-ico">${icon("message", 18)}</span><div class="lp-title"><b>How are you doing today?</b><small>Helps your doctor understand how you're feeling</small></div></div>
     <div class="form-grid">
       <div class="field"><label for="ci-date">Date</label><input class="input" id="ci-date" type="date" value="${today}" max="${today}"></div>
-      <div class="field"><label for="ci-wt">Weight (kg) — optional</label><input class="input" id="ci-wt" type="number" step="0.1" min="25" max="350" inputmode="decimal" placeholder="e.g. 82.5"></div>
+      <div class="field">
+        <label for="ci-wt">Weight (kg) — optional</label>
+        <input class="input" id="ci-wt" type="number" step="0.1" min="25" max="350" inputmode="decimal" placeholder="e.g. 82.5">
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <span class="hint">or</span>
+          <input class="input" id="ci-wt-lbs" type="number" step="0.1" min="55" max="770" inputmode="decimal" placeholder="lbs" style="width:80px" aria-label="Weight, pounds">
+          <span class="hint">lbs</span>
+        </div>
+      </div>
     </div>
     <div class="sym-set">${syms.map(symBlockHTML).join("")}</div>
     <div class="field"><label for="ci-notes">Anything else? (optional)</label><textarea class="input" id="ci-notes" rows="2" placeholder="Describe how you're feeling…"></textarea></div>
     <button class="btn btn-block ci-save" type="submit"><span class="spin"></span><span class="btn-label">${icon("check", 17)} Save check-in</span></button>
   </form>
   ${checkinSummary()}`;
+
+  wireUnitHelper(body.querySelector("#ci-wt"), [body.querySelector("#ci-wt-lbs")],
+    (kg) => { const lbs = kgToLbs(kg); return lbs != null && [lbs]; },
+    (lbs) => lbsToKg(lbs));
 
   const selected = {};
   body.querySelectorAll("[data-sym]").forEach((row) => {
