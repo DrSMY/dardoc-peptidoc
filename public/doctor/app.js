@@ -3101,6 +3101,16 @@ function wizStepClinical() {
   }
 }
 
+// Client-side mirror of src/api.js's guideInfoFor() — same source records
+// via /api/presets, for the guide preview before anything is published (and
+// so has no server-parsed plan to pull guideInfo from yet).
+function previewGuideInfo(category, medication) {
+  const info = category === "glp1" ? (S.presets.glp1Info || {})[medication] : (S.presets.peptideInfo || {})[medication];
+  if (!info) return null;
+  const redFlags = category === "glp1" ? ((S.presets.glp1Eligibility || {}).redFlags || []) : (info.redFlags || []);
+  return { howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags };
+}
+
 function wizStepReview() {
   const w = S.wizard;
   injectGuideCss();
@@ -3126,6 +3136,7 @@ function wizStepReview() {
     // doseOptionsFor in src/api.js) — the guidebook's approved dose ladder,
     // not a commitment to where the doctor plans to titrate this patient.
     doseOptions: c.category === "glp1" && c.template ? (c.template.config.doses || []) : [],
+    guideInfo: previewGuideInfo(c.category, c.medication),
   }));
   // A hand-edited record from the Clinical step is the doctor's final word
   // on it and is published as-is; otherwise it's regenerated fresh here so

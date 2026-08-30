@@ -168,6 +168,19 @@ function doseOptionsFor(category, medication) {
   return (cfg && cfg.doses) || [];
 }
 
+// The short reference facts the patient-facing text guide draws on — how
+// the medication works, its common side effects, and what should prompt an
+// urgent call rather than a routine message. Sourced from the same
+// presets.js records the rest of the app already treats as authoritative
+// (GLP1_INFO/PEPTIDE_INFO's one-line summaries, and GLP1_ELIGIBILITY's
+// shared red-flag list — peptides carry their own per-product list).
+function guideInfoFor(category, medication) {
+  const info = category === "glp1" ? presets.GLP1_INFO[medication] : presets.PEPTIDE_INFO[medication];
+  if (!info) return null;
+  const redFlags = category === "glp1" ? presets.GLP1_ELIGIBILITY.redFlags : (info.redFlags || []);
+  return { howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags };
+}
+
 function parsePlan(row) {
   if (!row) return null;
   const safe = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
@@ -180,6 +193,7 @@ function parsePlan(row) {
     labTests: safe(row.lab_tests_json || "[]", []),
     suppList: safe(row.supplements_json || "[]", []),
     doseOptions: doseOptionsFor(row.category, row.medication),
+    guideInfo: guideInfoFor(row.category, row.medication),
     phases_json: undefined,
     diet_json: undefined,
     lab_tests_json: undefined,

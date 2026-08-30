@@ -285,147 +285,233 @@ function buildGuide(plan, patient, doctorName, opts) {
 }
 
 // ── plain-text guide (for the "Copy guide text" button) ───────────
-// A comprehensive plain-text mirror of buildGuide()/buildComboGuide() —
-// every section the patient sees, in the same order, as paste-anywhere
-// text (WhatsApp, email, another EMR, a printed handout) rather than a
-// rendered page. `**bold**` markers are stripped rather than converted,
-// since plain text has no bold.
+// A warm, first-person message from the doctor, written to be pasted
+// straight into WhatsApp — not a clinical document. Bold via WhatsApp's own
+// *single-asterisk* syntax, one emoji per section for quick visual scanning,
+// blank-line segregation between sections instead of ASCII rule lines
+// (which just read as clutter in a chat bubble).
 function guideProseText(text) {
   return String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").trim();
 }
 
-const GT_RULE = "─".repeat(48);
-
-function guideFooterText(plan, patient, doctorName) {
-  const signer = plan.signedBy || {};
-  const signerName = signer.name || doctorName || "your doctor";
-  const lines = [GT_RULE, `Prescribed and signed by ${signerName}${signer.credentials ? `, ${signer.credentials}` : ""}`];
-  if (signer.signature) lines.push(signer.signature);
-  if (signer.clinic) lines.push(signer.clinic);
-  if (plan.revisedBy) {
-    lines.push(`Revised by ${plan.revisedBy.name}${plan.revisedBy.credentials ? `, ${plan.revisedBy.credentials}` : ""}${plan.updated_at ? ` on ${fmtDate(plan.updated_at)}` : ""}`);
-  }
-  lines.push("", `You can message ${signerName} anytime through your patient portal. If you need to speak to a doctor urgently, please contact our customer care team directly.`);
-  return lines.join("\n");
+// "Severe abdominal pain (possible pancreatitis) — stop medication and seek
+// urgent care" → "Severe abdominal pain". Strips the "— what to do about
+// it" tail and any "(parenthetical)" aside, so a list of these reads as a
+// flowing comma list of symptoms rather than a wall of clinical caveats.
+function leadClause(s) {
+  return String(s || "").split(/\s+—\s+/)[0].replace(/\s*\([^)]*\)/g, "").trim();
+}
+function lcFirst(s) { return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+// "daily" → "once daily", "weekly" → "once weekly" — everything else (a
+// custom frequency the doctor typed) is trusted as already-readable.
+function guideFreqPhrase(f) {
+  const t = String(f || "").trim().toLowerCase();
+  if (t === "daily") return "once daily";
+  if (t === "weekly") return "once weekly";
+  return t;
+}
+function commaList(items, conj) {
+  const a = items.filter(Boolean);
+  if (!a.length) return "";
+  if (a.length === 1) return a[0];
+  return `${a.slice(0, -1).join(", ")}, ${conj} ${a[a.length - 1]}`;
 }
 
-// opts.skipFooter — buildComboGuideText appends one shared footer after
-// every program instead of one per medication.
+// "2026-09-24" → "between 21 and 27 September 2026" — the app schedules a
+// single follow-up date, but a patient books their own appointment around
+// it, so the message gives a window rather than implying an exact day.
+function followUpWindowText(nextFollowup) {
+  if (!nextFollowup) return "at your next scheduled visit";
+  const base = new Date(String(nextFollowup).includes("T") ? nextFollowup : nextFollowup + "T12:00:00");
+  if (isNaN(base)) return "at your next scheduled visit";
+  const start = new Date(base.getTime() - 3 * 864e5);
+  const end = new Date(base.getTime() + 3 * 864e5);
+  const full = { day: "numeric", month: "long", year: "numeric" };
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  const startStr = start.toLocaleDateString("en-GB", sameMonth ? { day: "numeric" } : full);
+  const endStr = end.toLocaleDateString("en-GB", full);
+  return `between ${startStr} and ${endStr}`;
+}
+
+// Generic, category-level coaching — not tied to one specific medication,
+// so it's the same for every GLP-1 (or every peptide) rather than living in
+// the per-product content library.
+const GLP1_MESSAGE_REASONS = ["persistent nausea or vomiting", "significant constipation or diarrhoea",
+  "difficulty maintaining food or fluids", "excessive appetite suppression", "weakness or dizziness", "any medication concerns"];
+const PEPTIDE_MESSAGE_REASONS = ["side effects that aren't settling", "an injection-site reaction",
+  "questions about your protocol or supply", "anything that doesn't feel right"];
+
+// opts.skipHeader / .skipFollowUp / .skipFooter — buildComboGuideText uses
+// these to build one combined message instead of duplicating the welcome
+// and sign-off per medication. opts.extraSection injects an "ALSO ON YOUR
+// PROGRAM" block right before the follow-up section.
 function buildGuideText(plan, patient, doctorName, opts) {
+  const o = opts || {};
   const signer = plan.signedBy || {};
   const signerName = signer.name || doctorName || "your doctor";
+  const isGlp1 = plan.category === "glp1";
   const diet = plan.diet || {};
-  const phases = plan.phases || [];
+  const info = plan.guideInfo || {};
+  const currentPhase = (plan.phases || [])[0] || null;
+  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
   const routeLabel = {
-    injection: "Subcutaneous injection", oral: "By mouth (oral)",
-    nasal: "Nasal spray", topical: "Applied to skin (topical)",
+    injection: "Subcutaneous injection", oral: "Oral tablet",
+    nasal: "Nasal spray", topical: "Topical application",
   }[plan.route] || plan.route;
 
   const lines = [];
   const push = (s) => lines.push(s === undefined ? "" : s);
-  const heading = (s) => { push(); push(s.toUpperCase()); push(GT_RULE); };
+  const section = (emoji, title) => { push(); push(`${emoji} *${title}*`); };
 
-  push("PERSONAL TREATMENT GUIDE");
-  push(`Issued ${fmtDate(plan.created_at)}`);
-  push();
-  push(`Prepared for: ${patient.title ? patient.title + " " : ""}${patient.name}`);
-  push(`By: ${signerName}${signer.credentials ? `, ${signer.credentials}` : ""}`);
+  if (!o.skipHeader) {
+    push("🩺 *PERSONAL TREATMENT GUIDE*");
+    section("👋", "WELCOME TO YOUR TREATMENT JOURNEY");
+    push(`Dear ${patient.title ? patient.title + " " : ""}${firstName},`);
+    push();
+    push("Welcome to your treatment journey.");
+    push(isGlp1
+      ? "Our goal is sustainable weight loss while protecting your health, preserving muscle, improving nutrition, and building habits that can continue long term."
+      : "Our goal is to support your recovery and long-term health through this treatment, guided by careful monitoring throughout.");
+    push("The DoCare app will be your main point of connection with us for messages, follow-ups, refills, progress tracking, and personalised support.");
+    push();
+    push(signerName);
+  }
 
-  heading("Your program");
+  section("📋", "YOUR CURRENT TREATMENT");
   push(`Medication: ${plan.medication}`);
-  if (plan.dose) push(`Current dose: ${plan.dose}`);
-  push(`How to take it: ${routeLabel}`);
-  push(`Frequency: ${plan.frequency}`);
-  if (plan.quantity > 1) push(`Quantity dispensed: ${plan.quantity}`);
-
-  // Not a week-by-week schedule — see buildGuide()'s matching note. Just the
-  // dose the patient is on right now, how long it's valid for, and (for a
-  // GLP-1) the full approved dose ladder for context.
-  const currentPhase = phases[0] || null;
-  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
-  if (currentPhase && currentPhase.weeks) {
-    push(`This is your current dose for ${currentPhase.weeks} week${currentPhase.weeks == 1 ? "" : "s"}.`);
-  }
+  if (plan.dose) push(`Dose: ${plan.dose}`);
+  push(`How to take: ${routeLabel}${plan.frequency ? `, ${guideFreqPhrase(plan.frequency)}` : ""}`);
+  if (currentPhase && currentPhase.weeks) push(`Current duration: ${currentPhase.weeks} week${currentPhase.weeks == 1 ? "" : "s"}`);
+  push();
+  push("Continue this dose unless advised otherwise.");
   if (doseOptions.length) {
-    push(`Approved doses for ${plan.medication}: ${doseOptions.join(" → ")}. Your current dose is ${plan.dose || "—"}.`);
-  }
-  if ((currentPhase && currentPhase.weeks) || doseOptions.length) push("Your doctor may adjust this at your next review.");
-
-  if (plan.instructions) { heading("Instructions from your doctor"); push(guideProseText(plan.instructions)); }
-
-  const dietItems = [];
-  if (diet.calories) dietItems.push(`Daily calorie target: ${diet.calories} kcal`);
-  if (diet.proteinMin) dietItems.push(`Daily protein: ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g`);
-  if (diet.water) dietItems.push(`Water: ${diet.water}`);
-  if (dietItems.length) { heading("Nutrition targets"); dietItems.forEach(push); }
-
-  const suppItems = Array.isArray(plan.suppList) ? plan.suppList : [];
-  if (suppItems.length) {
-    heading("Recommended supplements");
-    suppItems.forEach((s) => push(`• ${s.name}${s.dose ? ` — ${s.dose}` : ""}${s.benefit ? ` (${s.benefit})` : ""}`));
-  } else if (plan.supplements) {
-    heading("Supplements"); push(plan.supplements);
+    push();
+    push(`Approved doses for ${plan.medication}: ${doseOptions.join(" → ")}.`);
   }
 
-  if (plan.warnings) { heading("When to contact your doctor"); push(guideProseText(plan.warnings)); }
-
-  const labList = Array.isArray(plan.labTests) ? plan.labTests : [];
-  if (labList.length) {
-    heading("Lab tests to complete");
-    labList.forEach((l) => {
-      push(`• ${l.name} — ${l.required ? "REQUIRED" : "recommended"}${l.fasting ? ", fasting" : ""}`);
-      if (l.detail) push(`  ${l.detail}`);
-      if (l.link) push(`  Book: ${l.link}`);
-    });
-  } else if (plan.blood_test && plan.blood_test !== "none") {
-    heading("Blood test");
-    push(`Blood test ${plan.blood_test === "required" ? "REQUIRED" : "recommended"}. Please complete as advised by your doctor.`);
+  if (plan.instructions) {
+    section("💊", `HOW TO TAKE ${String(plan.medication || "").toUpperCase()}`);
+    // The stored instructions end with a generic "eat well / stay
+    // hydrated" reminder (see defaultInstructionsFor) that the dedicated
+    // nutrition sections below already cover in full — drop it here so
+    // the same advice isn't said twice.
+    const technique = isGlp1
+      ? String(plan.instructions).split("\n").filter((l) => !/prioritise protein at every meal/i.test(l) && !/stay well hydrated/i.test(l)).join("\n").trim()
+      : plan.instructions;
+    push(guideProseText(technique));
   }
 
-  if (typeof guideContentFor === "function") {
-    const content = guideContentFor(plan.medication, plan.route);
-    if (content) {
-      heading("Your complete medication guide");
-      content.sections.forEach((s) => { push(); push(s.head); push(guideProseText(s.body)); });
-      if (plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length) {
-        push(); push(PEPTIDE_GENERAL_GUIDE[0].head); push(guideProseText(PEPTIDE_GENERAL_GUIDE[0].body));
-      }
-    }
+  if (isGlp1 && (diet.calories || diet.proteinMin || diet.water)) {
+    section("🥗", "YOUR DAILY NUTRITION TARGETS");
+    if (diet.calories) push(`Calories: approximately ${diet.calories} kcal`);
+    if (diet.proteinMin) push(`Protein: ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g`);
+    push(`Water: ${diet.water || "2–3 litres daily"}`);
+    push();
+    push(`${plan.medication} reduces appetite, but the goal is not to stop eating. Your body still needs adequate protein, vitamins, minerals, fibre, and fluids.`);
+
+    section("🍗", "PRIORITISE PROTEIN");
+    push("Protein helps preserve muscle and keeps you fuller for longer. Include protein with every meal.");
+    push("Good choices include chicken, turkey, lean beef, fish, seafood, eggs, Greek yoghurt, cottage cheese, low-fat labneh, lentils, chickpeas, and beans.");
+
+    section("🍽️", "BUILD YOUR MEALS SIMPLY");
+    push("Aim for:");
+    push("• ½ plate: vegetables or salad");
+    push("• ¼ plate: lean protein");
+    push("• ¼ plate: complex carbohydrates");
+    push();
+    push("Choose oats, brown or basmati rice, quinoa, freekeh, whole-grain bread, sweet potato, lentils, and beans.");
+    push();
+    push("Limit sugary drinks, sweets, fried foods, fast food, processed snacks, large portions of rice, bread or pasta, and very fatty meals, which may worsen nausea.");
+
+    section("🍏", "IF YOUR APPETITE IS LOW");
+    push("Do not force large meals. Choose smaller, nutritious options such as eggs with vegetables, Greek yoghurt with berries, grilled chicken with salad, tuna with vegetables, lentil soup, or cottage cheese.");
+    push();
+    push("Avoid going through the day with almost no food simply because you are not hungry.");
+
+    section("💧", "HYDRATION, FIBRE & EATING HABITS");
+    push("Aim for 2–3 litres of water daily unless advised otherwise.");
+    push("Include vegetables, fruit, oats, legumes, and whole grains for fibre.");
+    push("Eat slowly, take smaller portions, stop when comfortably full, avoid overeating, limit late heavy meals, and avoid lying down immediately after eating.");
+    push("Where appropriate, add regular walking and strength/resistance exercise 2–3 times weekly.");
   }
 
-  heading("Follow-up");
-  push(`Your next follow-up is due around ${fmtDate(plan.next_followup)}.`);
-  push(`Log your doses and check in regularly in the DoCare portal so ${signerName} can track your progress.`);
+  if (info.howItWorks) {
+    section("⚙️", `HOW ${String(plan.medication || "").toUpperCase()} HELPS`);
+    push(info.howItWorks);
+  }
 
-  if (!(opts && opts.skipFooter)) { push(); push(guideFooterText(plan, patient, doctorName)); }
+  if (info.commonSideEffects) {
+    section("⚠️", "COMMON SIDE EFFECTS");
+    push(`Common effects include ${lcFirst(info.commonSideEffects.replace(/\.$/, ""))}.`);
+    if (isGlp1) push("If nauseated, eat smaller meals, avoid greasy or heavy foods, eat slowly, and maintain hydration.");
+    push(`Message me if symptoms persist or interfere with normal ${isGlp1 ? "eating or drinking" : "daily activity"}.`);
+  }
+
+  section("☎️", "WHEN TO CONTACT ME");
+  push(`Message me through the DoCare app for ${commaList(isGlp1 ? GLP1_MESSAGE_REASONS : PEPTIDE_MESSAGE_REASONS, "or")}.`);
+  const urgentList = (info.redFlags || []).map(leadClause).filter(Boolean).map(lcFirst);
+  if (urgentList.length) {
+    push();
+    push(`Seek urgent medical attention for ${commaList(urgentList, "or")}.`);
+  }
+
+  section("📱", "HOW THE DOCARE APP SUPPORTS YOU");
+  push(`Use the DoCare app as your main point of contact throughout treatment. You can message me directly, request follow-ups or refills, track treatment and progress, and access personalised guidance${isGlp1 ? " on nutrition, lifestyle, and weight-loss best practices" : ""}.`);
+  push();
+  push("For non-medical matters such as appointments, payments, deliveries, technical support, or general assistance, our Customer Care Team is available through the app.");
+
+  if (o.extraSection) { push(); push(o.extraSection); }
+
+  if (!o.skipFollowUp) {
+    section("📅", "NEXT FOLLOW-UP & REFILL");
+    push(`Your next follow-up and medication refill is expected ${followUpWindowText(plan.next_followup)} and can be arranged easily through the DoCare app.`);
+    push();
+    push("Until then:");
+    push(`• Continue ${plan.medication}${plan.dose ? " " + plan.dose : ""}${plan.frequency ? " " + plan.frequency : ""}`);
+    if (isGlp1 && diet.proteinMin) push(`• Aim for ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g protein daily`);
+    if (isGlp1 && diet.calories) push(`• Aim for approximately ${diet.calories} kcal/day`);
+    if (isGlp1) push(`• Maintain hydration: ${diet.water || "2–3 L daily"}`);
+    push("• Track your progress");
+    push("• Contact me through the app if needed");
+  }
+
+  if (!o.skipFooter) {
+    section("💬", "A FINAL MESSAGE FROM YOUR DOCTOR");
+    push(`${firstName}, remember that this is your journey, not a race.`);
+    push(isGlp1
+      ? "The medication is one part of the process. Our goal is safe weight loss, better health, muscle preservation, and habits you can maintain long term."
+      : "The medication is one part of the process. Our goal is safe, steady progress and a full recovery you can build on.");
+    push("Stay consistent, stay connected through the app, and allow the process time to work.");
+    push("I look forward to seeing your progress.");
+    push();
+    push(signerName);
+    if (signer.credentials) push(signer.credentials);
+    if (signer.signature) push(signer.signature);
+    if (signer.clinic) push(signer.clinic);
+  }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// Plain-text mirror of buildComboGuide() — the primary program's full guide,
-// every other active program summarised the same way the HTML does, and one
-// shared footer at the end.
+// One combined message for more than one active program: the primary
+// program gets the full letter, every other program is summarised in its
+// own section right before the shared follow-up and sign-off.
 function buildComboGuideText(plans, patient, doctorName) {
   if (!plans || !plans.length) return "";
   if (plans.length === 1) return buildGuideText(plans[0], patient, doctorName);
   const primary = plans.find((p) => p.category === "glp1") || plans[0];
   const others = plans.filter((p) => p !== primary);
-  const mainText = buildGuideText(primary, patient, doctorName, { skipFooter: true });
-  if (!others.length) return [mainText, guideFooterText(primary, patient, doctorName)].join("\n\n");
-
   const otherBlocks = others.map((plan) => {
-    const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
-    const how = content && content.sections.find((s) => /^HOW TO /i.test(s.head));
-    const works = content && content.sections.find((s) => /WORKS|PROTOCOL AT A GLANCE/i.test(s.head));
-    const block = [`${plan.medication}${plan.dose ? ` — ${plan.dose}` : ""}`,
-      `${plan.frequency}${plan.quantity > 1 ? ` × ${plan.quantity}` : ""}`];
-    if (works) block.push("What to expect: " + guideProseText(works.body));
-    if (how) block.push("How to take it: " + guideProseText(how.body));
-    if (plan.instructions) block.push("Instructions from your doctor: " + guideProseText(plan.instructions));
-    return block.join("\n");
+    const info = plan.guideInfo || {};
+    const block = [`*${plan.medication}*${plan.dose ? ` — ${plan.dose}` : ""}`, plan.frequency || ""];
+    if (info.howItWorks) block.push(info.howItWorks);
+    if (plan.instructions) block.push(guideProseText(plan.instructions));
+    return block.filter(Boolean).join("\n");
   }).join("\n\n");
-
-  return [mainText, `ALSO ON YOUR PROGRAM\n${GT_RULE}\n\n${otherBlocks}`, guideFooterText(primary, patient, doctorName)].join("\n\n");
+  return buildGuideText(primary, patient, doctorName, {
+    extraSection: `📎 *ALSO ON YOUR PROGRAM*\n\n${otherBlocks}`,
+  });
 }
 
 // Guide styles are injected once wherever the guide is shown.
