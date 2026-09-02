@@ -373,7 +373,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push(isGlp1
       ? "Our goal is sustainable weight loss while protecting your health, preserving muscle, improving nutrition, and building habits that can continue long term."
       : "Our goal is to support your recovery and long-term health through this treatment, guided by careful monitoring throughout.");
-    push("The DoCare app will be your main point of connection with us for messages, follow-ups, refills, progress tracking, and personalised support.");
+    push("We're here to support you throughout your treatment — with messages, follow-ups, refills, and personalised guidance whenever you need them.");
     push();
     push(signerName);
   }
@@ -449,23 +449,36 @@ function buildGuideText(plan, patient, doctorName, opts) {
   }
 
   section("☎️", "WHEN TO CONTACT ME");
-  push(`Message me through the DoCare app for ${commaList(isGlp1 ? GLP1_MESSAGE_REASONS : PEPTIDE_MESSAGE_REASONS, "or")}.`);
+  push(`Message me for ${commaList(isGlp1 ? GLP1_MESSAGE_REASONS : PEPTIDE_MESSAGE_REASONS, "or")}.`);
   const urgentList = (info.redFlags || []).map(leadClause).filter(Boolean).map(lcFirst);
   if (urgentList.length) {
     push();
     push(`Seek urgent medical attention for ${commaList(urgentList, "or")}.`);
   }
 
-  section("📱", "HOW THE DOCARE APP SUPPORTS YOU");
-  push(`Use the DoCare app as your main point of contact throughout treatment. You can message me directly, request follow-ups or refills, track treatment and progress, and access personalised guidance${isGlp1 ? " on nutrition, lifestyle, and weight-loss best practices" : ""}.`);
+  // Deliberately general: some patients have the practice's own app, many
+  // don't, and the guide has to read naturally either way rather than
+  // assuming everyone reads it inside something they may never have
+  // installed.
+  const appName = signer.appName || "";
+  section("🔗", "STAYING CONNECTED WITH US");
+  if (appName) {
+    push(`If you have the ${appName} installed and subscribed, you can access everything — messaging, follow-ups, refills, and progress tracking — right there in the app.`);
+    push();
+    push("If you don't have it installed, don't worry — we'll send you a link whenever you need to book or purchase something, and you can rebook at any time.");
+  } else {
+    push("You're welcome to message me directly with any questions, request a follow-up or refill, and share how you're progressing.");
+    push();
+    push("Whenever you need to book or purchase something, we'll send you a link — you can arrange this whenever suits you.");
+  }
   push();
-  push("For non-medical matters such as appointments, payments, deliveries, technical support, or general assistance, our Customer Care Team is available through the app.");
+  push("For non-medical matters such as appointments, payments, deliveries, technical support, or general assistance, our Customer Care Team is available to help.");
 
   if (o.extraSection) { push(); push(o.extraSection); }
 
   if (!o.skipFollowUp) {
     section("📅", "NEXT FOLLOW-UP & REFILL");
-    push(`Your next follow-up and medication refill is expected ${followUpWindowText(plan.next_followup)} and can be arranged easily through the DoCare app.`);
+    push(`Your next follow-up and medication refill is expected ${followUpWindowText(plan.next_followup)}${appName ? ` and can be arranged easily through the ${appName}` : " — we'll be in touch to arrange it, or you're welcome to reach out"}.`);
     push();
     push("Until then:");
     push(`• Continue ${plan.medication}${plan.dose ? " " + plan.dose : ""}${plan.frequency ? " " + plan.frequency : ""}`);
@@ -473,7 +486,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     if (isGlp1 && diet.calories) push(`• Aim for approximately ${diet.calories} kcal/day`);
     if (isGlp1) push(`• Maintain hydration: ${diet.water || "2–3 L daily"}`);
     push("• Track your progress");
-    push("• Contact me through the app if needed");
+    push("• Contact me if needed");
   }
 
   if (!o.skipFooter) {
@@ -482,7 +495,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push(isGlp1
       ? "The medication is one part of the process. Our goal is safe weight loss, better health, muscle preservation, and habits you can maintain long term."
       : "The medication is one part of the process. Our goal is safe, steady progress and a full recovery you can build on.");
-    push("Stay consistent, stay connected through the app, and allow the process time to work.");
+    push("Stay consistent, stay connected with us, and allow the process time to work.");
     push("I look forward to seeing your progress.");
     push();
     push(signerName);

@@ -193,6 +193,12 @@ CREATE TABLE IF NOT EXISTS organizations (
 addColumn("users", "org_id", "INTEGER");
 addColumn("users", "platform_admin", "INTEGER NOT NULL DEFAULT 0"); // may create organisations and cross into any of them
 addColumn("patients", "org_id", "INTEGER");
+// The organisation's own patient-facing app/subscription product, if it has
+// one — e.g. "DarDoc App". No default (stays NULL until set), specifically
+// so "never configured" (NULL) stays distinguishable from "a super admin
+// deliberately cleared it" (empty string) — see the one-time seed below,
+// which must only ever fire for the former.
+addColumn("organizations", "app_name", "TEXT");
 db.exec("CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);");
 db.exec("CREATE INDEX IF NOT EXISTS idx_patients_org ON patients(org_id);");
 
@@ -206,6 +212,15 @@ function seedOrganizations() {
     db.prepare("INSERT INTO organizations (name, slug) VALUES (?, 'dardoc')").run(DEFAULT_ORG);
     org = db.prepare("SELECT * FROM organizations WHERE slug = 'dardoc'").get();
     console.log(`Seeded default organisation: ${org.name}`);
+  }
+  // DarDoc Healthcare's real patient app — set once here since it's a known
+  // fact about this specific organisation, not something to guess for every
+  // install. Only ever fires while app_name is still NULL (truly never
+  // configured); once a super admin sets or deliberately clears it from the
+  // Organisations page, this never overwrites their choice again.
+  if (org.app_name == null && org.slug === "dardoc") {
+    db.prepare("UPDATE organizations SET app_name = 'DarDoc App' WHERE id = ?").run(org.id);
+    org = db.prepare("SELECT * FROM organizations WHERE id = ?").get(org.id);
   }
   const orphanUsers = db.prepare("UPDATE users SET org_id = ? WHERE org_id IS NULL").run(org.id).changes;
   const orphanPatients = db.prepare("UPDATE patients SET org_id = ? WHERE org_id IS NULL").run(org.id).changes;

@@ -67,7 +67,7 @@ function getDoctor(req) {
   const s = db.prepare("SELECT * FROM sessions WHERE token = ? AND kind = 'doctor' AND expires_at > datetime('now')").get(token);
   if (!s) return null;
   const u = db.prepare(`SELECT u.id, u.email, u.name, u.role, u.credentials, u.signature, u.clinic, u.active,
-      u.org_id, u.platform_admin, o.name AS org_name, o.slug AS org_slug
+      u.org_id, u.platform_admin, o.name AS org_name, o.slug AS org_slug, o.app_name
     FROM users u LEFT JOIN organizations o ON o.id = u.org_id
     WHERE u.id = ? AND u.active = 1`).get(s.ref_id);
   if (!u) return null;
@@ -131,13 +131,17 @@ function normMobile(m) {
 // from the session, so a guide opened months later — or by a different
 // doctor, or by an admin — still shows who actually prescribed it.
 function signerFor(userId) {
-  const u = db.prepare(`SELECT u.name, u.credentials, u.signature, u.clinic, o.name AS org_name
+  const u = db.prepare(`SELECT u.name, u.credentials, u.signature, u.clinic, o.name AS org_name, o.app_name
     FROM users u LEFT JOIN organizations o ON o.id = u.org_id WHERE u.id = ?`).get(userId);
   return {
     name: u ? u.name : "Your doctor",
     credentials: (u && u.credentials) || "",
     signature: (u && u.signature) || "",
     clinic: (u && (u.clinic || u.org_name)) || "",
+    // The organisation's own patient-facing app, only when it actually has
+    // one — a practice with no such app gets guide text that never assumes
+    // it exists (see buildGuideText's appName fallback in guide.js).
+    appName: (u && u.app_name) || "",
   };
 }
 
@@ -248,13 +252,14 @@ function publicUser(u) {
     credentials: u.credentials || "", signature: u.signature || "",
     clinic: u.clinic || u.org_name || "", active: u.active === undefined ? 1 : u.active,
     orgId: u.org_id || null, orgName: u.org_name || u.clinic || "", platformAdmin: !!u.platform_admin,
+    appName: u.app_name || "",
   };
 }
 
 // A single user row with its organisation's name attached — the only shape
 // publicUser() should ever be given.
 function userWithOrg(where, ...vals) {
-  return db.prepare(`SELECT u.*, o.name AS org_name FROM users u
+  return db.prepare(`SELECT u.*, o.name AS org_name, o.app_name FROM users u
     LEFT JOIN organizations o ON o.id = u.org_id WHERE ${where}`).get(...vals);
 }
 
@@ -404,6 +409,9 @@ route("PUT", "/api/admin/orgs/:id", async (req, res, p, body) => {
   const sets = [], vals = [];
   if (body.name !== undefined) { sets.push("name = ?"); vals.push(String(body.name).trim()); }
   if (body.contactEmail !== undefined) { sets.push("contact_email = ?"); vals.push(String(body.contactEmail).trim()); }
+  // The organisation's own patient app, if it has one (e.g. "DarDoc App") —
+  // sent as "" to clear it deliberately, distinct from never having set it.
+  if (body.appName !== undefined) { sets.push("app_name = ?"); vals.push(String(body.appName).trim()); }
   if (body.active !== undefined) {
     const next = body.active ? 1 : 0;
     // Switching off the organisation you are signed in to would lock you out.

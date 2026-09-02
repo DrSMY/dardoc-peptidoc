@@ -3123,7 +3123,7 @@ function wizStepReview() {
   // hardcoded practice name. Sign the preview the same way the server signs
   // the real thing once published: with the doctor actually running this
   // consultation.
-  const previewSigner = { name: S.user.name, credentials: S.user.credentials, signature: S.user.signature, clinic: S.user.clinic || S.user.orgName || "" };
+  const previewSigner = { name: S.user.name, credentials: S.user.credentials, signature: S.user.signature, clinic: S.user.clinic || S.user.orgName || "", appName: S.user.appName || "" };
   const fakePlans = w.cart.map((c) => ({
     title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
     category: c.category, medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
@@ -3760,12 +3760,15 @@ async function viewOrgs() {
 
 function orgModal(org, done) {
   const isNew = !org;
-  const o = org || { name: "", contact_email: "" };
+  const o = org || { name: "", contact_email: "", app_name: "" };
   const scrim = modal(`
     <div class="modal-head"><h3>${isNew ? "New organisation" : "Edit " + esc(o.name)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
     <form id="og-form">
       <div class="field"><label for="og-name">Organisation name <span class="req">*</span></label><input class="input" id="og-name" value="${esc(o.name)}" placeholder="Meridian Wellness Clinic" required></div>
       <div class="field"><label for="og-contact">Contact email</label><input class="input" id="og-contact" type="email" value="${esc(o.contact_email || "")}"></div>
+      ${!isNew ? `
+      <div class="field"><label for="og-app">Patient-facing app (optional)</label><input class="input" id="og-app" value="${esc(o.app_name || "")}" placeholder="e.g. DarDoc App — leave blank if this practice has none">
+      <span class="hint">Named here, the patient guide explains that a subscribed patient gets everything inside it, and anyone without it gets a booking link instead — otherwise the guide stays general and never assumes one exists.</span></div>` : ""}
       ${isNew ? `
       <hr class="divider">
       <div class="card-title" style="font-size:14.5px">${icon("key", 17)} First super admin</div>
@@ -3796,7 +3799,7 @@ function orgModal(org, done) {
           adminEmail: g("og-ae").value.trim(), adminPassword: g("og-ap").value,
         });
       } else {
-        await api("PUT", `/api/admin/orgs/${o.id}`, { name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim() });
+        await api("PUT", `/api/admin/orgs/${o.id}`, { name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim(), appName: g("og-app").value.trim() });
       }
       scrim.remove();
       toast(isNew ? "Organisation created" : "Changes saved");
