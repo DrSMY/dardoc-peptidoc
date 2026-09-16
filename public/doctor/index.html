@@ -106,6 +106,12 @@
   .metric-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
   .metric { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 14px; font-size: 13px; }
   .metric b { font-family: var(--font-head); font-size: 15px; display: block; }
+  /* persistent sidebar patient-info card — compact stacked rows, unlike the
+     two-column .emr-grid, so it stays legible in a ~1fr sidebar column */
+  .pi-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .pi-row:last-child { border-bottom: none; }
+  .pi-lbl { color: var(--muted); }
+  .pi-val { font-weight: 700; font-family: var(--font-head); text-align: right; }
 
   /* patient detail */
   .detail-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -279,7 +285,7 @@
 <div id="app"></div>
 <script src="/shared.js?v=docare50"></script>
 <script src="/patient-guides.js?v=docare25"></script>
-<script src="/guide.js?v=docare55"></script>
-<script src="/doctor/app.js?v=docare55"></script>
+<script src="/guide.js?v=docare56"></script>
+<script src="/doctor/app.js?v=docare56"></script>
 </body>
 </html>

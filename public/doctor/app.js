@@ -745,7 +745,7 @@ async function viewPatient(id) {
         document.getElementById("btn-wa").addEventListener("click", () => {
           const link = `${location.origin}/portal`;
           const medSummary = guidePlans.length > 1 ? `${primaryPl.medication} and ${guidePlans.length - 1} other program${guidePlans.length > 2 ? "s" : ""}` : primaryPl.medication;
-          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${medSummary} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, DoCare`;
+          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${medSummary} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, ${S.user.clinic || S.user.orgName || "DarDoc Healthcare"}`;
           window.open(waLink(p.mobile, txt), "_blank");
         });
       }
@@ -885,7 +885,7 @@ async function sharePinModal(p) {
   scrim.querySelector("#gen-pin").addEventListener("click", async () => {
     const { pin } = await api("POST", `/api/patients/${p.id}/pin`);
     const link = `${location.origin}/portal`;
-    const waText = `Hello ${p.title ? p.title + " " : ""}${p.name}, here is your access to your personal treatment portal:\n\n🔗 ${link}\n📱 Mobile: +${p.mobile}\n🔑 PIN: ${pin}\n\nYou can view your guide, log your doses and report how you feel — I'll be following your progress.\n\n— ${S.user.name}, DoCare`;
+    const waText = `Hello ${p.title ? p.title + " " : ""}${p.name}, here is your access to your personal treatment portal:\n\n🔗 ${link}\n📱 Mobile: +${p.mobile}\n🔑 PIN: ${pin}\n\nYou can view your guide, log your doses and report how you feel — I'll be following your progress.\n\n— ${S.user.name}, ${S.user.clinic || S.user.orgName || "DarDoc Healthcare"}`;
     scrim.querySelector("#pin-zone").innerHTML = `
       <div class="pin-display">${pin}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -947,6 +947,7 @@ async function viewConsult() {
       weightKg: "", startWeightKg: "", maxWeightKg: "", goalWeightKg: "", goalWeightCustomized: false,
       activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     cart: [],              // programs added so far this consultation (one entry per medication)
+    noMedication: false,   // doctor explicitly chose not to prescribe anything this visit
     draft: freshDraft("glp1"), // the program currently being configured on the Program step
     followupDays: 28, clinicalNote: "", supplements: "",
     labTests: [],          // chosen lab tests (structured) — shown in the guide
@@ -1633,6 +1634,7 @@ function wizIntakeIdentity() {
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
   `, wizSidePanel());
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
 
   const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight", startWeightKg: "wp-startweight", maxWeightKg: "wp-maxweight" };
   const commitDemo = () => {
@@ -1648,11 +1650,13 @@ function wizIntakeIdentity() {
       w.patient.goalWeightKg = suggested ?? "";
       document.getElementById("wp-goalweight").value = w.patient.goalWeightKg;
     }
+    refreshPatientInfoSide();
   };
   Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
   document.getElementById("wp-goalweight").addEventListener("input", (e) => {
     w.patient.goalWeightKg = e.target.value;
     w.patient.goalWeightCustomized = true;
+    refreshPatientInfoSide();
   });
 
   const activityDetailBtn = document.getElementById("wp-activity-detail");
@@ -1854,6 +1858,7 @@ function wizIntakeClinical() {
     ${renderIntakeQuestion(glp1Q)}
   `, wizSidePanel());
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
 
   wireIntake(view(), () => wizIntakeClinical());
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
@@ -1864,11 +1869,37 @@ function wizIntakeClinical() {
   });
 }
 
-// ── persistent side panel: patient notes + recommended meds ──────────
-// Shown on every consultation page so a note jotted early in the intake
-// isn't lost by the time the doctor reaches Program/Labs/Clinical/Review —
-// and the medications suggested from the patient's health goals stay
-// visible underneath it the whole way through, not just on the Goals step.
+// ── persistent side panel: patient summary + notes + recommended meds ──
+// Shown on every consultation page so demographics/BMI/goal weight, a note
+// jotted early in the intake, and the medications suggested from the
+// patient's health goals all stay visible the whole way through — not just
+// on the one step that happened to collect them.
+function patientInfoSideHTML() {
+  const w = S.wizard, p = w.patient, m = wizMetrics();
+  const row = (lbl, val) => val ? `<div class="pi-row"><span class="pi-lbl">${lbl}</span><span class="pi-val">${val}</span></div>` : "";
+  const demo = [p.age ? `${esc(p.age)} y` : "", esc(p.gender || "")].filter(Boolean).join(" · ");
+  return `<div class="card card-pad" id="wz-patientinfo">
+    <div class="card-title">${icon("user", 17)} Patient summary</div>
+    ${row("Name", esc(p.name) || "—")}
+    ${row("Age / Gender", demo)}
+    ${row("Height", p.heightCm ? esc(p.heightCm) + " cm" : "")}
+    ${row("Weight", p.weightKg ? esc(p.weightKg) + " kg" : "")}
+    ${row("BMI", m.bmi ? `${m.bmi} · ${esc(m.bmiCat)}` : "")}
+    ${row("Goal weight", p.goalWeightKg ? esc(p.goalWeightKg) + " kg" : "")}
+    ${row("BMR", m.bmr ? m.bmr + " kcal" : "")}
+    ${row("TDEE", m.tdee ? m.tdee + " kcal" : "")}
+    ${row("Calorie target", m.target ? m.target + " kcal" : "")}
+    ${row("Protein target", m.proteinMin ? `${m.proteinMin}–${m.proteinMax} g` : "")}
+    ${!p.name && !p.heightCm && !p.weightKg ? `<p class="hint">Fill in the Identity step to see this patient's summary here.</p>` : ""}
+  </div>`;
+}
+// Re-renders just the summary card in place — called as the doctor types on
+// the Identity step, without touching the notes textarea or meds list next
+// to it (both live in the same sidebar but shouldn't re-render together).
+function refreshPatientInfoSide() {
+  const box = document.getElementById("wz-patientinfo");
+  if (box) box.outerHTML = patientInfoSideHTML();
+}
 function patientNotesSideHTML() {
   const w = S.wizard;
   return `<div class="card card-pad">
@@ -1881,7 +1912,7 @@ function wireNotesPanel(scope) {
   if (box) box.addEventListener("input", (e) => { S.wizard.patient.intake.additional_notes = e.target.value; });
 }
 function wizSidePanel() {
-  return patientNotesSideHTML() + suggestedPeptidesHTML();
+  return patientInfoSideHTML() + patientNotesSideHTML() + suggestedPeptidesHTML();
 }
 
 // ── Sub-step 3: Primary Health Objectives ─────────────────────────────
@@ -2103,6 +2134,7 @@ function wizIntakeGoals() {
   if (goalWeightInline) goalWeightInline.addEventListener("input", (e) => {
     w.patient.goalWeightKg = e.target.value;
     w.patient.goalWeightCustomized = true;
+    refreshPatientInfoSide();
   });
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => {
@@ -2123,6 +2155,7 @@ function wizIntakeObjective() {
     ${qs.map(renderIntakeQuestion).join("")}
   `, wizSidePanel());
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
   wireIntake(view(), () => wizIntakeObjective());
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => advanceIntake());
@@ -2152,9 +2185,15 @@ function wizStepProgram() {
       ${cats.map((c) => `<button class="chip ${d.category === c.key ? "on" : ""}" data-cat="${c.key}">${esc(c.label)}</button>`).join("")}
     </div>
     <div id="wz-program-body"></div>
-    <div style="margin-top:14px">
+    <div style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <button class="btn btn-secondary" id="wz-add-cart" type="button">${icon("plus", 16)} Add to program</button>
+      ${!w.cart.length ? `<button type="button" class="linklike" id="wz-no-med">or continue without prescribing a medication</button>` : ""}
     </div>
+    ${w.noMedication && !w.cart.length ? `
+    <div class="g-callout g-teal" style="margin-top:14px">
+      ${icon("info", 17)}
+      <div style="flex:1">No medication will be prescribed this visit — you can still record lab tests, a clinical note, and a follow-up date. <button type="button" class="linklike" id="wz-no-med-cancel">Add a medication instead</button></div>
+    </div>` : ""}
     ${cartHTML()}
     <p class="err-text" id="wz-err" hidden role="alert"></p>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:18px">
@@ -2166,6 +2205,10 @@ function wizStepProgram() {
   </div>`;
   wireNotesPanel(view());
   wirePeptideInfoButtons(view());
+  const noMedBtn = document.getElementById("wz-no-med");
+  if (noMedBtn) noMedBtn.addEventListener("click", () => { w.noMedication = true; wizStepProgram(); });
+  const noMedCancelBtn = document.getElementById("wz-no-med-cancel");
+  if (noMedCancelBtn) noMedCancelBtn.addEventListener("click", () => { w.noMedication = false; wizStepProgram(); });
 
   function cartHTML() {
     if (!w.cart.length) return "";
@@ -2357,7 +2400,7 @@ function wizStepProgram() {
   document.getElementById("wz-next").addEventListener("click", () => {
     const err = document.getElementById("wz-err");
     addDraftToCart(); // silently include an in-progress selection, if any
-    if (!w.cart.length) { err.textContent = "Add at least one program before continuing."; err.hidden = false; return; }
+    if (!w.cart.length && !w.noMedication) { err.textContent = "Add at least one program before continuing, or choose to continue without a medication."; err.hidden = false; return; }
     w.step = 2;
     prefillFromIntake();
     if (!Object.keys(w.diet).length && w.cart.some((c) => c.category === "glp1")) w.diet = defaultDiet();
@@ -2372,6 +2415,7 @@ function wizStepProgram() {
 function addDraftToCart() {
   const w = S.wizard, d = w.draft;
   if (!d.medication) return false;
+  w.noMedication = false; // a medication was added after all
   w.cart.push({
     ...d,
     phases: d.phases.map((p) => ({ ...p })),
@@ -3165,6 +3209,7 @@ function wizStepLabs() {
   <div id="wz-side">${wizSidePanel()}</div>
   </div>`;
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
 
   const updateCounts = () => {
     document.getElementById("lab-count").textContent = w.labTests.filter((l) => l.on).length;
@@ -3264,6 +3309,7 @@ function wizStepClinical() {
   <div id="wz-side">${wizSidePanel()}</div>
   </div>`;
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
 
   // The EMR box starts populated from every field on this page (and the two
   // steps before it), and stays in sync with them — until the doctor types
@@ -3279,7 +3325,9 @@ function wizStepClinical() {
       intake: w.patient.intake },
     w.cart, wizMetrics(), w.clinicalNote, w.followupDays,
     (w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on)
-  ) || "Add a medication and patient details to generate the clinical record.";
+  ) || (w.noMedication
+    ? "No medication was prescribed this visit — your private clinical note above is the record for this consultation."
+    : "Add a medication and patient details to generate the clinical record.");
   const refreshEmr = () => {
     collect();
     if (w.emrCustomized) return;
@@ -3380,33 +3428,33 @@ function wizStepReview() {
     w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs, previewSupps
   );
   w.clinicalSuggestion = clinicalSuggestion;
-  const guideText = buildComboGuideText(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name);
+  const guideText = fakePlans.length ? buildComboGuideText(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name) : "";
+  const guideHtml = fakePlans.length ? buildComboGuide(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name)
+    : `<div class="empty">${icon("file", 34)}<div class="empty-title">No medication this visit</div><p>No guide is generated when nothing is prescribed — the clinical note and follow-up date are still saved.</p></div>`;
+  const publishSaves = w.cart.length > 1 ? `${w.cart.length} programs` : w.cart.length === 1 ? "the program" : "this consultation";
   view().innerHTML = `${wizHead()}
   <div class="two-col" style="grid-template-columns:1fr 340px">
     <div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
         <div class="card-title" style="margin:0">${icon("file", 19)} Guide preview — what the patient sees</div>
-        <button class="btn btn-secondary btn-sm" id="rv-guide-copy" type="button">${icon("copy", 15)} Copy guide text</button>
+        ${fakePlans.length ? `<button class="btn btn-secondary btn-sm" id="rv-guide-copy" type="button">${icon("copy", 15)} Copy guide text</button>` : ""}
       </div>
       <div id="guide-preview" style="display:flex;flex-direction:column;gap:18px">
-        ${buildComboGuide(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name)}
+        ${guideHtml}
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px">
       <div class="card card-pad">
         <div class="card-title">${icon("send", 18)} Publish</div>
         <p style="font-size:13.5px;color:var(--muted);margin-bottom:14px">
-          Publishing saves ${w.cart.length > 1 ? `${w.cart.length} programs` : "the program"} for <b>${esc(w.patient.name)}</b>${w.existingId ? "" : ", registers them as a new patient"} and generates their portal access PIN to share on WhatsApp.
+          Publishing saves ${publishSaves} for <b>${esc(w.patient.name)}</b>${w.existingId ? "" : ", registers them as a new patient"} and generates their portal access PIN to share on WhatsApp.
+          ${w.cart.length ? `<br><b>Rx:</b> ${esc(w.cart.map((c) => c.medication + (c.dose ? " " + c.dose : "")).join(", "))}` : ""}
         </p>
         <p class="err-text" id="wz-err" hidden role="alert"></p>
         <button class="btn btn-accent btn-block" id="wz-publish"><span class="spin"></span><span class="btn-label">${icon("check", 18)} Publish guide</span></button>
         <button class="btn btn-ghost btn-block" id="wz-back" style="margin-top:8px">${icon("chevL", 16)} Back to edit</button>
       </div>
-      <div class="card card-pad">
-        <div class="card-title">${icon("scale", 18)} Patient summary</div>
-        ${patientSummaryHTML(true) || `<p class="hint">Add height, weight and age in the intake to compute metrics.</p>`}
-      </div>
-      ${patientNotesSideHTML()}
+      ${wizSidePanel()}
       ${clinicalSuggestion ? `<div class="card card-pad">
         <div class="card-title" style="justify-content:space-between">
           <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record (EMR)</span>
@@ -3417,8 +3465,10 @@ function wizStepReview() {
     </div>
   </div>`;
   wireNotesPanel(view());
+  wirePeptideInfoButtons(view());
   if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
-  document.getElementById("rv-guide-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
+  const guideCopyBtn = document.getElementById("rv-guide-copy");
+  if (guideCopyBtn) guideCopyBtn.addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
 
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 3; paintWizard(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
@@ -3488,15 +3538,21 @@ function wizStepReview() {
 function publishedModal(patientId, w, pin) {
   const link = `${location.origin}/portal`;
   const name = `${w.patient.title ? w.patient.title + " " : ""}${w.patient.name}`;
-  const medSummary = w.cart.length > 1 ? `${w.cart.length} programs` : `${w.cart[0].medication}${w.cart[0].dose ? " " + w.cart[0].dose : ""}`;
-  const waText = pin
-    ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, DoCare`
-    : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, DoCare`;
+  const companyName = S.user.clinic || S.user.orgName || "DarDoc Healthcare";
+  const hasProgram = w.cart.length > 0;
+  const medSummary = w.cart.length > 1 ? `${w.cart.length} programs` : hasProgram ? `${w.cart[0].medication}${w.cart[0].dose ? " " + w.cart[0].dose : ""}` : "";
+  const waText = hasProgram
+    ? (pin
+      ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, ${companyName}`
+      : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, ${companyName}`)
+    : (pin
+      ? `Hello ${name}, thank you for your visit today. Your portal access is ready:\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nWe'll be in touch ahead of your next follow-up.\n\n— ${S.user.name}, ${companyName}`
+      : `Hello ${name}, thank you for your visit today. We'll be in touch ahead of your next follow-up.\n\n— ${S.user.name}, ${companyName}`);
   const scrim = modal(`
     <div style="text-align:center;padding:6px 0 2px">
       <div style="width:60px;height:60px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">${icon("checkCircle", 30)}</div>
-      <h3 style="font-size:20px">Guide published</h3>
-      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.</p>
+      <h3 style="font-size:20px">${hasProgram ? "Guide published" : "Consultation saved"}</h3>
+      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${hasProgram ? `${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.` : `${esc(w.patient.name)}'s visit has been recorded — no medication was prescribed this time.`}</p>
       ${pin ? `<div class="pin-display">${pin}</div><p class="hint" style="margin-bottom:14px">Their portal PIN — shown once. You can regenerate it any time from the patient page.</p>` : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} Send via WhatsApp</button>
