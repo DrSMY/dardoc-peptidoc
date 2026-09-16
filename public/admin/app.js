@@ -73,6 +73,7 @@ const NAV = [
   { hash: "#/protocols", label: "Protocols & Medications", ico: "layers" },
   { hash: "#/peptide-info", label: "Peptide Clinical Info", ico: "droplet" },
   { hash: "#/goal-map", label: "Health Goal Mapping", ico: "sparkle" },
+  { hash: "#/glp1-videos", label: "GLP-1 Video Links", ico: "file" },
   { hash: "#/kb", label: "Knowledge Base", ico: "book" },
 ];
 
@@ -121,6 +122,7 @@ function route() {
   if (h.startsWith("#/protocols")) return viewProtocols();
   if (h.startsWith("#/peptide-info")) return viewPeptideInfo();
   if (h.startsWith("#/goal-map")) return viewGoalMap();
+  if (h.startsWith("#/glp1-videos")) return viewGlp1Videos();
   if (h.startsWith("#/kb")) return viewKb();
   return viewOverview();
 }
@@ -442,6 +444,36 @@ async function viewPeptideInfo() {
   document.getElementById("add-info").addEventListener("click", () => peptideInfoModal(null));
   view().querySelectorAll("[data-pep]").forEach((r) => r.addEventListener("click", () => {
     peptideInfoModal(S.peptideInfo.find((p) => p.name === r.dataset.pep));
+  }));
+}
+
+// ── GLP-1 patient-education video links (glp1_video_links table) ──
+// One optional URL per GLP-1 medication, shown in the patient guide once
+// set — never guessed or pre-filled, always pasted in here by hand.
+async function viewGlp1Videos() {
+  view().innerHTML = `<div class="skel" style="height:300px"></div>`;
+  const links = await api("GET", "/api/admin/glp1-video-links");
+  view().innerHTML = `
+  <div class="page-head">
+    <div><h1>GLP-1 Video Links</h1><div class="sub">Optional — paste a video URL per medication and it appears in that medication's patient guide</div></div>
+  </div>
+  <div class="card card-pad">
+    <div class="form-grid">
+      ${links.map((l) => `
+        <div class="field full">
+          <label for="vid-${esc(l.medication)}">${esc(l.medication)}</label>
+          <div style="display:flex;gap:8px">
+            <input class="input" id="vid-${esc(l.medication)}" data-med="${esc(l.medication)}" value="${esc(l.url)}" placeholder="https://…">
+            <button class="btn btn-secondary btn-sm" data-save="${esc(l.medication)}">Save</button>
+          </div>
+        </div>`).join("")}
+    </div>
+  </div>`;
+  view().querySelectorAll("[data-save]").forEach((b) => b.addEventListener("click", async () => {
+    const med = b.dataset.save;
+    const url = view().querySelector(`#vid-${CSS.escape(med)}`).value.trim();
+    await api("POST", "/api/admin/glp1-video-links", { medication: med, url });
+    toast("Saved");
   }));
 }
 

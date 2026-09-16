@@ -178,11 +178,19 @@ function doseOptionsFor(category, medication) {
 // presets.js records the rest of the app already treats as authoritative
 // (GLP1_INFO/PEPTIDE_INFO's one-line summaries, and GLP1_ELIGIBILITY's
 // shared red-flag list — peptides carry their own per-product list).
+function glp1VideoLink(medication) {
+  const row = db.prepare("SELECT url FROM glp1_video_links WHERE medication = ?").get(medication);
+  return (row && row.url) || "";
+}
+
 function guideInfoFor(category, medication) {
   const info = category === "glp1" ? presets.GLP1_INFO[medication] : presets.PEPTIDE_INFO[medication];
   if (!info) return null;
   const redFlags = category === "glp1" ? presets.GLP1_ELIGIBILITY.redFlags : (info.redFlags || []);
-  return { howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags };
+  return {
+    howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags,
+    videoLink: category === "glp1" ? glp1VideoLink(medication) : "",
+  };
 }
 
 function parsePlan(row) {
@@ -297,6 +305,11 @@ function dbHealthGoalPeptides() {
   }
   return out;
 }
+function dbGlp1VideoLinks() {
+  const out = {};
+  for (const r of db.prepare("SELECT medication, url FROM glp1_video_links").all()) if (r.url) out[r.medication] = r.url;
+  return out;
+}
 
 route("GET", "/api/presets", (req, res) => {
   json(res, 200, {
@@ -311,6 +324,7 @@ route("GET", "/api/presets", (req, res) => {
     healthGoalPeptides: dbHealthGoalPeptides(),
     peptideInfo: dbPeptideInfo(),
     glp1Info: presets.GLP1_INFO,
+    glp1VideoLinks: dbGlp1VideoLinks(),
     goalDescriptions: presets.GOAL_DESCRIPTIONS,
     glp1Eligibility: presets.GLP1_ELIGIBILITY,
     labTestCatalog: presets.LAB_TEST_CATALOG,
@@ -576,6 +590,26 @@ route("POST", "/api/admin/peptide-info/delete", async (req, res, _p, body) => {
   json(res, 200, { ok: true });
 });
 
+// GLP-1 patient-education video links — one optional URL per medication,
+// pasted in by the super admin (never guessed or auto-filled). Shown in the
+// guide only for the medications that have one set.
+route("GET", "/api/admin/glp1-video-links", (req, res) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const links = dbGlp1VideoLinks();
+  json(res, 200, Object.keys(presets.GLP1_INFO).map((medication) => ({ medication, url: links[medication] || "" })));
+});
+
+route("POST", "/api/admin/glp1-video-links", async (req, res, _p, body) => {
+  if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
+  const medication = String(body.medication || "").trim();
+  if (!medication) return json(res, 400, { error: "Medication is required." });
+  db.prepare(`
+    INSERT INTO glp1_video_links (medication, url) VALUES (?, ?)
+    ON CONFLICT(medication) DO UPDATE SET url = excluded.url, updated_at = datetime('now')`)
+    .run(medication, String(body.url || "").trim());
+  json(res, 200, { ok: true });
+});
+
 // Health-goal → peptide mapping (the "Suggested Peptides" side panel data)
 route("GET", "/api/admin/health-goal-peptides", (req, res) => {
   if (!requireSuperadmin(req)) return json(res, 401, { error: "Not signed in as super admin." });
@@ -754,11 +788,15 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
       : { error: "That mobile number is already registered to another organisation." });
   }
   const pin = generatePin();
+  // The weight entered when a patient is first registered is both their
+  // starting weight and (for that first visit) their current weight.
+  const startWeight = body.startWeightKg || body.weightKg || null;
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, org_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (doctor_id, org_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, current_weight_kg, max_weight_kg, goal_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(doc.id, doc.org_id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
-      body.heightCm || null, body.weightKg || null, body.activityLevel || "Sedentary",
+      body.heightCm || null, startWeight, body.weightKg || startWeight, body.maxWeightKg || null, body.goalWeightKg || null,
+      body.activityLevel || "Sedentary",
       body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
       JSON.stringify(body.intake || {}), body.email || "", body.nationalId || "");
   json(res, 200, { id: Number(r.lastInsertRowid), pin });
@@ -786,7 +824,12 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
   const patient = patientInOrg(p.id, me);
   if (!patient) return json(res, 404, NOT_IN_ORG);
   const fields = { name: "name", title: "title", age: "age", gender: "gender", heightCm: "height_cm",
-    weightKg: "start_weight_kg", activityLevel: "activity_level", chronicIllnesses: "chronic_illnesses",
+    // `weightKg` from a follow-up consultation is this visit's *current*
+    // weight — the original starting weight is only ever touched via the
+    // explicit `startWeightKg` field, so it stays the true baseline.
+    weightKg: "current_weight_kg", startWeightKg: "start_weight_kg",
+    maxWeightKg: "max_weight_kg", goalWeightKg: "goal_weight_kg",
+    activityLevel: "activity_level", chronicIllnesses: "chronic_illnesses",
     medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email",
     nationalId: "national_id" };
   const sets = [], vals = [];
@@ -810,6 +853,51 @@ route("POST", "/api/patients/:id/pin", (req, res, p) => {
   db.prepare("UPDATE patients SET pin_hash = ? WHERE id = ?").run(hashSecret(pin), p.id);
   db.prepare("DELETE FROM sessions WHERE kind = 'patient' AND ref_id = ?").run(p.id);
   json(res, 200, { pin });
+});
+
+// ── incomplete consultations ("save for later") ──────────────────
+// A snapshot of the wizard's client-side state — nothing here touches the
+// real patients/plans tables. Scoped to the doctor's organisation (any
+// clinician on the team can pick one up), never to platform admins crossing
+// into a practice.
+route("GET", "/api/drafts", (req, res) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const rows = db.prepare("SELECT id, label, updated_at FROM wizard_drafts WHERE org_id = ? ORDER BY updated_at DESC").all(me.org_id);
+  json(res, 200, rows);
+});
+
+route("GET", "/api/drafts/:id", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const row = db.prepare("SELECT * FROM wizard_drafts WHERE id = ? AND org_id = ?").get(p.id, me.org_id);
+  if (!row) return json(res, 404, { error: "Draft not found." });
+  json(res, 200, { id: row.id, label: row.label, state: JSON.parse(row.state_json || "{}") });
+});
+
+route("POST", "/api/drafts", async (req, res, _p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const r = db.prepare("INSERT INTO wizard_drafts (doctor_id, org_id, label, state_json) VALUES (?,?,?,?)")
+    .run(me.id, me.org_id, String(body.label || "").trim(), JSON.stringify(body.state || {}));
+  json(res, 200, { id: Number(r.lastInsertRowid) });
+});
+
+route("PUT", "/api/drafts/:id", async (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const row = db.prepare("SELECT id FROM wizard_drafts WHERE id = ? AND org_id = ?").get(p.id, me.org_id);
+  if (!row) return json(res, 404, { error: "Draft not found." });
+  db.prepare("UPDATE wizard_drafts SET label = ?, state_json = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(String(body.label || "").trim(), JSON.stringify(body.state || {}), p.id);
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/drafts/:id", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  db.prepare("DELETE FROM wizard_drafts WHERE id = ? AND org_id = ?").run(p.id, me.org_id);
+  json(res, 200, { ok: true });
 });
 
 // ── bulk history import (superadmin) ─────────────────────────────

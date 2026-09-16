@@ -97,6 +97,7 @@ function renderLogin() {
 const NAV = [
   { hash: "#/dashboard", label: "Dashboard", ico: "grid" },
   { hash: "#/consult", label: "New consultation", ico: "plus", rx: true },
+  { hash: "#/drafts", label: "Drafts", ico: "clock", rx: true },
   { hash: "#/patients", label: "Patients", ico: "users" },
   { hash: "#/activity", label: "Recent activity", ico: "activity" },
   { hash: "#/messages", label: "Messages", ico: "message" },
@@ -153,6 +154,12 @@ function renderShell() {
   const logout = async () => { await api("POST", "/api/auth/logout"); location.hash = ""; S.user = null; renderLogin(); };
   document.getElementById("sb-logout").addEventListener("click", logout);
   document.getElementById("m-logout").addEventListener("click", logout);
+  // Delegated so it keeps working across every wizard step repaint — wizHead()
+  // (and its "Save for later" button) is re-rendered on every step change,
+  // but #view itself is never replaced.
+  document.getElementById("view").addEventListener("click", (e) => {
+    if (e.target.closest("#wz-savelater")) saveDraftForLater();
+  });
 }
 
 function setActiveNav() {
@@ -173,6 +180,7 @@ function route() {
   if (m) return viewPatient(Number(m[1]));
   if (h.startsWith("#/patients")) return viewPatients();
   if (h.startsWith("#/consult")) return canPrescribe() ? viewConsult() : viewNoAccess("New consultation");
+  if (h.startsWith("#/drafts")) return canPrescribe() ? viewDrafts() : viewNoAccess("Drafts");
   if (h.startsWith("#/team")) return isSuperadmin() ? viewTeam() : viewNoAccess("Team");
   if (h.startsWith("#/orgs")) { S.teamOrgId = null; return isPlatformAdmin() ? viewOrgs() : viewNoAccess("Organisations"); }
   const pm = h.match(/^#\/plan\/(\d+)/);
@@ -528,7 +536,8 @@ async function viewPatient(id) {
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
   if (p.start_weight_kg && !weights.length) weights.push({ x: p.created_at.slice(0, 10), y: p.start_weight_kg });
-  const bmi = calcBMIClient(p.height_cm, weights.length ? weights[weights.length - 1].y : p.start_weight_kg);
+  const latestWeight = weights.length ? weights[weights.length - 1].y : (p.current_weight_kg || p.start_weight_kg);
+  const bmi = calcBMIClient(p.height_cm, latestWeight);
   const wtChange = weights.length > 1 ? (weights[weights.length - 1].y - weights[0].y) : null;
 
   view().innerHTML = `
@@ -550,9 +559,11 @@ async function viewPatient(id) {
   </div>
 
   <div class="metric-strip">
-    <div class="metric"><b>${weights.length ? weights[weights.length - 1].y + " kg" : (p.start_weight_kg ? p.start_weight_kg + " kg" : "—")}</b>Current weight</div>
+    <div class="metric"><b>${latestWeight ? latestWeight + " kg" : "—"}</b>Current weight</div>
     <div class="metric"><b style="color:${wtChange != null && wtChange < 0 ? "var(--accent)" : "inherit"}">${wtChange != null ? (wtChange > 0 ? "+" : "") + wtChange.toFixed(1) + " kg" : "—"}</b>Change</div>
     <div class="metric"><b>${bmi ?? "—"}</b>BMI ${bmi ? "· " + bmiCategoryClient(bmi) : ""}</div>
+    ${p.max_weight_kg ? `<div class="metric"><b>${p.max_weight_kg} kg</b>Max weight</div>` : ""}
+    ${p.goal_weight_kg ? `<div class="metric"><b>${p.goal_weight_kg} kg</b>Goal weight</div>` : ""}
     <div class="metric"><b>${doses.length}</b>Doses logged</div>
     <div class="metric"><b>${checkins.length}</b>Check-ins</div>
   </div>
@@ -588,8 +599,11 @@ async function viewPatient(id) {
               <div><span class="emr-lbl">Age</span><span class="emr-val">${p.age ? esc(p.age) + " years" : "—"}</span></div>
               <div><span class="emr-lbl">Gender</span><span class="emr-val">${esc(p.gender || "—")}</span></div>
               <div><span class="emr-lbl">Height</span><span class="emr-val">${p.height_cm ? esc(p.height_cm) + " cm" : "—"}</span></div>
-              <div><span class="emr-lbl">Weight</span><span class="emr-val">${weights.length ? esc(weights[weights.length - 1].y) : esc(p.start_weight_kg || "—")} kg</span></div>
+              <div><span class="emr-lbl">Weight</span><span class="emr-val">${latestWeight ? esc(latestWeight) + " kg" : "—"}</span></div>
               <div><span class="emr-lbl">BMI</span><span class="emr-val">${bmi ?? "—"}${bmi ? " · " + esc(bmiCategoryClient(bmi)) : ""}</span></div>
+              ${p.start_weight_kg ? `<div><span class="emr-lbl">Starting weight</span><span class="emr-val">${esc(p.start_weight_kg)} kg</span></div>` : ""}
+              ${p.max_weight_kg ? `<div><span class="emr-lbl">Maximum weight reached</span><span class="emr-val">${esc(p.max_weight_kg)} kg</span></div>` : ""}
+              ${p.goal_weight_kg ? `<div><span class="emr-lbl">Goal weight</span><span class="emr-val">${esc(p.goal_weight_kg)} kg</span></div>` : ""}
               <div><span class="emr-lbl">Mobile</span><span class="emr-val">+${esc(p.mobile)}</span></div>
               ${p.national_id ? `<div><span class="emr-lbl">Emirates ID / passport</span><span class="emr-val">${esc(p.national_id)}</span></div>` : ""}
               <div class="full"><span class="emr-lbl">Chronic illnesses</span><span class="emr-val">${esc(p.chronic_illnesses || "None reported")}</span></div>
@@ -720,13 +734,11 @@ async function viewPatient(id) {
         wireGuidePicker(box, guidePlans, renderOne, activeId);
         box.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
         document.getElementById("btn-copytext").addEventListener("click", async () => {
-          // Whichever medication's guide is currently on screen — the picker
-          // keeps S.guidePlanId in sync, so re-reading it here (rather than
-          // the activeId captured at render time) copies what's actually
-          // displayed even after switching chips.
-          const currentId = S.guidePlanId && guidePlans.some((pl) => pl.id === S.guidePlanId) ? S.guidePlanId : activeId;
-          const pl = guidePlans.find((x) => x.id === currentId) || guidePlans[0];
-          await navigator.clipboard.writeText(buildGuideText(pl, p, S.user.name));
+          // Every active program in one consolidated letter — not just the
+          // medication currently on screen — so a patient on two peptides
+          // never gets two separate, repetitive full guides copied one after
+          // another.
+          await navigator.clipboard.writeText(buildComboGuideText(guidePlans, p, S.user.name));
           toast("Guide text copied");
         });
         document.getElementById("btn-print").addEventListener("click", () => window.print());
@@ -822,6 +834,7 @@ function intakeSummaryCard(p) {
   if (intake.previous_glp1 === "Yes") rows.push(`<div><b>Previous GLP-1 use:</b> Yes${intake.previous_glp1__notes ? " — " + esc(intake.previous_glp1__notes) : ""}</div>`);
   if (intake.is_pregnant === "Yes") rows.push(`<div><b>Pregnant:</b> Yes</div>`);
   if (intake.is_breastfeeding === "Yes") rows.push(`<div><b>Breastfeeding:</b> Yes</div>`);
+  if (activityDetailSummary(intake.activity_detail)) rows.push(`<div><b>Exercise:</b> ${esc(activityDetailSummary(intake.activity_detail))}</div>`);
   if (intake.additional_notes) rows.push(`<div><b>Patient notes:</b> ${esc(intake.additional_notes)}</div>`);
   if (!rows.length) return "";
   return `<div class="card card-pad">
@@ -929,7 +942,10 @@ async function viewConsult() {
     step: 0,
     intakeSub: 0, // sub-step within Intake: identity → clinical → goals → objective
     existingId: preselect ? Number(preselect) : null,
-    patient: { name: "", mobile: "", email: "", nationalId: "", title: "", age: "", gender: "", heightCm: "", weightKg: "", activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
+    draftId: null,          // set once this consultation has been "saved for later"
+    patient: { name: "", mobile: "", email: "", nationalId: "", title: "", age: "", gender: "", heightCm: "",
+      weightKg: "", startWeightKg: "", maxWeightKg: "", goalWeightKg: "", goalWeightCustomized: false,
+      activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     cart: [],              // programs added so far this consultation (one entry per medication)
     draft: freshDraft("glp1"), // the program currently being configured on the Program step
     followupDays: 28, clinicalNote: "", supplements: "",
@@ -940,6 +956,10 @@ async function viewConsult() {
     clinicalSuggestion: "",
     emrCustomized: false,  // doctor has hand-edited the EMR text — stop overwriting it from field changes
   };
+  if (location.hash.includes("draft=")) {
+    const draftId = Number((location.hash.match(/draft=(\d+)/) || [])[1]);
+    if (draftId) return void resumeDraft(draftId);
+  }
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
     if (p) loadPatientIntoWizard(p);
@@ -952,9 +972,20 @@ function loadPatientIntoWizard(p) {
   Object.assign(S.wizard.patient, {
     name: p.name, mobile: p.mobile, email: p.email || "", nationalId: p.national_id || "",
     title: p.title || "", age: p.age || "", gender: p.gender || "",
-    heightCm: p.height_cm || "", weightKg: p.last_weight || p.start_weight_kg || "",
+    heightCm: p.height_cm || "", weightKg: p.last_weight || p.current_weight_kg || p.start_weight_kg || "",
+    startWeightKg: p.start_weight_kg || "", maxWeightKg: p.max_weight_kg || "",
+    goalWeightKg: p.goal_weight_kg || "", goalWeightCustomized: p.goal_weight_kg != null,
     intake: p.intake_json ? JSON.parse(p.intake_json) : {},
   });
+}
+
+// A goal weight suggestion — the weight for a BMI of 25 at this patient's
+// height — offered as a starting point, never forced: the doctor can
+// overwrite or clear it, and once they do it stops being auto-recomputed.
+function suggestGoalWeightKg(heightCm) {
+  const h = Number(heightCm);
+  if (!h) return null;
+  return Math.round(25 * (h / 100) ** 2 * 10) / 10;
 }
 
 // live metrics for the current wizard patient
@@ -980,10 +1011,69 @@ function patientSummaryHTML(showRx) {
 
 function wizHead() {
   return `
-  <div class="page-head"><div><h1>New consultation</h1><div class="sub">Consult → build program → publish guide</div></div></div>
+  <div class="page-head">
+    <div><h1>New consultation</h1><div class="sub">Consult → build program → publish guide</div></div>
+    <button class="btn btn-secondary btn-sm" id="wz-savelater" type="button">${icon("clock", 16)} Save for later</button>
+  </div>
   <div class="steps">
     ${WIZ_STEPS.map((s, i) => `<div class="step-dot ${i < S.wizard.step ? "done" : ""} ${i === S.wizard.step ? "on" : ""}"><div class="step-bar"></div><div class="step-lbl">${i + 1}. ${s}</div></div>`).join("")}
   </div>`;
+}
+
+// A consultation that can't be finished in one sitting is saved as an
+// incomplete draft — nothing here touches the real patients/plans tables.
+// Available on every wizard step (wired once via delegation on #view, since
+// wizHead() is re-rendered on every step change).
+async function saveDraftForLater() {
+  const w = S.wizard;
+  if (!w) return;
+  const label = w.patient.name || w.patient.mobile || "Untitled consultation";
+  try {
+    if (w.draftId) await api("PUT", `/api/drafts/${w.draftId}`, { label, state: w });
+    else { const created = await api("POST", "/api/drafts", { label, state: w }); w.draftId = created.id; }
+    toast("Saved — resume anytime from Drafts");
+  } catch (ex) {
+    toast(ex.message || "Could not save draft", "bad");
+  }
+}
+
+async function resumeDraft(draftId) {
+  view().innerHTML = `<div class="skel" style="height:340px"></div>`;
+  try {
+    const { state } = await api("GET", `/api/drafts/${draftId}`);
+    S.wizard = state;
+    S.wizard.draftId = draftId;
+    paintWizard();
+  } catch (ex) {
+    view().innerHTML = `<div class="empty">${icon("alert", 32)}<div class="empty-title">${esc(ex.message || "Draft not found")}</div></div>`;
+  }
+}
+
+// ── incomplete consultations list ─────────────────────────────────
+async function viewDrafts() {
+  view().innerHTML = `<div class="skel" style="height:200px"></div>`;
+  const drafts = await api("GET", "/api/drafts");
+  view().innerHTML = `
+  <div class="page-head"><div><h1>Drafts</h1><div class="sub">Consultations saved for later — pick one up where you left off</div></div></div>
+  ${drafts.length ? `<div class="card">
+    ${drafts.map((d) => `
+      <div class="pt-row" data-draft="${d.id}">
+        <div class="pt-info">
+          <div class="pt-name">${esc(d.label || "Untitled consultation")}</div>
+          <div class="pt-meta">Saved ${timeAgo(d.updated_at)}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" data-resume="${d.id}">${icon("chevR", 15)} Resume</button>
+          <button class="icon-btn" data-discard="${d.id}" aria-label="Discard draft">${icon("x", 16)}</button>
+        </div>
+      </div>`).join("")}
+  </div>` : `<div class="empty">${icon("clock", 34)}<div class="empty-title">No drafts</div><p>Consultations saved for later will show up here.</p></div>`}`;
+  view().querySelectorAll("[data-resume]").forEach((b) => b.addEventListener("click", () => { location.hash = `#/consult?draft=${b.dataset.resume}`; }));
+  view().querySelectorAll("[data-discard]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Discard this saved consultation? This can't be undone.")) return;
+    await api("DELETE", `/api/drafts/${b.dataset.discard}`);
+    viewDrafts();
+  }));
 }
 
 function paintWizard() {
@@ -1408,6 +1498,45 @@ function showIntakeErr(missing) {
   err.hidden = false;
 }
 
+// ── activity detail (cardio/resistance) — optional, only offered once the
+// patient is more active than sedentary ────────────────────────────────
+function activityDetailSummary(d) {
+  if (!d) return "";
+  const bits = [];
+  if (d.cardioType) bits.push(`Cardio: ${d.cardioType}${d.cardioSessions ? ` × ${d.cardioSessions}/wk` : ""}`);
+  if (d.resistanceType) bits.push(`Resistance: ${d.resistanceType}${d.resistanceSessions ? ` × ${d.resistanceSessions}/wk` : ""}`);
+  return bits.join(" · ");
+}
+
+function activityDetailModal(current, onSave) {
+  const d = current || {};
+  const scrim = modal(`
+    <div class="modal-head"><h3>Exercise details</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin:-6px 0 14px">Optional — only what the patient can tell you.</p>
+    <div class="form-grid">
+      <div class="field full"><label for="ad-cardio">Cardio type</label><input class="input" id="ad-cardio" value="${esc(d.cardioType || "")}" placeholder="e.g. Running, cycling, swimming"></div>
+      <div class="field"><label for="ad-cardio-n">Cardio sessions per week</label><input class="input" id="ad-cardio-n" type="number" min="0" max="14" value="${esc(d.cardioSessions || "")}"></div>
+      <div class="field full"><label for="ad-resist">Resistance training type</label><input class="input" id="ad-resist" value="${esc(d.resistanceType || "")}" placeholder="e.g. Weights, bodyweight, bands"></div>
+      <div class="field"><label for="ad-resist-n">Resistance sessions per week</label><input class="input" id="ad-resist-n" type="number" min="0" max="14" value="${esc(d.resistanceSessions || "")}"></div>
+    </div>
+    <button class="btn btn-primary btn-block" id="ad-save">Save</button>`);
+  scrim.querySelector("#ad-save").addEventListener("click", () => {
+    onSave({
+      cardioType: scrim.querySelector("#ad-cardio").value.trim(),
+      cardioSessions: scrim.querySelector("#ad-cardio-n").value.trim(),
+      resistanceType: scrim.querySelector("#ad-resist").value.trim(),
+      resistanceSessions: scrim.querySelector("#ad-resist-n").value.trim(),
+    });
+    scrim.remove();
+  });
+}
+
+// ── missed-appointment quick message — for a patient who isn't present ──
+function missedAppointmentText(patient, doctorName) {
+  const name = `${patient.title ? patient.title + " " : ""}${patient.name || "there"}`;
+  return `Hello ${name}, we noticed you weren't able to make it to your appointment with ${doctorName} today. No worries — let's find a time that works better for you.\n\nJust reply here or message us to reschedule, and we'll get you booked in.\n\n— ${doctorName}`;
+}
+
 function wizStepIntake() {
   const key = intakeSubSteps()[Math.min(S.wizard.intakeSub, intakeSubSteps().length - 1)].key;
   if (key === "identity") return wizIntakeIdentity();
@@ -1434,6 +1563,10 @@ function wizIntakeIdentity() {
       <span class="hint">${w.existingId
         ? `Follow-up for this patient — <button type="button" class="linklike" id="wz-clear-existing">clear selection</button> to start a new patient instead.`
         : "Type to search existing patients (name or mobile) for a follow-up, or just fill the form below for a new patient."}</span>
+    </div>
+    <div class="field full" style="margin-top:-8px">
+      <button type="button" class="btn btn-ghost btn-sm" id="wz-missed-appt">${icon("whatsapp", 15)} Send missed-appointment message</button>
+      <span class="hint">If ${esc(w.patient.name || "this patient")} isn't present, send a quick WhatsApp to reschedule — no need to continue this consultation.</span>
     </div>
 
     <div class="qf-box">
@@ -1479,21 +1612,64 @@ function wizIntakeIdentity() {
           <span class="hint">lbs</span>
         </div>
       </div>
-      <div class="field full"><label>Activity level</label><div class="chip-row">${Object.keys(S.presets.activityLevels || {}).map((a) => `<button type="button" class="chip ${w.patient.activityLevel === a ? "on" : ""}" data-demochip="activityLevel" data-v="${a}">${a}</button>`).join("")}</div></div>
+      <div class="field"><label for="wp-startweight">Starting weight (kg) <span class="hint" style="font-weight:400">optional</span></label><input class="input" id="wp-startweight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.startWeightKg)}" placeholder="Weight when treatment began"></div>
+      <div class="field"><label for="wp-maxweight">Maximum weight reached (kg) <span class="hint" style="font-weight:400">optional</span></label><input class="input" id="wp-maxweight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.maxWeightKg)}"></div>
+      <div class="field">
+        <label for="wp-goalweight">Goal weight (kg) <span class="hint" style="font-weight:400">optional</span></label>
+        <input class="input" id="wp-goalweight" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${esc(w.patient.goalWeightKg)}">
+        <span class="hint">Suggested for a target BMI of 25 — adjust or clear as needed.</span>
+      </div>
+      <div class="field full">
+        <label>Activity level</label>
+        <div class="chip-row">${Object.keys(S.presets.activityLevels || {}).map((a) => `<button type="button" class="chip ${w.patient.activityLevel === a ? "on" : ""}" data-demochip="activityLevel" data-v="${a}">${a}</button>`).join("")}</div>
+        ${w.patient.activityLevel && w.patient.activityLevel !== "Sedentary" ? `
+        <div style="margin-top:8px">
+          <button type="button" class="btn btn-ghost btn-sm" id="wp-activity-detail">${icon("activity", 15)} ${activityDetailSummary(w.patient.intake.activity_detail) ? "Edit exercise details" : "Add exercise details (optional)"}</button>
+          ${activityDetailSummary(w.patient.intake.activity_detail) ? `<div class="hint" style="margin-top:4px">${esc(activityDetailSummary(w.patient.intake.activity_detail))}</div>` : ""}
+        </div>` : ""}
+      </div>
       <div class="field full"><label>Body shape</label><div class="chip-row">${(S.presets.bodyShapes || []).map((b) => `<button type="button" class="chip ${w.patient.intake.body_shape === b ? "on" : ""}" data-demochip="intake.body_shape" data-v="${b}">${b}</button>`).join("")}</div></div>
     </div>
     <div id="wz-metrics">${patientSummaryHTML(false)}</div>
-  `);
+  `, wizSidePanel());
+  wireNotesPanel(view());
 
-  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight" };
+  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight", startWeightKg: "wp-startweight", maxWeightKg: "wp-maxweight" };
   const commitDemo = () => {
     Object.entries(demoTextIds).forEach(([k, id]) => { w.patient[k] = document.getElementById(id).value; });
   };
   const liveMetrics = () => {
     commitDemo();
     document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
+    // A fresh height suggests a goal weight (BMI 25) — but only until the
+    // doctor has typed into that field themselves.
+    if (!w.patient.goalWeightCustomized) {
+      const suggested = suggestGoalWeightKg(w.patient.heightCm);
+      w.patient.goalWeightKg = suggested ?? "";
+      document.getElementById("wp-goalweight").value = w.patient.goalWeightKg;
+    }
   };
   Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
+  document.getElementById("wp-goalweight").addEventListener("input", (e) => {
+    w.patient.goalWeightKg = e.target.value;
+    w.patient.goalWeightCustomized = true;
+  });
+
+  const activityDetailBtn = document.getElementById("wp-activity-detail");
+  if (activityDetailBtn) activityDetailBtn.addEventListener("click", () => {
+    commitDemo();
+    activityDetailModal(w.patient.intake.activity_detail, (detail) => {
+      w.patient.intake.activity_detail = detail;
+      wizIntakeIdentity();
+    });
+  });
+
+  const missedApptBtn = document.getElementById("wz-missed-appt");
+  if (missedApptBtn) missedApptBtn.addEventListener("click", () => {
+    commitDemo();
+    if (!w.patient.mobile.trim()) return toast("Add a mobile number first", "bad");
+    window.open(waLink(w.patient.mobile, missedAppointmentText(w.patient, S.user.name)), "_blank");
+  });
 
   // Height/weight can be typed in whichever unit the doctor has in front of
   // them (a US-format referral in lbs, a patient who knows their height in
@@ -1676,7 +1852,8 @@ function wizIntakeClinical() {
 
     ${renderIntakeQuestion(cancerQ)}
     ${renderIntakeQuestion(glp1Q)}
-  `);
+  `, wizSidePanel());
+  wireNotesPanel(view());
 
   wireIntake(view(), () => wizIntakeClinical());
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
@@ -1685,6 +1862,26 @@ function wizIntakeClinical() {
     if (missing.length) return showIntakeErr(missing);
     advanceIntake();
   });
+}
+
+// ── persistent side panel: patient notes + recommended meds ──────────
+// Shown on every consultation page so a note jotted early in the intake
+// isn't lost by the time the doctor reaches Program/Labs/Clinical/Review —
+// and the medications suggested from the patient's health goals stay
+// visible underneath it the whole way through, not just on the Goals step.
+function patientNotesSideHTML() {
+  const w = S.wizard;
+  return `<div class="card card-pad">
+    <div class="card-title">${icon("edit", 17)} Patient notes</div>
+    <textarea class="input" id="wz-notes" rows="4" placeholder="Notes or concerns for this consultation — carries through every step.">${esc(w.patient.intake.additional_notes || "")}</textarea>
+  </div>`;
+}
+function wireNotesPanel(scope) {
+  const box = (scope || document).querySelector("#wz-notes");
+  if (box) box.addEventListener("input", (e) => { S.wizard.patient.intake.additional_notes = e.target.value; });
+}
+function wizSidePanel() {
+  return patientNotesSideHTML() + suggestedPeptidesHTML();
 }
 
 // ── Sub-step 3: Primary Health Objectives ─────────────────────────────
@@ -1880,14 +2077,33 @@ function showPeptideDetail(name) {
 }
 
 function wizIntakeGoals() {
+  const w = S.wizard;
   const goalsQ = S.presets.intakeQuestions.find((q) => q.id === "health_goals");
+  const isWeightLoss = (w.patient.intake.health_goals || []).includes("Weight loss");
   wizIntakeShell(`
     <div class="card-title">${icon("sparkle", 19)} Primary Health Objectives</div>
     <p class="hint" style="margin-bottom:14px">Select every goal that applies — choosing <b>Weight loss</b> routes this consultation into the GLP-1 / weight-loss program, and each goal reveals its own follow-up questions next.</p>
     ${renderIntakeQuestion(goalsQ)}
-  `, suggestedPeptidesHTML());
+    ${isWeightLoss ? `
+    <div class="g-callout g-teal" style="margin-top:14px;align-items:flex-start">
+      ${icon("trend", 17)}
+      <div style="flex:1">
+        <b>Goal weight (optional)</b>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <input class="input" id="wg-goalweight-inline" type="number" step="0.1" min="25" max="350" style="max-width:120px" value="${esc(w.patient.goalWeightKg)}" placeholder="kg">
+          <span class="hint">kg — suggested for a target BMI of 25; also editable on the Identity page.</span>
+        </div>
+      </div>
+    </div>` : ""}
+  `, wizSidePanel());
+  wireNotesPanel(view());
   wireIntake(view(), () => wizIntakeGoals());
   wirePeptideInfoButtons(view());
+  const goalWeightInline = document.getElementById("wg-goalweight-inline");
+  if (goalWeightInline) goalWeightInline.addEventListener("input", (e) => {
+    w.patient.goalWeightKg = e.target.value;
+    w.patient.goalWeightCustomized = true;
+  });
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => {
     const missing = validateGoals();
@@ -1899,11 +2115,14 @@ function wizIntakeGoals() {
 
 // ── Sub-step 4: Objective-Specific Questions (skipped if none apply) ──
 function wizIntakeObjective() {
-  const qs = S.presets.intakeQuestions.filter((q) => q.section === "Objective-Specific Questions" && intakeVisible(q));
+  // additional_notes now lives permanently in the persistent side panel
+  // (see patientNotesSideHTML) rather than as a one-time question here.
+  const qs = S.presets.intakeQuestions.filter((q) => q.section === "Objective-Specific Questions" && q.id !== "additional_notes" && intakeVisible(q));
   wizIntakeShell(`
     <div class="card-title">${icon("activity", 19)} Objective-Specific Questions</div>
     ${qs.map(renderIntakeQuestion).join("")}
-  `);
+  `, wizSidePanel());
+  wireNotesPanel(view());
   wireIntake(view(), () => wizIntakeObjective());
   document.getElementById("wz-back").addEventListener("click", retreatIntake);
   document.getElementById("wz-next").addEventListener("click", () => advanceIntake());
@@ -1943,8 +2162,9 @@ function wizStepProgram() {
       <button class="btn btn-primary" id="wz-next">Continue ${icon("chevR", 17)}</button>
     </div>
   </div>
-  <div id="wz-side">${suggestedPeptidesHTML()}</div>
+  <div id="wz-side">${wizSidePanel()}</div>
   </div>`;
+  wireNotesPanel(view());
   wirePeptideInfoButtons(view());
 
   function cartHTML() {
@@ -2910,7 +3130,8 @@ function wizStepLabs() {
   const medList = w.cart.map((c) => c.medication).join(", ") || "the program";
   const patientName = w.patient.name || "the patient";
   view().innerHTML = `${wizHead()}
-  <div class="card card-pad" style="max-width:820px">
+  <div class="two-col">
+  <div class="card card-pad">
     <div class="card-title">${icon("sparkles", 19)} AI clinical analysis — labs &amp; supplements</div>
     <p class="hint" style="margin:-4px 0 14px">Analysed <b>${esc(medList)}</b> against ${esc(patientName)}&rsquo;s findings and the prescriber&rsquo;s protocol guidebook. Nothing is pre-selected — tick anything you want to order or advise, or add your own. Chosen items appear in the patient&rsquo;s guide.</p>
 
@@ -2940,7 +3161,10 @@ function wizStepLabs() {
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
       <button class="btn btn-primary" id="wz-next" ${blocking.length ? "disabled" : ""} title="${blocking.length ? "Resolve the protocol safety issues first" : ""}">Continue ${icon("chevR", 17)}</button>
     </div>
+  </div>
+  <div id="wz-side">${wizSidePanel()}</div>
   </div>`;
+  wireNotesPanel(view());
 
   const updateCounts = () => {
     document.getElementById("lab-count").textContent = w.labTests.filter((l) => l.on).length;
@@ -2990,7 +3214,8 @@ function wizStepClinical() {
   const hasGlp1 = w.cart.some((c) => c.category === "glp1");
 
   view().innerHTML = `${wizHead()}
-  <div class="card card-pad" style="max-width:820px">
+  <div class="two-col">
+  <div class="card card-pad">
     <div class="card-title">${icon("clipboard", 19)} Clinical details &amp; guide content</div>
 
     ${w.cart.map((c, i) => `
@@ -3035,7 +3260,10 @@ function wizStepClinical() {
       <button class="btn btn-ghost" id="wz-back">${icon("chevL", 17)} Back</button>
       <button class="btn btn-primary" id="wz-next">Preview guide ${icon("chevR", 17)}</button>
     </div>
+  </div>
+  <div id="wz-side">${wizSidePanel()}</div>
   </div>`;
+  wireNotesPanel(view());
 
   // The EMR box starts populated from every field on this page (and the two
   // steps before it), and stays in sync with them — until the doctor types
@@ -3108,7 +3336,10 @@ function previewGuideInfo(category, medication) {
   const info = category === "glp1" ? (S.presets.glp1Info || {})[medication] : (S.presets.peptideInfo || {})[medication];
   if (!info) return null;
   const redFlags = category === "glp1" ? ((S.presets.glp1Eligibility || {}).redFlags || []) : (info.redFlags || []);
-  return { howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags };
+  return {
+    howItWorks: info.howItWorks || "", commonSideEffects: info.commonSideEffects || "", redFlags,
+    videoLink: category === "glp1" ? ((S.presets.glp1VideoLinks || {})[medication] || "") : "",
+  };
 }
 
 function wizStepReview() {
@@ -3175,6 +3406,7 @@ function wizStepReview() {
         <div class="card-title">${icon("scale", 18)} Patient summary</div>
         ${patientSummaryHTML(true) || `<p class="hint">Add height, weight and age in the intake to compute metrics.</p>`}
       </div>
+      ${patientNotesSideHTML()}
       ${clinicalSuggestion ? `<div class="card card-pad">
         <div class="card-title" style="justify-content:space-between">
           <span style="display:flex;align-items:center;gap:10px">${icon("file", 18)} Clinical record (EMR)</span>
@@ -3184,6 +3416,7 @@ function wizStepReview() {
       </div>` : ""}
     </div>
   </div>`;
+  wireNotesPanel(view());
   if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
   document.getElementById("rv-guide-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
 
@@ -3205,6 +3438,8 @@ function wizStepReview() {
           name: w.patient.name, mobile: w.patient.mobile, email: w.patient.email, nationalId: w.patient.nationalId, title: w.patient.title,
           age: Number(w.patient.age) || null, gender: w.patient.gender,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
+          startWeightKg: Number(w.patient.startWeightKg) || null, maxWeightKg: Number(w.patient.maxWeightKg) || null,
+          goalWeightKg: Number(w.patient.goalWeightKg) || null,
           activityLevel: w.patient.activityLevel, chronicIllnesses: w.patient.chronicIllnesses,
           medications: w.patient.medications, allergies: w.patient.allergies, intake: w.patient.intake,
         });
@@ -3215,9 +3450,12 @@ function wizStepReview() {
           email: w.patient.email, nationalId: w.patient.nationalId, chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
           allergies: w.patient.allergies, intake: w.patient.intake,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
+          startWeightKg: Number(w.patient.startWeightKg) || null, maxWeightKg: Number(w.patient.maxWeightKg) || null,
+          goalWeightKg: Number(w.patient.goalWeightKg) || null,
           age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,
         });
       }
+      if (w.draftId) { try { await api("DELETE", `/api/drafts/${w.draftId}`); } catch { /* best effort */ } }
       // One plan row per program added this consultation — each keeps its
       // own dose/quantity/instructions/warnings/blood test, sharing the
       // visit-level follow-up date, clinical note and EMR suggestion.

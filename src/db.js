@@ -202,6 +202,42 @@ addColumn("organizations", "app_name", "TEXT");
 db.exec("CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);");
 db.exec("CREATE INDEX IF NOT EXISTS idx_patients_org ON patients(org_id);");
 
+// ── weight tracking ─────────────────────────────────────────────
+// `start_weight_kg` is the weight recorded when the patient was first
+// registered and is never overwritten afterwards. `current_weight_kg` is
+// updated at each consultation. Both `max_weight_kg` and `goal_weight_kg`
+// are optional, doctor-entered fields — the wizard suggests a goal weight
+// (the weight for a BMI of 25) but never requires one.
+addColumn("patients", "current_weight_kg", "REAL");
+addColumn("patients", "max_weight_kg", "REAL");
+addColumn("patients", "goal_weight_kg", "REAL");
+
+// ── incomplete consultations ("save for later") ──────────────────
+// A snapshot of the wizard's in-memory state, so a consultation that can't
+// be finished in one sitting isn't lost — nothing here touches the real
+// patients/plans tables until the doctor actually publishes.
+db.exec(`
+CREATE TABLE IF NOT EXISTS wizard_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  doctor_id INTEGER NOT NULL REFERENCES users(id),
+  org_id INTEGER,
+  label TEXT DEFAULT '',
+  state_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_drafts_org ON wizard_drafts(org_id);`);
+
+// ── GLP-1 patient-education video links ──────────────────────────
+// Optional, per-medication URL the doctor pastes in from the admin panel —
+// never guessed or auto-filled — shown in the guide only once set.
+db.exec(`
+CREATE TABLE IF NOT EXISTS glp1_video_links (
+  medication TEXT PRIMARY KEY,
+  url TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+
 // Everything that existed before organisations belongs to the practice that
 // has been using the app: DarDoc Healthcare becomes organisation 1 and adopts
 // every existing user and patient. Runs once — afterwards nothing is orphaned.

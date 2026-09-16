@@ -581,9 +581,11 @@ function paintGuide(v) {
   v.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => { S.guidePlanId = Number(b.dataset.gpick); }));
   v.querySelector("#g-print").addEventListener("click", () => window.print());
   v.querySelector("#g-copytext").addEventListener("click", async () => {
-    const currentId = S.guidePlanId && plans.some((p) => p.id === S.guidePlanId) ? S.guidePlanId : activeId;
-    const plan = plans.find((p) => p.id === currentId) || plans[0];
-    await navigator.clipboard.writeText(buildGuideText(plan, S.me.patient, S.me.doctorName));
+    // Browsing the guide on-screen stays per-medication (see paintGuide's
+    // note above), but the copied text is always the one consolidated
+    // letter — so a patient on two peptides doesn't end up pasting two
+    // separate, repetitive full guides one after another.
+    await navigator.clipboard.writeText(buildComboGuideText(plans, S.me.patient, S.me.doctorName));
     toast("Guide text copied");
   });
 }

@@ -242,6 +242,7 @@ function buildGuide(plan, patient, doctorName, opts) {
         ${plan.quantity && plan.quantity > 1 ? `<div class="g-fact"><div class="g-fact-lbl">Quantity dispensed</div><div class="g-fact-val">${esc(plan.quantity)}</div></div>` : ""}
       </div>
       ${doseNoteHtml}
+      ${(plan.guideInfo || {}).videoLink ? `<a class="g-video-link" href="${esc(plan.guideInfo.videoLink)}" target="_blank" rel="noopener">🎥 Watch: how ${esc(plan.medication)} works &amp; how to take it</a>` : ""}
     </section>
 
     <section class="g-sec">
@@ -309,6 +310,18 @@ function guideFreqPhrase(f) {
   if (t === "daily") return "once daily";
   if (t === "weekly") return "once weekly";
   return t;
+}
+// Structured lab tests, in the same required/recommended wording the HTML
+// guide uses — shared by the single-plan and multi-peptide text guides.
+function pushLabTestLines(push, section, labList) {
+  if (!labList || !labList.length) return;
+  section("🧪", "LAB TESTS");
+  labList.forEach((l) => {
+    const bits = [`${l.name} — ${l.required ? "required" : "recommended"}`];
+    if (l.fasting) bits.push("fasting");
+    push(`• ${bits.join(", ")}`);
+    if (l.detail) push(`  ${l.detail}`);
+  });
 }
 function commaList(items, conj) {
   const a = items.filter(Boolean);
@@ -389,6 +402,10 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push();
     push(`Approved doses for ${plan.medication}: ${doseOptions.join(" → ")}.`);
   }
+  if (info.videoLink) {
+    push();
+    push(`🎥 Watch how ${plan.medication} works and how to take it: ${info.videoLink}`);
+  }
 
   if (plan.instructions) {
     section("💊", `HOW TO TAKE ${String(plan.medication || "").toUpperCase()}`);
@@ -447,6 +464,8 @@ function buildGuideText(plan, patient, doctorName, opts) {
     if (isGlp1) push("If nauseated, eat smaller meals, avoid greasy or heavy foods, eat slowly, and maintain hydration.");
     push(`Message me if symptoms persist or interfere with normal ${isGlp1 ? "eating or drinking" : "daily activity"}.`);
   }
+
+  pushLabTestLines(push, section, plan.labTests);
 
   section("☎️", "WHEN TO CONTACT ME");
   push(`Message me for ${commaList(isGlp1 ? GLP1_MESSAGE_REASONS : PEPTIDE_MESSAGE_REASONS, "or")}.`);
@@ -517,9 +536,15 @@ function buildComboGuideText(plans, patient, doctorName) {
   const others = plans.filter((p) => p !== primary);
   const otherBlocks = others.map((plan) => {
     const info = plan.guideInfo || {};
-    const block = [`*${plan.medication}*${plan.dose ? ` — ${plan.dose}` : ""}`, plan.frequency || ""];
+    const block = [`*${plan.medication}*${plan.dose ? ` — ${plan.dose}` : ""}`, plan.frequency ? guideFreqPhrase(plan.frequency) : ""];
     if (info.howItWorks) block.push(info.howItWorks);
     if (plan.instructions) block.push(guideProseText(plan.instructions));
+    // Every medication's own side effects and red flags travel with it, even
+    // when it isn't the primary program — a consolidated guide still has to
+    // carry every warning sign, not just the lead medication's.
+    if (info.commonSideEffects) block.push(`Common effects: ${lcFirst(info.commonSideEffects.replace(/\.$/, ""))}.`);
+    const urgent = (info.redFlags || []).map(leadClause).filter(Boolean).map(lcFirst);
+    if (urgent.length) block.push(`Seek urgent care for ${commaList(urgent, "or")}.`);
     return block.filter(Boolean).join("\n");
   }).join("\n\n");
   return buildGuideText(primary, patient, doctorName, {
@@ -569,6 +594,7 @@ const GUIDE_CSS = `
   .g-med-photo-overlay { width: 60px; height: 60px; top: 14px; right: 16px; padding: 6px; }
   .g-sec-program .g-facts { padding-top: 72px; }
 }
+.g-video-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; color: var(--brand); font-family: var(--font-head); margin: -6px 0 14px; }
 .g-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .g-fact { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 14px; }
 .g-fact-lbl { font-size: 11.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
