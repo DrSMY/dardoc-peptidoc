@@ -85,9 +85,32 @@ const IN_ORG = "patient_id IN (SELECT id FROM patients WHERE org_id = ?)";
 // A patient, but only if the signed-in user's organisation owns them. Used
 // wherever a patient is reached by id, so one practice cannot read or write
 // another's records by guessing a number.
+// Date of birth as YYYY-MM-DD → a real, past calendar date, or null.
+function parseDob(v) {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  const age = ageFromDob(m[0]);
+  return age >= 0 && age <= 120 ? m[0] : null;
+}
+function ageFromDob(dob, today) {
+  const t = today || new Date();
+  const [y, m, d] = dob.split("-").map(Number);
+  let age = t.getFullYear() - y;
+  if ((t.getMonth() + 1) * 100 + t.getDate() < m * 100 + d) age--;
+  return age;
+}
+// With a date of birth on file the age is always derived from it.
+function withLiveAge(row) {
+  if (row && row.dob) row.age = ageFromDob(row.dob);
+  return row;
+}
+
 function patientInOrg(id, user) {
   const row = db.prepare("SELECT * FROM patients WHERE id = ?").get(id);
-  return row && row.org_id === user.org_id ? row : null;
+  return row && row.org_id === user.org_id ? withLiveAge(row) : null;
 }
 const NOT_IN_ORG = { error: "Not found in your organisation." };
 
@@ -833,7 +856,7 @@ route("GET", "/api/patients", (req, res) => {
       (SELECT COUNT(*) FROM messages m WHERE m.patient_id = p.id AND m.sender = 'patient' AND m.read_at IS NULL) AS unread_msgs
     FROM patients p WHERE p.archived = 0 AND p.org_id = ?
     ORDER BY p.created_at DESC`).all(me.org_id);
-  json(res, 200, rows.map((r) => ({ ...r, pin_hash: undefined })));
+  json(res, 200, rows.map((r) => ({ ...withLiveAge(r), pin_hash: undefined })));
 });
 
 route("POST", "/api/patients", async (req, res, _p, body) => {
@@ -850,14 +873,19 @@ route("POST", "/api/patients", async (req, res, _p, body) => {
       ? { error: "A patient with this mobile number already exists.", patientId: dup.id }
       : { error: "That mobile number is already registered to another organisation." });
   }
+  let dob = null;
+  if (body.dob) {
+    dob = parseDob(body.dob);
+    if (!dob) return json(res, 400, { error: "Enter a valid date of birth." });
+  }
   const pin = generatePin();
   // The weight entered when a patient is first registered is both their
   // starting weight and (for that first visit) their current weight.
   const startWeight = body.startWeightKg || body.weightKg || null;
   const r = db.prepare(`INSERT INTO patients
-    (doctor_id, org_id, name, mobile, pin_hash, title, age, gender, height_cm, start_weight_kg, current_weight_kg, max_weight_kg, goal_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(doc.id, doc.org_id, name, mobile, hashSecret(pin), body.title || "", body.age || null, body.gender || "",
+    (doctor_id, org_id, name, mobile, pin_hash, title, age, dob, gender, height_cm, start_weight_kg, current_weight_kg, max_weight_kg, goal_weight_kg, activity_level, chronic_illnesses, medications, allergies, notes, intake_json, email, national_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(doc.id, doc.org_id, name, mobile, hashSecret(pin), body.title || "", dob ? ageFromDob(dob) : (body.age || null), dob, body.gender || "",
       body.heightCm || null, startWeight, body.weightKg || startWeight, body.maxWeightKg || null, body.goalWeightKg || null,
       body.activityLevel || "Sedentary",
       body.chronicIllnesses || "", body.medications || "", body.allergies || "", body.notes || "",
@@ -896,6 +924,17 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
     medications: "medications", allergies: "allergies", notes: "notes", archived: "archived", email: "email",
     nationalId: "national_id" };
   const sets = [], vals = [];
+  // A date of birth replaces a typed age; clearing it (sent as "") leaves the
+  // typed age in force.
+  if (body.dob !== undefined) {
+    if (!body.dob) sets.push("dob = NULL");
+    else {
+      const dob = parseDob(body.dob);
+      if (!dob) return json(res, 400, { error: "Enter a valid date of birth." });
+      sets.push("dob = ?"); vals.push(dob);
+      body.age = ageFromDob(dob);
+    }
+  }
   for (const [k, col] of Object.entries(fields)) {
     if (body[k] !== undefined) { sets.push(`${col} = ?`); vals.push(body[k]); }
   }
@@ -926,7 +965,7 @@ route("POST", "/api/patients/:id/pin", (req, res, p) => {
 route("GET", "/api/drafts", (req, res) => {
   const me = requireClinician(req);
   if (!me) return json(res, 403, NOT_CLINICIAN);
-  const rows = db.prepare("SELECT id, label, updated_at FROM wizard_drafts WHERE org_id = ? ORDER BY updated_at DESC").all(me.org_id);
+  const rows = db.prepare("SELECT id, label, progress, mobile, updated_at FROM wizard_drafts WHERE org_id = ? ORDER BY updated_at DESC").all(me.org_id);
   json(res, 200, rows);
 });
 
@@ -941,8 +980,8 @@ route("GET", "/api/drafts/:id", (req, res, p) => {
 route("POST", "/api/drafts", async (req, res, _p, body) => {
   const me = requireClinician(req);
   if (!me) return json(res, 403, NOT_CLINICIAN);
-  const r = db.prepare("INSERT INTO wizard_drafts (doctor_id, org_id, label, state_json) VALUES (?,?,?,?)")
-    .run(me.id, me.org_id, String(body.label || "").trim(), JSON.stringify(body.state || {}));
+  const r = db.prepare("INSERT INTO wizard_drafts (doctor_id, org_id, label, progress, mobile, state_json) VALUES (?,?,?,?,?,?)")
+    .run(me.id, me.org_id, String(body.label || "").trim(), String(body.progress || "").trim(), String(body.mobile || "").trim(), JSON.stringify(body.state || {}));
   json(res, 200, { id: Number(r.lastInsertRowid) });
 });
 
@@ -951,8 +990,8 @@ route("PUT", "/api/drafts/:id", async (req, res, p, body) => {
   if (!me) return json(res, 403, NOT_CLINICIAN);
   const row = db.prepare("SELECT id FROM wizard_drafts WHERE id = ? AND org_id = ?").get(p.id, me.org_id);
   if (!row) return json(res, 404, { error: "Draft not found." });
-  db.prepare("UPDATE wizard_drafts SET label = ?, state_json = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(String(body.label || "").trim(), JSON.stringify(body.state || {}), p.id);
+  db.prepare("UPDATE wizard_drafts SET label = ?, progress = ?, mobile = ?, state_json = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(String(body.label || "").trim(), String(body.progress || "").trim(), String(body.mobile || "").trim(), JSON.stringify(body.state || {}), p.id);
   json(res, 200, { ok: true });
 });
 

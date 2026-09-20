@@ -160,6 +160,10 @@ function renderShell() {
   document.getElementById("view").addEventListener("click", (e) => {
     if (e.target.closest("#wz-savelater")) saveDraftForLater();
   });
+  // Any edit or tap inside a consultation starts a short idle timer; when it
+  // fires the work so far is saved to Drafts.
+  ["input", "click"].forEach((ev) => document.getElementById("view").addEventListener(ev, scheduleAutosave));
+  refreshDraftBadge();
 }
 
 function setActiveNav() {
@@ -175,6 +179,10 @@ function view() { return document.getElementById("view"); }
 
 function route() {
   const h = location.hash || "#/dashboard";
+  // Walking away from a consultation mid-way keeps it as a draft.
+  const inWizard = h.startsWith("#/consult");
+  if (S.inWizard && !inWizard) { clearTimeout(autosaveTimer); persistDraft(false); }
+  S.inWizard = inWizard;
   setActiveNav();
   const m = h.match(/^#\/patient\/(\d+)/);
   if (m) return viewPatient(Number(m[1]));
@@ -597,6 +605,7 @@ async function viewPatient(id) {
             <div class="emr-grid">
               <div><span class="emr-lbl">Name</span><span class="emr-val">${esc(p.title ? p.title + " " : "")}${esc(p.name)}</span></div>
               <div><span class="emr-lbl">Age</span><span class="emr-val">${p.age ? esc(p.age) + " years" : "—"}</span></div>
+              ${p.dob ? `<div><span class="emr-lbl">Date of birth</span><span class="emr-val">${esc(fmtDate(p.dob))}</span></div>` : ""}
               <div><span class="emr-lbl">Gender</span><span class="emr-val">${esc(p.gender || "—")}</span></div>
               <div><span class="emr-lbl">Height</span><span class="emr-val">${p.height_cm ? esc(p.height_cm) + " cm" : "—"}</span></div>
               <div><span class="emr-lbl">Weight</span><span class="emr-val">${latestWeight ? esc(latestWeight) + " kg" : "—"}</span></div>
@@ -876,9 +885,32 @@ function modal(html, wide) {
 // it expires. Sending again reuses the same link, so the patient's earlier
 // message keeps working.
 function guideLinkMessage(patient, url) {
-  const name = `${patient.title ? patient.title + " " : ""}${patient.name}`;
-  const company = S.user.clinic || S.user.orgName || "DarDoc Healthcare";
-  return `Hello ${name}, your personalised treatment guide is ready 📋\n\nTap to open it — you can expand each section to see how to take your medication, what to expect, side effects and when to contact us:\n\n${url}\n\n— ${S.user.name}, ${company}`;
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
+  const u = S.user;
+  // The sender signs it, exactly as set in Settings → Your signature; a
+  // line the doctor hasn't filled in is simply left out.
+  const signature = [
+    [u.name, u.credentials].filter(Boolean).join(" "),
+    u.signature,
+    u.clinic || u.orgName || "DarDoc Healthcare",
+  ].filter(Boolean);
+  return [
+    "🩺 *PERSONAL TREATMENT GUIDE*",
+    "",
+    "👋 *WELCOME TO YOUR TREATMENT JOURNEY*",
+    `Dear ${patient.title ? patient.title + " " : ""}${firstName},`,
+    "",
+    "Welcome to your treatment journey.",
+    "Our goal is sustainable results while protecting your health, preserving muscle, improving nutrition, and building habits that can continue long term.",
+    "We're here to support you throughout your treatment — with messages, follow-ups, refills, and personalised guidance whenever you need them.",
+    "",
+    "Tap the link to open it — you can expand each section to see how to take your medication, what to expect, side effects and when to contact us:",
+    "",
+    url,
+    "",
+    "",
+    ...signature,
+  ].join("\n");
 }
 
 async function guideLinkModal(patient) {
@@ -894,7 +926,7 @@ async function guideLinkModal(patient) {
   catch (ex) { body.innerHTML = `<p class="err-text">${esc(ex.message)}</p>`; return; }
 
   body.innerHTML = `
-    <div class="field"><label for="gl-msg">Message</label><textarea class="input" id="gl-msg" rows="8"></textarea></div>
+    <div class="field"><label for="gl-msg">Message</label><textarea class="input" id="gl-msg" rows="16"></textarea></div>
     <div class="card" style="background:var(--bg);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
       <span id="gl-url" style="flex:1;min-width:0;font-size:12.5px;color:var(--muted);word-break:break-all"></span>
       <button class="btn btn-ghost btn-sm" id="gl-copylink" type="button">${icon("copy", 15)} Link</button>
@@ -1082,7 +1114,7 @@ async function viewConsult() {
     intakeSub: 0, // sub-step within Intake: identity → clinical → goals → objective
     existingId: preselect ? Number(preselect) : null,
     draftId: null,          // set once this consultation has been "saved for later"
-    patient: { name: "", mobile: "", email: "", nationalId: "", title: "", age: "", gender: "", heightCm: "",
+    patient: { name: "", mobile: "", email: "", nationalId: "", title: "", age: "", dob: "", gender: "", heightCm: "",
       weightKg: "", startWeightKg: "", maxWeightKg: "", goalWeightKg: "", goalWeightCustomized: false,
       activityLevel: "Sedentary", chronicIllnesses: "", medications: "", allergies: "", intake: {} },
     cart: [],              // programs added so far this consultation (one entry per medication)
@@ -1111,13 +1143,25 @@ async function viewConsult() {
 function loadPatientIntoWizard(p) {
   Object.assign(S.wizard.patient, {
     name: p.name, mobile: p.mobile, email: p.email || "", nationalId: p.national_id || "",
-    title: p.title || "", age: p.age || "", gender: p.gender || "",
+    title: p.title || "", age: p.age || "", dob: p.dob || "", gender: p.gender || "",
     heightCm: p.height_cm || "", weightKg: p.last_weight || p.current_weight_kg || p.start_weight_kg || "",
     startWeightKg: p.start_weight_kg || "", maxWeightKg: p.max_weight_kg || "",
     goalWeightKg: p.goal_weight_kg || "", goalWeightCustomized: p.goal_weight_kg != null,
     intake: p.intake_json ? JSON.parse(p.intake_json) : {},
   });
 }
+
+// Whole years between a YYYY-MM-DD date of birth and today, or null when the
+// date is missing, malformed, in the future or implausibly old.
+function ageFromDob(dob) {
+  const m = String(dob || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const t = new Date();
+  let age = t.getFullYear() - Number(m[1]);
+  if ((t.getMonth() + 1) * 100 + t.getDate() < Number(m[2]) * 100 + Number(m[3])) age--;
+  return age >= 0 && age <= 120 ? age : null;
+}
+const todayISO = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
 
 // A goal weight suggestion — the weight for a BMI of 25 at this patient's
 // height — offered as a starting point, never forced: the doctor can
@@ -1153,36 +1197,130 @@ function wizHead() {
   return `
   <div class="page-head">
     <div><h1>New consultation</h1><div class="sub">Consult → build program → publish guide</div></div>
-    <button class="btn btn-secondary btn-sm" id="wz-savelater" type="button">${icon("clock", 16)} Save for later</button>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="hint" id="wz-autosave">${savedStampText()}</span>
+      <button class="btn btn-secondary btn-sm" id="wz-savelater" type="button">${icon("clock", 16)} Save for later</button>
+    </div>
   </div>
   <div class="steps">
     ${WIZ_STEPS.map((s, i) => `<div class="step-dot ${i < S.wizard.step ? "done" : ""} ${i === S.wizard.step ? "on" : ""}"><div class="step-bar"></div><div class="step-lbl">${i + 1}. ${s}</div></div>`).join("")}
   </div>`;
 }
 
-// A consultation that can't be finished in one sitting is saved as an
-// incomplete draft — nothing here touches the real patients/plans tables.
-// Available on every wizard step (wired once via delegation on #view, since
-// wizHead() is re-rendered on every step change).
+// ── drafts: a consultation is kept until it is published ─────────────
+// Nothing here touches the real patients/plans tables. The wizard saves
+// itself to Drafts whenever a page is completed (the step changes), when the
+// doctor navigates away from the consultation, and a few seconds after they
+// stop typing — so no patient is ever lost part-way. "Save for later" is the
+// manual version of the same thing. Publishing deletes the draft.
+const wizardHasContent = (w) => !!(w && w.patient && (w.patient.name.trim() || w.patient.mobile.trim() || w.patient.email.trim()));
+
+function wizardProgress(w) {
+  if (w.step === 0) {
+    const subs = intakeSubSteps();
+    return `Intake · ${subs[Math.min(w.intakeSub, subs.length - 1)].label}`;
+  }
+  return WIZ_STEPS[w.step] || "";
+}
+
+// What gets stored: the wizard's data, minus bookkeeping that only means
+// something in this browser tab, minus the one-time plaintext PIN, and with
+// each program's template reduced to its id (re-found in the library on
+// resume) rather than a copy of the whole library record.
+function wizardSnapshot(w) {
+  const { _pos, _saving, savedAt, published, pendingPin, ...rest } = w;
+  return JSON.parse(JSON.stringify(rest, (k, v) => (k === "template" && v && typeof v === "object" ? { id: v.id } : v)));
+}
+
+function savedStampText() {
+  const w = S.wizard;
+  return w && w.savedAt ? `Draft saved ${new Date(w.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+}
+
+// Saves the current consultation as a draft (creating it the first time).
+// Saves are queued one after another, so two quick triggers can never create
+// two drafts. Resolves true when something was saved.
+function persistDraft(showErrors) {
+  const w = S.wizard;
+  if (!w || w.published || !wizardHasContent(w)) return Promise.resolve(false);
+  const run = async () => {
+    if (w.published) return false;
+    const p = w.patient;
+    const body = {
+      label: p.name.trim() || p.mobile.trim() || p.email.trim(),
+      progress: wizardProgress(w), mobile: p.mobile.trim(), state: wizardSnapshot(w),
+    };
+    if (w.draftId) {
+      try { await api("PUT", `/api/drafts/${w.draftId}`, body); }
+      catch (ex) {
+        if (ex.status !== 404) throw ex;   // discarded elsewhere — keep the work by saving it afresh
+        w.draftId = (await api("POST", "/api/drafts", body)).id;
+      }
+    } else {
+      w.draftId = (await api("POST", "/api/drafts", body)).id;
+    }
+    w.savedAt = Date.now();
+    const stamp = document.getElementById("wz-autosave");
+    if (stamp) stamp.textContent = savedStampText();
+    refreshDraftBadge();
+    return true;
+  };
+  w._saving = (w._saving || Promise.resolve()).then(run).catch((ex) => {
+    if (showErrors) toast(ex.message || "Could not save draft", "bad");
+    return false;
+  });
+  return w._saving;
+}
+
+// Called whenever the wizard paints: a change of page means the previous one
+// was completed, so save.
+function autosavePosition() {
+  const w = S.wizard;
+  if (!w) return;
+  const pos = `${w.step}.${w.intakeSub}`;
+  const prev = w._pos;
+  w._pos = pos;
+  if (prev !== undefined && prev !== pos) persistDraft(false);
+}
+
+let autosaveTimer = null;
+function scheduleAutosave() {
+  if (!S.wizard || S.wizard.published || !location.hash.startsWith("#/consult")) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => persistDraft(false), 6000);
+}
+
+// Amber count on the Drafts nav link, so unfinished files are never out of sight.
+async function refreshDraftBadge() {
+  if (!S.user || !canPrescribe()) return;
+  let rows;
+  try { rows = await api("GET", "/api/drafts"); } catch { return; }
+  document.querySelectorAll('a[href="#/drafts"]').forEach((a) => {
+    let b = a.querySelector(".badge");
+    if (!rows.length) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement("span"); b.className = "badge badge-amber"; b.style.marginLeft = "6px"; a.appendChild(b); }
+    b.textContent = rows.length;
+  });
+}
+
 async function saveDraftForLater() {
   const w = S.wizard;
   if (!w) return;
-  const label = w.patient.name || w.patient.mobile || "Untitled consultation";
-  try {
-    if (w.draftId) await api("PUT", `/api/drafts/${w.draftId}`, { label, state: w });
-    else { const created = await api("POST", "/api/drafts", { label, state: w }); w.draftId = created.id; }
-    toast("Saved — resume anytime from Drafts");
-  } catch (ex) {
-    toast(ex.message || "Could not save draft", "bad");
-  }
+  if (!wizardHasContent(w)) return toast("Add the patient's name or mobile number first", "bad");
+  if (await persistDraft(true)) toast("Saved — resume anytime from Drafts");
 }
 
 async function resumeDraft(draftId) {
   view().innerHTML = `<div class="skel" style="height:340px"></div>`;
   try {
     const { state } = await api("GET", `/api/drafts/${draftId}`);
+    // Programs were saved with just their template's id; find the record again.
+    const rehydrate = (o) => { if (o && o.template && o.template.id != null) o.template = S.templates.find((t) => t.id === o.template.id) || null; };
+    rehydrate(state.draft);
+    (state.cart || []).forEach(rehydrate);
+    state.patient = { dob: "", ...state.patient };
+    state.draftId = draftId;
     S.wizard = state;
-    S.wizard.draftId = draftId;
     paintWizard();
   } catch (ex) {
     view().innerHTML = `<div class="empty">${icon("alert", 32)}<div class="empty-title">${esc(ex.message || "Draft not found")}</div></div>`;
@@ -1194,30 +1332,32 @@ async function viewDrafts() {
   view().innerHTML = `<div class="skel" style="height:200px"></div>`;
   const drafts = await api("GET", "/api/drafts");
   view().innerHTML = `
-  <div class="page-head"><div><h1>Drafts</h1><div class="sub">Consultations saved for later — pick one up where you left off</div></div></div>
+  <div class="page-head"><div><h1>Drafts</h1><div class="sub">Every consultation stays here until you publish it — pick one up where you left off</div></div></div>
   ${drafts.length ? `<div class="card">
     ${drafts.map((d) => `
       <div class="pt-row" data-draft="${d.id}">
         <div class="pt-info">
-          <div class="pt-name">${esc(d.label || "Untitled consultation")}</div>
-          <div class="pt-meta">Saved ${timeAgo(d.updated_at)}</div>
+          <div class="pt-name">${esc(d.label || "Untitled consultation")}${d.progress ? ` <span class="badge badge-amber">${esc(d.progress)}</span>` : ""}</div>
+          <div class="pt-meta">${d.mobile ? `+${esc(d.mobile)} · ` : ""}Saved ${timeAgo(d.updated_at)}</div>
         </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-secondary btn-sm" data-resume="${d.id}">${icon("chevR", 15)} Resume</button>
           <button class="icon-btn" data-discard="${d.id}" aria-label="Discard draft">${icon("x", 16)}</button>
         </div>
       </div>`).join("")}
-  </div>` : `<div class="empty">${icon("clock", 34)}<div class="empty-title">No drafts</div><p>Consultations saved for later will show up here.</p></div>`}`;
+  </div>` : `<div class="empty">${icon("clock", 34)}<div class="empty-title">No drafts</div><p>Consultations you start but don't publish will show up here.</p></div>`}`;
   view().querySelectorAll("[data-resume]").forEach((b) => b.addEventListener("click", () => { location.hash = `#/consult?draft=${b.dataset.resume}`; }));
   view().querySelectorAll("[data-discard]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Discard this saved consultation? This can't be undone.")) return;
     await api("DELETE", `/api/drafts/${b.dataset.discard}`);
+    refreshDraftBadge();
     viewDrafts();
   }));
 }
 
 function paintWizard() {
   const w = S.wizard;
+  autosavePosition();
   if (w.step === 0) return wizStepIntake();
   if (w.step === 1) return wizStepProgram();
   if (w.step === 2) return wizStepLabs();
@@ -1538,7 +1678,7 @@ function applyQuickFillFields(r) {
   if (r.nationalId) { w.patient.nationalId = r.nationalId; changed.push("ID"); }
   if (r.mobile) { w.patient.mobile = r.mobile; changed.push("mobile"); }
   if (r.email) { w.patient.email = r.email; changed.push("email"); }
-  if (r.age) { w.patient.age = r.age; changed.push("age"); }
+  if (r.age) { w.patient.age = r.age; w.patient.dob = ""; changed.push("age"); }
   if (r.gender) { w.patient.gender = r.gender; changed.push("gender"); }
   if (r.heightCm) { w.patient.heightCm = r.heightCm; changed.push("height"); }
   if (r.weightKg) { w.patient.weightKg = r.weightKg; changed.push("weight"); }
@@ -1678,6 +1818,7 @@ function missedAppointmentText(patient, doctorName) {
 }
 
 function wizStepIntake() {
+  autosavePosition();
   const key = intakeSubSteps()[Math.min(S.wizard.intakeSub, intakeSubSteps().length - 1)].key;
   if (key === "identity") return wizIntakeIdentity();
   if (key === "clinical") return wizIntakeClinical();
@@ -1731,7 +1872,15 @@ function wizIntakeIdentity() {
 
     <div class="intake-sec-title">${icon("clipboard", 15)} Demographics</div>
     <div class="form-grid">
-      <div class="field"><label for="wp-age">Age <span class="req">*</span></label><input class="input" id="wp-age" type="number" inputmode="numeric" min="12" max="110" value="${esc(w.patient.age)}"></div>
+      <div class="field">
+        <label for="wp-age">Age <span class="req">*</span></label>
+        <input class="input" id="wp-age" type="number" inputmode="numeric" min="12" max="110" value="${esc(w.patient.age)}">
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <span class="hint">or</span>
+          <input class="input" id="wp-dob" type="date" min="1900-01-01" max="${todayISO()}" value="${esc(w.patient.dob || "")}" aria-label="Date of birth" style="flex:1;min-width:0">
+          <span class="hint">date of birth</span>
+        </div>
+      </div>
       <div class="field"><label>Gender <span class="req">*</span></label><div class="chip-row">${genderChips.map((g) => `<button type="button" class="chip ${w.patient.gender === g ? "on" : ""}" data-demochip="gender" data-v="${g}">${g}</button>`).join("")}</div></div>
       <div class="field">
         <label for="wp-height">Height (cm) <span class="req">*</span></label>
@@ -1775,7 +1924,7 @@ function wizIntakeIdentity() {
   wireNotesPanel(view());
   wirePeptideInfoButtons(view());
 
-  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", heightCm: "wp-height", weightKg: "wp-weight", startWeightKg: "wp-startweight", maxWeightKg: "wp-maxweight" };
+  const demoTextIds = { name: "wp-name", mobile: "wp-mobile", email: "wp-email", nationalId: "wp-natid", age: "wp-age", dob: "wp-dob", heightCm: "wp-height", weightKg: "wp-weight", startWeightKg: "wp-startweight", maxWeightKg: "wp-maxweight" };
   const commitDemo = () => {
     Object.entries(demoTextIds).forEach(([k, id]) => { w.patient[k] = document.getElementById(id).value; });
   };
@@ -1791,6 +1940,12 @@ function wizIntakeIdentity() {
     }
     refreshPatientInfoSide();
   };
+  // Age can be typed or worked out from a date of birth — whichever the
+  // doctor has. Registered before the generic handler below so the other
+  // field is already reconciled when the values are read back.
+  const ageEl = document.getElementById("wp-age"), dobEl = document.getElementById("wp-dob");
+  dobEl.addEventListener("input", () => { const a = ageFromDob(dobEl.value); if (a !== null) ageEl.value = a; });
+  ageEl.addEventListener("input", () => { dobEl.value = ""; });
   Object.values(demoTextIds).forEach((id) => document.getElementById(id).addEventListener("input", liveMetrics));
   document.getElementById("wp-goalweight").addEventListener("input", (e) => {
     w.patient.goalWeightKg = e.target.value;
@@ -3621,11 +3776,11 @@ function wizStepReview() {
     }
     btn.classList.add("loading");
     try {
-      let patientId = w.existingId, newPin = null;
+      let patientId = w.existingId, newPin = w.pendingPin || null;
       if (!patientId) {
         const created = await api("POST", "/api/patients", {
           name: w.patient.name, mobile: w.patient.mobile, email: w.patient.email, nationalId: w.patient.nationalId, title: w.patient.title,
-          age: Number(w.patient.age) || null, gender: w.patient.gender,
+          age: Number(w.patient.age) || null, dob: w.patient.dob || "", gender: w.patient.gender,
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           startWeightKg: Number(w.patient.startWeightKg) || null, maxWeightKg: Number(w.patient.maxWeightKg) || null,
           goalWeightKg: Number(w.patient.goalWeightKg) || null,
@@ -3634,6 +3789,10 @@ function wizStepReview() {
         });
         patientId = created.id;
         newPin = created.pin;
+        // If a later step fails, retrying must update this patient rather
+        // than try to register them a second time.
+        w.existingId = patientId;
+        w.pendingPin = newPin;
       } else {
         await api("PATCH", `/api/patients/${patientId}`, {
           email: w.patient.email, nationalId: w.patient.nationalId, chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications,
@@ -3641,10 +3800,9 @@ function wizStepReview() {
           heightCm: Number(w.patient.heightCm) || null, weightKg: Number(w.patient.weightKg) || null,
           startWeightKg: Number(w.patient.startWeightKg) || null, maxWeightKg: Number(w.patient.maxWeightKg) || null,
           goalWeightKg: Number(w.patient.goalWeightKg) || null,
-          age: Number(w.patient.age) || null, gender: w.patient.gender, activityLevel: w.patient.activityLevel,
+          age: Number(w.patient.age) || null, dob: w.patient.dob || "", gender: w.patient.gender, activityLevel: w.patient.activityLevel,
         });
       }
-      if (w.draftId) { try { await api("DELETE", `/api/drafts/${w.draftId}`); } catch { /* best effort */ } }
       // One plan row per program added this consultation — each keeps its
       // own dose/quantity/instructions/warnings/blood test, sharing the
       // visit-level follow-up date, clinical note and EMR suggestion.
@@ -3652,7 +3810,8 @@ function wizStepReview() {
       // the guide (rendered per-medication) can always show them.
       const cleanLabs = (w.labTests || []).filter((l) => l.on).map((l) => ({ name: l.name, detail: l.detail, fasting: !!l.fasting, required: !!l.required, link: l.link || "" }));
       const cleanSupps = (w.suppList || []).filter((s) => s.on).map((s) => ({ name: s.name, dose: s.dose || "", benefit: s.benefit || "" }));
-      for (let i = 0; i < w.cart.length; i++) {
+      // Programs already saved by an earlier, interrupted attempt aren't repeated.
+      for (let i = w.plansSaved || 0; i < w.cart.length; i++) {
         const c = w.cart[i], p = fakePlans[i];
         await api("POST", "/api/plans", {
           patientId, category: c.category, title: p.title, medication: c.medication,
@@ -3662,7 +3821,15 @@ function wizStepReview() {
           clinicalSuggestion: w.clinicalSuggestion, supplements: w.supplements,
           labTests: cleanLabs, suppList: cleanSupps,
         });
+        w.plansSaved = i + 1;
       }
+      // Only now — patient and every program safely saved — does the draft go.
+      w.published = true;
+      clearTimeout(autosaveTimer);
+      await w._saving;
+      if (w.draftId) { try { await api("DELETE", `/api/drafts/${w.draftId}`); } catch { /* best effort */ } }
+      w.pendingPin = null;
+      refreshDraftBadge();
       toast("Guide published");
       publishedModal(patientId, w, newPin);
     } catch (ex) {

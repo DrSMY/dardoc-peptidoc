@@ -211,6 +211,10 @@ db.exec("CREATE INDEX IF NOT EXISTS idx_patients_org ON patients(org_id);");
 addColumn("patients", "current_weight_kg", "REAL");
 addColumn("patients", "max_weight_kg", "REAL");
 addColumn("patients", "goal_weight_kg", "REAL");
+// A patient's age is either typed in or derived from a date of birth. When a
+// DOB is on file the API always reports the *current* age computed from it,
+// so the record never goes stale; `age` is only the stored fallback.
+addColumn("patients", "dob", "TEXT");
 
 // ── incomplete consultations ("save for later") ──────────────────
 // A snapshot of the wizard's in-memory state, so a consultation that can't
@@ -227,6 +231,10 @@ CREATE TABLE IF NOT EXISTS wizard_drafts (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_org ON wizard_drafts(org_id);`);
+// What the Drafts list shows so an unfinished file can be told apart at a
+// glance: which step it stopped on, and the patient's mobile.
+addColumn("wizard_drafts", "progress", "TEXT DEFAULT ''");
+addColumn("wizard_drafts", "mobile", "TEXT DEFAULT ''");
 
 // ── organisation logo ────────────────────────────────────────────
 // The clinic's own logo replaces any house branding on the patient guide.
