@@ -725,7 +725,7 @@ async function viewPatient(id) {
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
           <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
-          <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send via WhatsApp</button>
+          <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send guide link</button>
         </div>
         ${guidePickerHTML(guidePlans, activeId)}
         <div id="g-active-guide">${renderOne(guidePlans.find((pl) => pl.id === activeId))}</div>`
@@ -742,12 +742,7 @@ async function viewPatient(id) {
           toast("Guide text copied");
         });
         document.getElementById("btn-print").addEventListener("click", () => window.print());
-        document.getElementById("btn-wa").addEventListener("click", () => {
-          const link = `${location.origin}/portal`;
-          const medSummary = guidePlans.length > 1 ? `${primaryPl.medication} and ${guidePlans.length - 1} other program${guidePlans.length > 2 ? "s" : ""}` : primaryPl.medication;
-          const txt = `Hello ${p.title ? p.title + " " : ""}${p.name}, your personal treatment guide for ${medSummary} is ready.\n\nOpen your patient portal here: ${link}\nSign in with your mobile number. If you need a new PIN, just ask.\n\n— ${S.user.name}, ${S.user.clinic || S.user.orgName || "DarDoc Healthcare"}`;
-          window.open(waLink(p.mobile, txt), "_blank");
-        });
+        document.getElementById("btn-wa").addEventListener("click", () => guideLinkModal(p));
       }
     }
 
@@ -874,6 +869,150 @@ function modal(html, wide) {
   scrim.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => scrim.remove()));
   return scrim;
 }
+
+// ── shareable guide link ─────────────────────────────────────────
+// The link opens the patient's active guide as a web page (no sign-in), with
+// the same tap-to-expand sections the doctor sees, and can be reopened until
+// it expires. Sending again reuses the same link, so the patient's earlier
+// message keeps working.
+function guideLinkMessage(patient, url) {
+  const name = `${patient.title ? patient.title + " " : ""}${patient.name}`;
+  const company = S.user.clinic || S.user.orgName || "DarDoc Healthcare";
+  return `Hello ${name}, your personalised treatment guide is ready 📋\n\nTap to open it — you can expand each section to see how to take your medication, what to expect, side effects and when to contact us:\n\n${url}\n\n— ${S.user.name}, ${company}`;
+}
+
+async function guideLinkModal(patient) {
+  const scrim = modal(`
+    <div class="modal-head"><h3>Send guide link</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin:-6px 0 14px">A private link to <b>${esc(patient.name)}</b>'s guide. It opens like a web page on any phone or computer, with sections that expand on tap, and can be reopened anytime until it expires.</p>
+    <div id="gl-body"><div class="skel" style="height:190px"></div></div>`);
+  const body = scrim.querySelector("#gl-body");
+  let link;
+  const urlOf = (l) => `${location.origin}/g/${l.token}`;
+  const metaText = (l) => `Active until ${fmtDate(l.expiresAt)} · ${l.views ? `opened ${l.views} time${l.views === 1 ? "" : "s"}, last ${timeAgo(l.lastViewedAt)}` : "not opened yet"}`;
+  try { link = await api("POST", `/api/patients/${patient.id}/guide-link`, {}); }
+  catch (ex) { body.innerHTML = `<p class="err-text">${esc(ex.message)}</p>`; return; }
+
+  body.innerHTML = `
+    <div class="field"><label for="gl-msg">Message</label><textarea class="input" id="gl-msg" rows="8"></textarea></div>
+    <div class="card" style="background:var(--bg);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+      <span id="gl-url" style="flex:1;min-width:0;font-size:12.5px;color:var(--muted);word-break:break-all"></span>
+      <button class="btn btn-ghost btn-sm" id="gl-copylink" type="button">${icon("copy", 15)} Link</button>
+      <a class="btn btn-ghost btn-sm" id="gl-open" target="_blank" rel="noopener">Open</a>
+    </div>
+    <p class="hint" id="gl-meta" style="margin-bottom:14px"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-accent" style="flex:1;min-width:180px" id="gl-wa" type="button">${icon("whatsapp", 18)} Send via WhatsApp</button>
+      <button class="btn btn-secondary" id="gl-copy" type="button">${icon("copy", 18)} Copy message</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="linklike" id="gl-renew" type="button">Generate a new link</button>
+      <button class="linklike" id="gl-off" type="button">Disable link</button>
+    </div>`;
+  const $ = (id) => scrim.querySelector("#" + id);
+  const msg = $("gl-msg");
+  const paint = () => {
+    $("gl-url").textContent = urlOf(link);
+    $("gl-open").href = urlOf(link);
+    $("gl-meta").textContent = metaText(link);
+  };
+  msg.value = guideLinkMessage(patient, urlOf(link));
+  paint();
+
+  $("gl-wa").addEventListener("click", () => {
+    if (!patient.mobile) return toast("This patient has no mobile number on file", "bad");
+    window.open(waLink(patient.mobile, msg.value), "_blank");
+  });
+  $("gl-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); });
+  $("gl-copylink").addEventListener("click", async () => { await navigator.clipboard.writeText(urlOf(link)); toast("Link copied"); });
+  $("gl-renew").addEventListener("click", async () => {
+    if (!confirm("Generate a new link? Any link already sent to the patient will stop working.")) return;
+    try {
+      const old = urlOf(link);
+      link = await api("POST", `/api/patients/${patient.id}/guide-link`, { renew: true });
+      msg.value = msg.value.includes(old) ? msg.value.split(old).join(urlOf(link)) : guideLinkMessage(patient, urlOf(link));
+      paint();
+      toast("New link generated — the old one no longer works");
+    } catch (ex) { toast(ex.message, "bad"); }
+  });
+  $("gl-off").addEventListener("click", async () => {
+    if (!confirm("Disable this link? The patient will no longer be able to open the guide with it.")) return;
+    try { await api("DELETE", `/api/patients/${patient.id}/guide-link`); scrim.remove(); toast("Link disabled"); }
+    catch (ex) { toast(ex.message, "bad"); }
+  });
+}
+
+// ── organisation logo ────────────────────────────────────────────
+// The clinic's own logo heads every patient guide. Any image is redrawn on a
+// canvas at a sensible size and uploaded as PNG, so a phone photo of a
+// letterhead or a 4000px export doesn't hit the size limit.
+function logoFileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) return reject(new Error("Choose a PNG, JPG, WebP or SVG image."));
+    const svg = file.type === "image/svg+xml";
+    const objUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      const w0 = img.naturalWidth || 512, h0 = img.naturalHeight || 256;
+      for (let side = 600; side >= 200; side -= 100) {
+        const k = svg ? side / Math.max(w0, h0) : Math.min(1, side / Math.max(w0, h0));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(w0 * k)); c.height = Math.max(1, Math.round(h0 * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        const out = c.toDataURL("image/png");
+        if (out.length <= 900000) return resolve(out);
+      }
+      reject(new Error("That image is too detailed — try a simpler or smaller version of the logo."));
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error("Couldn't read that image.")); };
+    img.src = objUrl;
+  });
+}
+
+function logoUploaderHTML(logoUrl) {
+  return `
+  <div class="field" id="lg-box">
+    <label>Clinic logo</label>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <div id="lg-preview" style="width:176px;height:76px;border:1px solid var(--border);border-radius:var(--r-md);background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px;box-sizing:border-box"></div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+        <label class="btn btn-secondary btn-sm" for="lg-file" style="cursor:pointer">${icon("plus", 15)} Upload logo</label>
+        <input type="file" id="lg-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+        <button type="button" class="btn btn-ghost btn-sm" id="lg-remove">Remove</button>
+      </div>
+    </div>
+    <span class="hint">Shown at the top of every patient guide your clinic sends. A PNG with a transparent background works best.</span>
+    <p class="err-text" id="lg-err" hidden role="alert"></p>
+  </div>`;
+}
+// `onChange(newLogoUrl)` runs after each successful upload or removal.
+function wireLogoUploader(scope, orgId, logoUrl, onChange) {
+  const q = (id) => scope.querySelector("#" + id);
+  const paint = (url) => {
+    q("lg-preview").innerHTML = url ? `<img src="${esc(url)}" alt="Clinic logo" style="max-width:100%;max-height:100%;object-fit:contain">` : `<span class="hint">No logo yet</span>`;
+    q("lg-remove").hidden = !url;
+  };
+  paint(logoUrl);
+  const fail = (ex) => { q("lg-err").textContent = ex.message; q("lg-err").hidden = false; };
+  q("lg-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    q("lg-err").hidden = true;
+    if (!file) return;
+    try {
+      const r = await api("POST", `/api/orgs/${orgId}/logo`, { dataUrl: await logoFileToDataUrl(file) });
+      paint(r.logoUrl); onChange(r.logoUrl); toast("Logo saved");
+    } catch (ex) { fail(ex); }
+    e.target.value = "";
+  });
+  q("lg-remove").addEventListener("click", async () => {
+    if (!confirm("Remove the clinic logo from patient guides?")) return;
+    try { const r = await api("DELETE", `/api/orgs/${orgId}/logo`); paint(r.logoUrl); onChange(r.logoUrl); toast("Logo removed"); }
+    catch (ex) { fail(ex); }
+  });
+}
+// Keeps the signed-in user's own copy current so guide previews pick it up.
+const rememberOwnLogo = (orgId) => (url) => { if (orgId === S.user.orgId) S.user.logoUrl = url; };
 
 async function sharePinModal(p) {
   const scrim = modal(`
@@ -3402,7 +3541,7 @@ function wizStepReview() {
   // hardcoded practice name. Sign the preview the same way the server signs
   // the real thing once published: with the doctor actually running this
   // consultation.
-  const previewSigner = { name: S.user.name, credentials: S.user.credentials, signature: S.user.signature, clinic: S.user.clinic || S.user.orgName || "", appName: S.user.appName || "" };
+  const previewSigner = { name: S.user.name, credentials: S.user.credentials, signature: S.user.signature, clinic: S.user.clinic || S.user.orgName || "", appName: S.user.appName || "", logoUrl: S.user.logoUrl || "" };
   const fakePlans = w.cart.map((c) => ({
     title: `${c.medication} — ${c.category === "glp1" ? "Weight Loss Program" : c.category === "peptide" ? "Peptide Therapy" : "Treatment Program"}`,
     category: c.category, medication: c.medication, dose: c.dose, quantity: c.quantity, route: c.route, frequency: c.frequency,
@@ -3555,11 +3694,14 @@ function publishedModal(patientId, w, pin) {
       <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${hasProgram ? `${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.` : `${esc(w.patient.name)}'s visit has been recorded — no medication was prescribed this time.`}</p>
       ${pin ? `<div class="pin-display">${pin}</div><p class="hint" style="margin-bottom:14px">Their portal PIN — shown once. You can regenerate it any time from the patient page.</p>` : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} Send via WhatsApp</button>
+        ${hasProgram ? `<button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-guide">${icon("whatsapp", 18)} Send guide link</button>` : ""}
+        <button class="btn ${hasProgram ? "btn-secondary" : "btn-accent"}" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} ${hasProgram ? "Send portal login" : "Send via WhatsApp"}</button>
         <button class="btn btn-secondary" id="pub-copy">${icon("copy", 18)} Copy</button>
       </div>
       <a class="btn btn-ghost btn-block" style="margin-top:8px" href="#/patient/${patientId}" id="pub-open">Open patient record</a>
     </div>`);
+  const pubGuide = scrim.querySelector("#pub-guide");
+  if (pubGuide) pubGuide.addEventListener("click", () => guideLinkModal({ id: patientId, name: w.patient.name, title: w.patient.title, mobile: w.patient.mobile }));
   scrim.querySelector("#pub-wa").addEventListener("click", () => window.open(waLink(w.patient.mobile, waText), "_blank"));
   scrim.querySelector("#pub-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(waText); toast("Message copied"); });
   scrim.querySelector("#pub-open").addEventListener("click", () => scrim.remove());
@@ -4015,7 +4157,9 @@ async function viewOrgs() {
   <div class="card">
     ${orgs.map((o) => `
       <div class="pt-row" style="cursor:default">
-        <div class="avatar">${esc(initials(o.name))}</div>
+        ${o.logo_version
+          ? `<div class="avatar" style="background:#fff;border:1px solid var(--border);width:48px;height:48px;padding:4px;box-sizing:border-box"><img src="/api/org-logo/${o.id}?v=${o.logo_version}" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>`
+          : `<div class="avatar">${esc(initials(o.name))}</div>`}
         <div class="pt-info">
           <div class="pt-name"><span>${esc(o.name)}</span>
             ${o.id === S.user.orgId ? `<span class="badge badge-teal">yours</span>` : ""}
@@ -4063,6 +4207,7 @@ function orgModal(org, done) {
       ${!isNew ? `
       <div class="field"><label for="og-app">Patient-facing app (optional)</label><input class="input" id="og-app" value="${esc(o.app_name || "")}" placeholder="e.g. DarDoc App — leave blank if this practice has none">
       <span class="hint">Named here, the patient guide explains that a subscribed patient gets everything inside it, and anyone without it gets a booking link instead — otherwise the guide stays general and never assumes one exists.</span></div>` : ""}
+      ${!isNew ? logoUploaderHTML() : ""}
       ${isNew ? `
       <hr class="divider">
       <div class="card-title" style="font-size:14.5px">${icon("key", 17)} First super admin</div>
@@ -4080,6 +4225,7 @@ function orgModal(org, done) {
       </div>
     </form>`);
   const g = (id) => scrim.querySelector("#" + id);
+  if (!isNew) wireLogoUploader(scrim, o.id, o.logo_version ? `/api/org-logo/${o.id}?v=${o.logo_version}` : "", rememberOwnLogo(o.id));
   g("og-cancel").addEventListener("click", () => scrim.remove());
   g("og-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -4251,6 +4397,12 @@ function viewSettings() {
       <button class="btn btn-primary" type="submit">Save signature</button>
     </form>
   </div>
+  ${isSuperadmin() || isPlatformAdmin() ? `
+  <div class="card card-pad" id="lg-card">
+    <div class="card-title">${icon("home", 19)} Clinic logo</div>
+    <p class="hint" style="margin:-6px 0 14px">The logo for <b>${esc(u.orgName || "your clinic")}</b>, shown on the patient guides you send.</p>
+    ${logoUploaderHTML()}
+  </div>` : ""}
   <div class="card card-pad">
     <div class="card-title">${icon("key", 19)} Change password</div>
     <form id="pw-form">
@@ -4261,6 +4413,9 @@ function viewSettings() {
     </form>
   </div>
   </div>`;
+
+  const logoCard = document.getElementById("lg-card");
+  if (logoCard) wireLogoUploader(logoCard, u.orgId, u.logoUrl, rememberOwnLogo(u.orgId));
 
   const sigPreview = () => {
     document.getElementById("sg-preview").textContent = signatureBlock({

@@ -119,7 +119,10 @@ function otherMedCardHTML(plan) {
 function buildGuide(plan, patient, doctorName, opts) {
   // opts.portal — render as an in-app page (no print letterhead / footer),
   // so the portal Guide tab can lead with a home-style hero header instead.
+  // opts.shared — the public guide link: opened from WhatsApp in a browser,
+  // not inside the app, so the copy must not tell the reader to "log in".
   const portal = opts && opts.portal;
+  const shared = opts && opts.shared;
   // The program is signed by whoever prescribed it, which is not always the
   // person reading it — another doctor in the practice, or an admin.
   const signer = plan.signedBy || {};
@@ -206,8 +209,9 @@ function buildGuide(plan, patient, doctorName, opts) {
     ${portal ? "" : `
     <header class="g-head">
       <div class="g-brand">
-        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:48px;width:auto">
+        ${signer.logoUrl ? `<span class="g-logo-chip"><img src="${esc(signer.logoUrl)}" alt="${esc(signer.clinic || "Clinic logo")}" onerror="this.parentNode.style.display='none'"></span>` : ""}
         <div>
+          ${!signer.logoUrl && signer.clinic ? `<div class="g-brand-name">${esc(signer.clinic)}</div>` : ""}
           <div class="g-brand-sub">Personal Treatment Guide</div>
         </div>
       </div>
@@ -268,7 +272,9 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div class="g-callout g-teal">
         ${icon("calendar", 18)}
         <div>Your next follow-up is due around <strong>${esc(fmtDate(plan.next_followup))}</strong>.
-        Log your doses and check in regularly in this app so ${esc(signerName)} can track your progress.</div>
+        ${shared
+          ? `${esc(signerName)}'s team will be in touch to arrange it, or you're welcome to reach out whenever you're ready to book.${signer.appName ? ` If you have the ${esc(signer.appName)}, you can arrange it there too.` : ""}`
+          : `Log your doses and check in regularly in this app so ${esc(signerName)} can track your progress.`}</div>
       </div>
     </section>
 
@@ -280,7 +286,9 @@ function buildGuide(plan, patient, doctorName, opts) {
         <br>${esc(signer.clinic || "")}
         ${revisedLine ? `<div style="margin-top:6px">${revisedLine}</div>` : ""}
       </div>
-      You can message ${esc(signerName)} anytime through your patient portal. If you need to speak to a doctor urgently, please contact our customer care team directly.
+      ${shared
+        ? `If you have any questions about your treatment, please contact ${esc(signer.clinic || signerName)} directly. If you need urgent medical help, contact your nearest emergency service.`
+        : `You can message ${esc(signerName)} anytime through your patient portal. If you need to speak to a doctor urgently, please contact our customer care team directly.`}
     </footer>`}
   </div>`;
 }
@@ -568,6 +576,10 @@ const GUIDE_CSS = `
 }
 .g-brand { display: flex; gap: 12px; align-items: center; }
 .g-brand img { filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
+/* the clinic's own logo sits on a white chip so any colours read on the dark header */
+.g-logo-chip { display: inline-flex; align-items: center; justify-content: center; background: #fff; border-radius: 12px; padding: 6px 12px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,.22); }
+.g-brand .g-logo-chip img { height: 44px; max-width: 170px; width: auto; object-fit: contain; filter: none; display: block; }
+@media (max-width: 480px) { .g-brand .g-logo-chip img { height: 36px; max-width: 130px; } .g-head { padding: 14px 16px; flex-wrap: wrap; gap: 8px; } .g-brand-sub { white-space: nowrap; } .g-issued { text-align: left; width: 100%; } }
 .g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
 .g-brand-name { font-family: var(--font-head); font-weight: 700; font-size: 17px; }
 .g-brand-sub { font-size: 12.5px; opacity: .8; }

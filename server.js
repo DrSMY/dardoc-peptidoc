@@ -3,7 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { handleApi } = require("./src/api");
+const { handleApi, guidePageMeta } = require("./src/api");
 
 const PORT = process.env.PORT || 4700;
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -47,6 +47,36 @@ function serveFile(res, filePath) {
   });
 }
 
+const escAttr = (v) => String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// The shareable patient guide (/g/<token>). The page itself is a static shell
+// that fetches the guide with the token, but link-preview crawlers (WhatsApp)
+// only read the HTML, so the clinic's name and logo are written into the
+// <head> here — nothing about the patient is.
+function serveGuidePage(req, res, token) {
+  fs.readFile(path.join(PUBLIC_DIR, "g", "index.html"), "utf8", (err, html) => {
+    if (err) { res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Not found"); }
+    const meta = guidePageMeta(token);
+    const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
+    const origin = `${proto}://${req.headers.host || "localhost"}`;
+    const title = meta && meta.clinic ? `Your personal treatment guide — ${meta.clinic}` : "Your personal treatment guide";
+    const tags = [
+      `<meta property="og:type" content="website">`,
+      `<meta property="og:title" content="${escAttr(title)}">`,
+      `<meta property="og:description" content="Tap to open your guide: how to take your medication, what to expect, side effects and when to contact us.">`,
+      meta && meta.clinic ? `<meta property="og:site_name" content="${escAttr(meta.clinic)}">` : "",
+      meta && meta.logoUrl ? `<meta property="og:image" content="${escAttr(origin + meta.logoUrl)}">` : "",
+    ].filter(Boolean).join("\n");
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Robots-Tag": "noindex, nofollow",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end(html.replace("<!--OG-->", tags));
+  });
+}
+
 // One-shot legacy data import on boot (idempotent — skips existing patients).
 // Set IMPORT_SUPABASE=1 in the environment to enable; new PINs print to logs.
 if (process.env.IMPORT_SUPABASE === "1") {
@@ -65,6 +95,9 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+
+  const guideMatch = pathname.match(/^\/g\/([A-Za-z0-9_-]{20,64})\/?$/);
+  if (guideMatch) return serveGuidePage(req, res, guideMatch[1]);
 
   if (PAGE_ROUTES[pathname]) {
     return serveFile(res, path.join(PUBLIC_DIR, PAGE_ROUTES[pathname]));

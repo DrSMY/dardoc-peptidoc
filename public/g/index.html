@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#283618">
+<title>Your personal treatment guide</title>
+<!--OG-->
+<link rel="stylesheet" href="/theme.css?v=docare25">
+<style>
+  body { background: var(--bg); margin: 0; }
+  .gp { max-width: 820px; margin: 0 auto; padding: 16px 14px calc(44px + env(safe-area-inset-bottom)); }
+  .gp-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+  .gp-bar-l { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .gp-bar-r { display: flex; gap: 8px; }
+  .gp-state { text-align: center; padding: 56px 22px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); }
+  .gp-state h1 { font-size: 20px; margin: 12px 0 6px; }
+  .gp-state p { color: var(--muted); font-size: 14.5px; max-width: 380px; margin: 0 auto; line-height: 1.55; }
+  .gp-state svg { color: var(--brand); }
+  .gp-skel { height: 180px; border-radius: var(--r-lg); margin-bottom: 14px; }
+  @media (max-width: 520px) { .gp { padding: 10px 8px calc(36px + env(safe-area-inset-bottom)); } }
+  @media print { .gp-bar { display: none; } .gp { padding: 0; max-width: none; } }
+</style>
+</head>
+<body>
+<main class="gp" id="gp">
+  <div class="skel gp-skel"></div>
+  <div class="skel gp-skel" style="height:320px"></div>
+</main>
+<script src="/shared.js?v=docare50"></script>
+<script src="/patient-guides.js?v=docare25"></script>
+<script src="/guide.js?v=docare59"></script>
+<script src="/g/app.js?v=docare59"></script>
+</body>
+</html>

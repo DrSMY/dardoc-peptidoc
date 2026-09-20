@@ -228,6 +228,38 @@ CREATE TABLE IF NOT EXISTS wizard_drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_org ON wizard_drafts(org_id);`);
 
+// ── organisation logo ────────────────────────────────────────────
+// The clinic's own logo replaces any house branding on the patient guide.
+// The image lives in its own table so that `SELECT * FROM organizations`
+// (used by list screens) never drags image bytes along; `logo_version` is
+// the cache-busting stamp on the image URL (0 = no logo).
+addColumn("organizations", "logo_version", "INTEGER NOT NULL DEFAULT 0");
+db.exec(`
+CREATE TABLE IF NOT EXISTS org_logos (
+  org_id INTEGER PRIMARY KEY REFERENCES organizations(id),
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+
+// ── shareable guide links ────────────────────────────────────────
+// A private, unguessable link a doctor sends over WhatsApp. It opens the
+// patient's current active guide as a web page — no sign-in — and can be
+// reopened until it expires or the doctor disables it.
+db.exec(`
+CREATE TABLE IF NOT EXISTS guide_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  views INTEGER NOT NULL DEFAULT 0,
+  last_viewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_guide_links_patient ON guide_links(patient_id);`);
+
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
 // never guessed or auto-filled — shown in the guide only once set.

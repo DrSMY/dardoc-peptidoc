@@ -8,9 +8,9 @@ const protocolMap = require("./protocol-map.js");
 const SESSION_HOURS = { doctor: 24 * 14, patient: 24 * 90 };
 
 // ── helpers ──────────────────────────────────────────────────────
-function json(res, status, data) {
+function json(res, status, data, headers) {
   const body = JSON.stringify(data);
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...(headers || {}) });
   res.end(body);
 }
 
@@ -67,7 +67,7 @@ function getDoctor(req) {
   const s = db.prepare("SELECT * FROM sessions WHERE token = ? AND kind = 'doctor' AND expires_at > datetime('now')").get(token);
   if (!s) return null;
   const u = db.prepare(`SELECT u.id, u.email, u.name, u.role, u.credentials, u.signature, u.clinic, u.active,
-      u.org_id, u.platform_admin, o.name AS org_name, o.slug AS org_slug, o.app_name
+      u.org_id, u.platform_admin, o.name AS org_name, o.slug AS org_slug, o.app_name, o.logo_version
     FROM users u LEFT JOIN organizations o ON o.id = u.org_id
     WHERE u.id = ? AND u.active = 1`).get(s.ref_id);
   if (!u) return null;
@@ -123,6 +123,12 @@ function generatePin() {
   return String(crypto.randomInt(100000, 1000000)); // 6 digits, no leading-zero ambiguity
 }
 
+// URL of an organisation's logo image, or "" when it has none. The version
+// stamp busts caches whenever the logo is replaced or removed.
+function orgLogoUrl(orgId, version) {
+  return orgId && version ? `/api/org-logo/${orgId}?v=${version}` : "";
+}
+
 function normMobile(m) {
   return String(m || "").replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
 }
@@ -131,7 +137,7 @@ function normMobile(m) {
 // from the session, so a guide opened months later — or by a different
 // doctor, or by an admin — still shows who actually prescribed it.
 function signerFor(userId) {
-  const u = db.prepare(`SELECT u.name, u.credentials, u.signature, u.clinic, o.name AS org_name, o.app_name
+  const u = db.prepare(`SELECT u.name, u.credentials, u.signature, u.clinic, u.org_id, o.name AS org_name, o.app_name, o.logo_version
     FROM users u LEFT JOIN organizations o ON o.id = u.org_id WHERE u.id = ?`).get(userId);
   return {
     name: u ? u.name : "Your doctor",
@@ -142,6 +148,9 @@ function signerFor(userId) {
     // one — a practice with no such app gets guide text that never assumes
     // it exists (see buildGuideText's appName fallback in guide.js).
     appName: (u && u.app_name) || "",
+    // The clinic's own logo, when it has uploaded one — the guide header shows
+    // this instead of any house branding.
+    logoUrl: u ? orgLogoUrl(u.org_id, u.logo_version) : "",
   };
 }
 
@@ -232,9 +241,10 @@ function checkinFlag(symptoms) {
 // ── route table ──────────────────────────────────────────────────
 // Each handler: (req, res, params, body) — return true-ish when handled.
 const routes = [];
+// `:token` matches an opaque URL-safe string; every other `:name` is a number.
 function route(method, pattern, handler) {
   const keys = [];
-  const rx = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return "(\\d+)"; }) + "$");
+  const rx = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return k === "token" ? "([A-Za-z0-9_-]{20,64})" : "(\\d+)"; }) + "$");
   routes.push({ method, rx, keys, handler });
 }
 
@@ -261,13 +271,14 @@ function publicUser(u) {
     clinic: u.clinic || u.org_name || "", active: u.active === undefined ? 1 : u.active,
     orgId: u.org_id || null, orgName: u.org_name || u.clinic || "", platformAdmin: !!u.platform_admin,
     appName: u.app_name || "",
+    logoUrl: orgLogoUrl(u.org_id, u.logo_version),
   };
 }
 
 // A single user row with its organisation's name attached — the only shape
 // publicUser() should ever be given.
 function userWithOrg(where, ...vals) {
-  return db.prepare(`SELECT u.*, o.name AS org_name, o.app_name FROM users u
+  return db.prepare(`SELECT u.*, o.name AS org_name, o.app_name, o.logo_version FROM users u
     LEFT JOIN organizations o ON o.id = u.org_id WHERE ${where}`).get(...vals);
 }
 
@@ -436,6 +447,58 @@ route("PUT", "/api/admin/orgs/:id", async (req, res, p, body) => {
   if (!sets.length) return json(res, 400, { error: "Nothing to update." });
   db.prepare(`UPDATE organizations SET ${sets.join(", ")} WHERE id = ?`).run(...vals, org.id);
   json(res, 200, db.prepare("SELECT * FROM organizations WHERE id = ?").get(org.id));
+});
+
+// ── organisation logo ───────────────────────────────────────────
+// Uploaded by the organisation's own super admin (or the platform owner) and
+// shown on every patient guide in place of any house branding. PNG / JPEG /
+// WebP only: SVG can carry script, and the bytes are checked rather than
+// trusting the declared type.
+const LOGO_MAX_BYTES = 700 * 1024;
+function sniffImageMime(buf) {
+  if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+function orgBrandingUser(req, orgId) {
+  const u = getDoctor(req);
+  if (!u) return null;
+  return u.platform_admin || (u.role === "superadmin" && u.org_id === orgId) ? u : null;
+}
+
+// Public on purpose: the guide page a patient opens has no session.
+route("GET", "/api/org-logo/:id", (req, res, p) => {
+  const row = db.prepare("SELECT mime, data FROM org_logos WHERE org_id = ?").get(p.id);
+  if (!row) { res.writeHead(404); return res.end(); }
+  res.writeHead(200, {
+    "Content-Type": row.mime, "Cache-Control": "public, max-age=86400",
+    "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'",
+  });
+  res.end(Buffer.from(row.data));
+});
+
+route("POST", "/api/orgs/:id/logo", async (req, res, p, body) => {
+  if (!orgBrandingUser(req, p.id)) return json(res, 403, { error: "Only this organisation's super admin can change its logo." });
+  if (!db.prepare("SELECT id FROM organizations WHERE id = ?").get(p.id)) return json(res, 404, { error: "Organisation not found." });
+  const m = String(body.dataUrl || "").match(/^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) return json(res, 400, { error: "Choose a PNG, JPG or WebP image." });
+  const buf = Buffer.from(m[1], "base64");
+  if (buf.length > LOGO_MAX_BYTES) return json(res, 400, { error: "That image is too large — keep the logo under 700 KB." });
+  const mime = sniffImageMime(buf);
+  if (!mime) return json(res, 400, { error: "That file is not a valid PNG, JPG or WebP image." });
+  const version = Date.now();
+  db.prepare(`INSERT INTO org_logos (org_id, mime, data) VALUES (?,?,?)
+    ON CONFLICT(org_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = datetime('now')`).run(p.id, mime, buf);
+  db.prepare("UPDATE organizations SET logo_version = ? WHERE id = ?").run(version, p.id);
+  json(res, 200, { logoUrl: orgLogoUrl(p.id, version) });
+});
+
+route("DELETE", "/api/orgs/:id/logo", (req, res, p) => {
+  if (!orgBrandingUser(req, p.id)) return json(res, 403, { error: "Only this organisation's super admin can change its logo." });
+  db.prepare("DELETE FROM org_logos WHERE org_id = ?").run(p.id);
+  db.prepare("UPDATE organizations SET logo_version = 0 WHERE id = ?").run(p.id);
+  json(res, 200, { logoUrl: "" });
 });
 
 // ── super admin: the clinical team ──────────────────────────────
@@ -900,6 +963,96 @@ route("DELETE", "/api/drafts/:id", (req, res, p) => {
   json(res, 200, { ok: true });
 });
 
+// ── shareable guide links ────────────────────────────────────────
+// A doctor sends a patient a private link; it opens their current active
+// guide as a web page with no sign-in, and can be reopened until it expires
+// or is disabled. The token is 192 random bits, so it is the credential —
+// hence noindex/no-store on everything served through it.
+const GUIDE_LINK_DAYS = 90;
+const NOINDEX = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" };
+
+function activeGuideLink(patientId) {
+  return db.prepare(`SELECT * FROM guide_links WHERE patient_id = ? AND revoked_at IS NULL
+    AND expires_at > datetime('now') ORDER BY id DESC LIMIT 1`).get(patientId);
+}
+function guideLinkInfo(l) {
+  return { token: l.token, expiresAt: l.expires_at, views: l.views, lastViewedAt: l.last_viewed_at, createdAt: l.created_at };
+}
+
+route("POST", "/api/patients/:id/guide-link", async (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
+  if (!db.prepare("SELECT 1 AS x FROM plans WHERE patient_id = ? AND status = 'active'").get(p.id)) {
+    return json(res, 400, { error: "This patient has no active program to share a guide for yet." });
+  }
+  // Regenerating retires every earlier link — the way to cut off a link that
+  // went to the wrong person.
+  if (body.renew) db.prepare("UPDATE guide_links SET revoked_at = datetime('now') WHERE patient_id = ? AND revoked_at IS NULL").run(p.id);
+  let link = activeGuideLink(p.id);
+  if (link) {
+    // Sending again keeps the same link working and pushes its expiry out.
+    db.prepare("UPDATE guide_links SET expires_at = datetime('now', ?) WHERE id = ?").run(`+${GUIDE_LINK_DAYS} days`, link.id);
+  } else {
+    db.prepare("INSERT INTO guide_links (token, patient_id, created_by, expires_at) VALUES (?,?,?,datetime('now', ?))")
+      .run(crypto.randomBytes(24).toString("base64url"), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
+  }
+  link = activeGuideLink(p.id);
+  json(res, 200, guideLinkInfo(link));
+});
+
+route("DELETE", "/api/patients/:id/guide-link", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  if (!patientInOrg(p.id, me)) return json(res, 404, NOT_IN_ORG);
+  db.prepare("UPDATE guide_links SET revoked_at = datetime('now') WHERE patient_id = ? AND revoked_at IS NULL").run(p.id);
+  json(res, 200, { ok: true });
+});
+
+// Only what the guide page renders — never clinical notes, contact details,
+// staff ids or anything else on the plan row.
+function sharedPlan(row) {
+  const p = parsePlan(row);
+  return {
+    id: p.id, category: p.category, title: p.title, medication: p.medication, dose: p.dose, quantity: p.quantity,
+    route: p.route, frequency: p.frequency, phases: p.phases, instructions: p.instructions, warnings: p.warnings,
+    diet: p.diet, blood_test: p.blood_test, supplements: p.supplements, labTests: p.labTests, suppList: p.suppList,
+    next_followup: p.next_followup, created_at: p.created_at, updated_at: p.updated_at, status: p.status,
+    signedBy: p.signedBy, revisedBy: p.revisedBy, doseOptions: p.doseOptions, guideInfo: p.guideInfo,
+  };
+}
+
+// Public: the token is the credential. Expired, disabled and unknown links
+// all answer identically so a link cannot be probed.
+route("GET", "/api/guide/:token", (req, res, p) => {
+  const unavailable = () => json(res, 404, { error: "This guide link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const link = db.prepare("SELECT * FROM guide_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(p.token);
+  if (!link) return unavailable();
+  const patient = db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
+  if (!patient) return unavailable();
+  const rows = db.prepare("SELECT * FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC").all(patient.id);
+  if (!rows.length) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
+  rows.sort((a, b) => (b.category === "glp1") - (a.category === "glp1"));
+  db.prepare("UPDATE guide_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(link.id);
+  const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
+  json(res, 200, {
+    patient: { title: patient.title || "", name: patient.name },
+    clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
+    plans: rows.map(sharedPlan),
+  }, NOINDEX);
+});
+
+// What a link-preview crawler (WhatsApp) should show for /g/<token>. It reads
+// the page's HTML without running its script, so this is rendered into the
+// <head> by the server — and deliberately carries no patient details.
+function guidePageMeta(token) {
+  const row = db.prepare(`SELECT o.id, o.name, o.logo_version FROM guide_links g
+    JOIN patients p ON p.id = g.patient_id JOIN organizations o ON o.id = p.org_id
+    WHERE g.token = ? AND g.revoked_at IS NULL AND g.expires_at > datetime('now')`).get(token);
+  return row ? { clinic: row.name, logoUrl: orgLogoUrl(row.id, row.logo_version) } : null;
+}
+
 // ── bulk history import (superadmin) ─────────────────────────────
 // Imports historical consultation records as patients + completed
 // ("previous history") plans — no active programs. Idempotent via
@@ -1333,7 +1486,7 @@ async function handleApi(req, res, pathname) {
     const m = pathname.match(r.rx);
     if (!m) continue;
     const params = {};
-    r.keys.forEach((k, i) => { params[k] = Number(m[i + 1]); });
+    r.keys.forEach((k, i) => { params[k] = k === "token" ? m[i + 1] : Number(m[i + 1]); });
     const body = ["POST", "PATCH", "PUT"].includes(req.method) ? await readBody(req) : {};
     try {
       await r.handler(req, res, params, body);
@@ -1346,4 +1499,4 @@ async function handleApi(req, res, pathname) {
   return false;
 }
 
-module.exports = { handleApi };
+module.exports = { handleApi, guidePageMeta };
