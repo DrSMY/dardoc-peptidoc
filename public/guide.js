@@ -705,6 +705,21 @@ const GUIDE_CSS = `
 .g-supp b { font-family: var(--font-head); font-size: 14.5px; }
 .g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .g-toolbar .btn { flex-shrink: 0; }
+/* refill request: choice cards shared by the portal, guide link and dedicated refill link */
+.rr-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.rr-choices-row { flex-direction: row; flex-wrap: wrap; }
+.rr-choices-row .rr-choice { flex: 1; min-width: 90px; justify-content: center; }
+.rr-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: var(--r-md); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.rr-choice:hover { border-color: var(--brand); }
+.rr-choice:has(:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
+.rr-choice.on { border-color: var(--brand); background: var(--brand-soft); }
+.rr-choice input[type="radio"] { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
+.rr-choice-label { font-size: 14px; font-weight: 600; }
+.rr-choice-info { margin: 10px 0 0; padding: 11px 14px; background: var(--bg); border-left: 3px solid var(--brand); border-radius: 0 var(--r-md) var(--r-md) 0; font-size: 13px; color: var(--muted); line-height: 1.55; }
+@media (prefers-reduced-motion: no-preference) {
+  .rr-reveal { animation: rrFadeIn .2s ease-out; }
+}
+@keyframes rrFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 `;
 
 function injectGuideCss() {
@@ -716,60 +731,145 @@ function injectGuideCss() {
   }
 }
 
-// ── refill request (shared by the portal and the public guide link) ─────
-// Same form in both places: current weight, side effects, (peptides) how
-// it's working, and for GLP-1 programs a dose preference. Submitting never
-// changes the program itself — it only logs a request the doctor reviews
-// and makes the final call on.
-function refillRequestFormHTML(plan) {
-  const isGlp1 = plan.category === "glp1";
-  const isPeptide = plan.category === "peptide";
+// ── refill request (shared by the portal, the guide link and the dedicated
+// refill link) ───────────────────────────────────────────────────────────
+// Same fields everywhere: current weight, a structured side-effects
+// question, (peptides) how it's working, and for GLP-1 programs a dose
+// preference with a plain-language explanation under whichever choice is
+// selected. Submitting never changes the program itself — it only logs a
+// request the doctor reviews and makes the final call on.
+
+// Shown under the selected dose choice so the decision is informed rather
+// than a blind pick. Deliberately factual, calm and non-prescriptive — these
+// describe what a choice means, not clinical advice, and every one of them
+// ends with the doctor confirming before anything actually changes.
+const DOSE_CHOICE_INFO = {
+  same: "You'll stay on your current dose. A good option if side effects feel manageable and you're seeing the progress you want.",
+  increase: "A higher dose is usually only considered once your current one is well tolerated. It can help if progress has slowed — your doctor will confirm you're ready before anything changes.",
+  decrease: "A lower dose can ease side effects while keeping you on treatment. Your doctor will confirm it's still enough to support your goals.",
+  custom: "Pick the exact dose you'd like to discuss. Your doctor will review it and confirm before it's applied.",
+  talk: "No dose will be changed yet. Your doctor will follow up with you directly to talk through how things are going first.",
+};
+const DOSE_CHOICE_LABELS = {
+  same: "Stay the same", increase: "Increase dose", decrease: "Decrease dose",
+  custom: "Choose a specific dose", talk: "I'd rather talk to my doctor first",
+};
+
+function doseChoiceFieldHTML(plan) {
   const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
-  const radio = (val, label, checked) => `
-    <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:400;margin-bottom:6px">
-      <input type="radio" name="rr-dose" value="${val}" ${checked ? "checked" : ""}> ${label}
+  const radio = (val, checked) => `
+    <label class="rr-choice">
+      <input type="radio" name="rr-dose" value="${val}" ${checked ? "checked" : ""}>
+      <span class="rr-choice-label">${esc(DOSE_CHOICE_LABELS[val])}</span>
     </label>`;
   return `
-  <div class="modal-head"><h3>Request a refill — ${esc(plan.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
-  <div class="field"><label for="rr-weight">Current weight (kg)</label><input class="input" id="rr-weight" type="number" step="0.1" inputmode="decimal" placeholder="Optional"></div>
-  <div class="field"><label for="rr-side">Any side effects to report?</label><textarea class="input" id="rr-side" rows="2" placeholder="Optional"></textarea></div>
-  ${isPeptide ? `<div class="field"><label for="rr-results">How has it been working for you? Any results noticed?</label><textarea class="input" id="rr-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
-  ${isGlp1 ? `
   <div class="field">
-    <label>Dose for your next refill</label>
-    <div style="margin-top:6px">
-      ${radio("same", "Stay the same", true)}
-      ${radio("increase", "Increase dose")}
-      ${radio("decrease", "Decrease dose")}
-      ${radio("custom", "Choose a specific dose")}
+    <label id="rr-dose-legend">Dose for your next refill</label>
+    <div class="rr-choices" role="radiogroup" aria-labelledby="rr-dose-legend">
+      ${radio("same", true)}${radio("increase")}${radio("decrease")}${radio("custom")}${radio("talk")}
     </div>
-    ${doseOptions.length ? `<select class="input" id="rr-customdose" style="margin-top:4px" hidden>${doseOptions.map((d) => `<option ${d === plan.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>` : ""}
-  </div>` : ""}
-  <div class="field"><label for="rr-notes">Anything else your doctor should know?</label><textarea class="input" id="rr-notes" rows="2" placeholder="Optional"></textarea></div>
-  <button class="btn btn-primary btn-block" id="rr-submit" type="button">Send request</button>
+    ${doseOptions.length ? `<select class="input" id="rr-customdose" style="margin-top:8px" hidden>${doseOptions.map((d) => `<option ${d === plan.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>` : ""}
+    <p class="rr-choice-info" id="rr-dose-info">${esc(DOSE_CHOICE_INFO.same)}</p>
+  </div>`;
+}
+
+function sideEffectsFieldHTML() {
+  return `
+  <div class="field">
+    <label id="rr-se-legend">Have you had any side effects?</label>
+    <div class="rr-choices rr-choices-row" role="radiogroup" aria-labelledby="rr-se-legend">
+      <label class="rr-choice"><input type="radio" name="rr-se" value="no" checked><span class="rr-choice-label">No</span></label>
+      <label class="rr-choice"><input type="radio" name="rr-se" value="yes"><span class="rr-choice-label">Yes</span></label>
+    </div>
+  </div>
+  <div class="field" id="rr-se-severity-field" hidden>
+    <label id="rr-sev-legend">How severe?</label>
+    <div class="rr-choices rr-choices-row" role="radiogroup" aria-labelledby="rr-sev-legend">
+      <label class="rr-choice"><input type="radio" name="rr-severity" value="mild"><span class="rr-choice-label">Mild</span></label>
+      <label class="rr-choice"><input type="radio" name="rr-severity" value="moderate"><span class="rr-choice-label">Moderate</span></label>
+      <label class="rr-choice"><input type="radio" name="rr-severity" value="high"><span class="rr-choice-label">High</span></label>
+    </div>
+  </div>
+  <div class="field"><label for="rr-side">Anything else about how you're feeling? (optional)</label><textarea class="input" id="rr-side" rows="2" placeholder="Optional"></textarea></div>`;
+}
+
+// Just the fields — no modal chrome, no submit button — so the same markup
+// works inside a modal (portal, guide link) and inline on the dedicated
+// refill page.
+function refillRequestFieldsHTML(plan) {
+  const isGlp1 = plan.category === "glp1";
+  const isPeptide = plan.category === "peptide";
+  return `
+  <div class="field"><label for="rr-weight">Current weight (kg)</label><input class="input" id="rr-weight" type="number" step="0.1" inputmode="decimal" placeholder="Optional"></div>
+  ${sideEffectsFieldHTML()}
+  ${isPeptide ? `<div class="field"><label for="rr-results">How has it been working for you? Any results noticed?</label><textarea class="input" id="rr-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
+  ${isGlp1 ? doseChoiceFieldHTML(plan) : ""}
+  <div class="field"><label for="rr-notes">Anything else your doctor should know?</label><textarea class="input" id="rr-notes" rows="2" placeholder="Optional"></textarea></div>`;
+}
+
+// Wires every conditional reveal: side-effects severity (only once "Yes" is
+// picked) and the dose-choice explanation + custom-dose picker.
+function wireRefillRequestFields(root) {
+  const sevField = root.querySelector("#rr-se-severity-field");
+  root.querySelectorAll('input[name="rr-se"]').forEach((r) => r.addEventListener("change", () => {
+    if (!r.checked) return;
+    const show = r.value === "yes";
+    if (sevField) { sevField.hidden = !show; if (show) sevField.classList.add("rr-reveal"); }
+  }));
+  const customSel = root.querySelector("#rr-customdose");
+  const doseInfo = root.querySelector("#rr-dose-info");
+  root.querySelectorAll('input[name="rr-dose"]').forEach((r) => r.addEventListener("change", () => {
+    if (!r.checked) return;
+    if (customSel) customSel.hidden = r.value !== "custom";
+    if (doseInfo) { doseInfo.textContent = DOSE_CHOICE_INFO[r.value] || ""; doseInfo.classList.remove("rr-reveal"); void doseInfo.offsetWidth; doseInfo.classList.add("rr-reveal"); }
+  }));
+  root.querySelectorAll(".rr-choice").forEach((label) => {
+    const input = label.querySelector("input[type=radio]");
+    if (!input) return;
+    const sync = () => label.classList.toggle("on", input.checked);
+    input.addEventListener("change", () => {
+      root.querySelectorAll(`input[name="${input.name}"]`).forEach((r) => r.closest(".rr-choice").classList.toggle("on", r.checked));
+    });
+    sync();
+  });
+}
+
+function readRefillRequestFields(root) {
+  const seRadio = root.querySelector('input[name="rr-se"]:checked');
+  const sevRadio = root.querySelector('input[name="rr-severity"]:checked');
+  const doseRadio = root.querySelector('input[name="rr-dose"]:checked');
+  const customSel = root.querySelector("#rr-customdose");
+  const val = (id) => { const el = root.querySelector("#" + id); return el ? el.value.trim() : ""; };
+  const hasSideEffects = seRadio ? seRadio.value : "";
+  return {
+    weightKg: Number(val("rr-weight")) || null,
+    hasSideEffects,
+    sideEffectSeverity: hasSideEffects === "yes" && sevRadio ? sevRadio.value : "",
+    sideEffects: val("rr-side"),
+    resultsFelt: val("rr-results"),
+    doseAction: doseRadio ? doseRadio.value : "",
+    requestedDose: customSel && !customSel.hidden ? customSel.value : "",
+    notes: val("rr-notes"),
+  };
+}
+
+function refillRequestFormHTML(plan) {
+  return `
+  <div class="modal-head"><h3>Request a refill — ${esc(plan.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+  ${refillRequestFieldsHTML(plan)}
+  <button class="btn btn-primary btn-block" id="rr-submit" type="button" style="margin-top:4px">Send request</button>
   <p class="hint" style="margin-top:10px;text-align:center">Your doctor will review this and confirm the next step.</p>`;
 }
 
 // Opens the form in a modal; submitFn(payload) does the actual POST (the
-// endpoint differs between the portal, which is already signed in, and the
-// public guide link, which authenticates by its token).
+// endpoint differs between the portal, which is already signed in, and a
+// public link, which authenticates by its token).
 function openRefillRequestModal(plan, submitFn) {
   const scrim = modal(refillRequestFormHTML(plan));
-  const customSel = scrim.querySelector("#rr-customdose");
-  scrim.querySelectorAll('input[name="rr-dose"]').forEach((r) => r.addEventListener("change", () => {
-    if (customSel) customSel.hidden = r.value !== "custom";
-  }));
+  wireRefillRequestFields(scrim);
   scrim.querySelector("#rr-submit").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
-    const doseRadio = scrim.querySelector('input[name="rr-dose"]:checked');
-    const payload = {
-      weightKg: Number(scrim.querySelector("#rr-weight").value) || null,
-      sideEffects: scrim.querySelector("#rr-side").value.trim(),
-      resultsFelt: scrim.querySelector("#rr-results") ? scrim.querySelector("#rr-results").value.trim() : "",
-      doseAction: doseRadio ? doseRadio.value : "",
-      requestedDose: customSel && !customSel.hidden ? customSel.value : "",
-      notes: scrim.querySelector("#rr-notes").value.trim(),
-    };
+    const payload = readRefillRequestFields(scrim);
     btn.disabled = true; btn.textContent = "Sending…";
     try {
       await submitFn(payload);

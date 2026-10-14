@@ -282,10 +282,10 @@ CREATE TABLE IF NOT EXISTS refill_requests (
   patient_id INTEGER NOT NULL REFERENCES patients(id),
   source TEXT NOT NULL DEFAULT 'doctor',        -- doctor | patient
   status TEXT NOT NULL DEFAULT 'pending',       -- pending | approved | declined
-  side_effects TEXT DEFAULT '',
+  side_effects TEXT DEFAULT '',                 -- free-text details (always optional)
   weight_kg REAL,
   results_felt TEXT DEFAULT '',                 -- peptide programs: how it's working
-  dose_action TEXT DEFAULT '',                  -- glp1 programs: increase | decrease | same | custom
+  dose_action TEXT DEFAULT '',                  -- glp1 programs: increase | decrease | same | custom | talk
   requested_dose TEXT DEFAULT '',
   notes TEXT DEFAULT '',
   prior_dose TEXT DEFAULT '',
@@ -297,6 +297,30 @@ CREATE TABLE IF NOT EXISTS refill_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_refill_requests_patient ON refill_requests(patient_id);
 CREATE INDEX IF NOT EXISTS idx_refill_requests_plan ON refill_requests(plan_id);`);
+// The structured version of the side-effects question (yes/no, then
+// severity) — `side_effects` stays the free-text "anything else" box, always
+// optional and shown regardless of the yes/no answer.
+addColumn("refill_requests", "has_side_effects", "TEXT DEFAULT ''");     // 'yes' | 'no'
+addColumn("refill_requests", "side_effect_severity", "TEXT DEFAULT ''"); // 'mild' | 'moderate' | 'high'
+
+// ── dedicated refill links ─────────────────────────────────────────
+// A separate shareable link just for requesting a refill — distinct from the
+// guide link, so it can be sent on its own (e.g. "time for your refill?")
+// without pointing the patient at the whole treatment guide. Same
+// unguessable-token pattern as guide_links.
+db.exec(`
+CREATE TABLE IF NOT EXISTS refill_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  views INTEGER NOT NULL DEFAULT 0,
+  last_viewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_refill_links_patient ON refill_links(patient_id);`);
 
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —

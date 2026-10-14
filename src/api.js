@@ -780,7 +780,8 @@ route("GET", "/api/dashboard", (req, res) => {
   const refillRequests = db.prepare(`
     SELECT pl.id AS plan_id, pl.category, pl.medication, pl.dose, pl.quantity, pl.refill_requested_at,
       p.id AS patient_id, p.name AS patient_name, p.mobile,
-      rr.id AS request_id, rr.side_effects, rr.weight_kg, rr.results_felt, rr.dose_action, rr.requested_dose, rr.notes
+      rr.id AS request_id, rr.side_effects, rr.weight_kg, rr.results_felt, rr.dose_action, rr.requested_dose, rr.notes,
+      rr.has_side_effects, rr.side_effect_severity
     FROM plans pl
     JOIN patients p ON p.id = pl.patient_id
     LEFT JOIN refill_requests rr ON rr.id = (
@@ -1140,6 +1141,95 @@ function guidePageMeta(token) {
   return row ? { clinic: row.name, logoUrl: orgLogoUrl(row.id, row.logo_version) } : null;
 }
 
+// ── dedicated refill link ──────────────────────────────────────────
+// A separate link from the guide link — shareable on its own (e.g. a
+// "time for your refill?" message) so the patient lands straight on the
+// refill request form rather than the whole treatment guide.
+function activeRefillLink(patientId) {
+  return db.prepare(`SELECT * FROM refill_links WHERE patient_id = ? AND revoked_at IS NULL
+    AND expires_at > datetime('now') ORDER BY id DESC LIMIT 1`).get(patientId);
+}
+function refillLinkInfo(l) {
+  return { token: l.token, expiresAt: l.expires_at, views: l.views, lastViewedAt: l.last_viewed_at, createdAt: l.created_at };
+}
+
+route("POST", "/api/patients/:id/refill-link", async (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
+  if (!db.prepare("SELECT 1 AS x FROM plans WHERE patient_id = ? AND status = 'active'").get(p.id)) {
+    return json(res, 400, { error: "This patient has no active program to request a refill for yet." });
+  }
+  if (body.renew) db.prepare("UPDATE refill_links SET revoked_at = datetime('now') WHERE patient_id = ? AND revoked_at IS NULL").run(p.id);
+  let link = activeRefillLink(p.id);
+  if (link) {
+    db.prepare("UPDATE refill_links SET expires_at = datetime('now', ?) WHERE id = ?").run(`+${GUIDE_LINK_DAYS} days`, link.id);
+  } else {
+    db.prepare("INSERT INTO refill_links (token, patient_id, created_by, expires_at) VALUES (?,?,?,datetime('now', ?))")
+      .run(crypto.randomBytes(24).toString("base64url"), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
+  }
+  link = activeRefillLink(p.id);
+  json(res, 200, refillLinkInfo(link));
+});
+
+route("DELETE", "/api/patients/:id/refill-link", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  if (!patientInOrg(p.id, me)) return json(res, 404, NOT_IN_ORG);
+  db.prepare("UPDATE refill_links SET revoked_at = datetime('now') WHERE patient_id = ? AND revoked_at IS NULL").run(p.id);
+  json(res, 200, { ok: true });
+});
+
+// Only what the refill-request page needs — never clinical notes or contact
+// details. Narrower than sharedPlan() since there's no guide content here.
+function refillLinkPlan(row) {
+  const p = parsePlan(row);
+  return {
+    id: p.id, category: p.category, medication: p.medication, dose: p.dose, route: p.route,
+    frequency: p.frequency, quantity: p.quantity, doseOptions: p.doseOptions, needs_refill: !!p.needs_refill,
+  };
+}
+
+// Public: the token is the credential. Expired, disabled and unknown links
+// all answer identically so a link cannot be probed.
+route("GET", "/api/refill/:token", (req, res, p) => {
+  const unavailable = () => json(res, 404, { error: "This link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const link = db.prepare("SELECT * FROM refill_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(p.token);
+  if (!link) return unavailable();
+  const patient = db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
+  if (!patient) return unavailable();
+  const rows = db.prepare("SELECT * FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC").all(patient.id);
+  db.prepare("UPDATE refill_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(link.id);
+  const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
+  json(res, 200, {
+    patient: { title: patient.title || "", name: patient.name },
+    clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
+    plans: rows.map(refillLinkPlan),
+  }, NOINDEX);
+});
+
+// Patient requests a refill through their dedicated refill link — no sign-in,
+// the token is the credential. Same as the guide-link version: only ever
+// logs a 'pending' request for the doctor to review and decide.
+route("POST", "/api/refill/:token/plans/:id/refill-request", async (req, res, p, body) => {
+  const link = db.prepare("SELECT * FROM refill_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(p.token);
+  if (!link) return json(res, 404, { error: "This link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ? AND status = 'active'").get(p.id, link.patient_id);
+  if (!plan) return json(res, 404, { error: "This program is no longer active." }, NOINDEX);
+  submitPatientRefillRequest(plan, body);
+  json(res, 200, { ok: true }, NOINDEX);
+});
+
+// What a link-preview crawler (WhatsApp) should show for /r/<token> — same
+// idea as guidePageMeta, deliberately carrying no patient details.
+function refillPageMeta(token) {
+  const row = db.prepare(`SELECT o.id, o.name, o.logo_version FROM refill_links r
+    JOIN patients p ON p.id = r.patient_id JOIN organizations o ON o.id = p.org_id
+    WHERE r.token = ? AND r.revoked_at IS NULL AND r.expires_at > datetime('now')`).get(token);
+  return row ? { clinic: row.name, logoUrl: orgLogoUrl(row.id, row.logo_version) } : null;
+}
+
 // ── bulk history import (superadmin) ─────────────────────────────
 // Imports historical consultation records as patients + completed
 // ("previous history") plans — no active programs. Idempotent via
@@ -1472,13 +1562,16 @@ function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, weigh
 // itself. It's logged as 'pending' and surfaces on the doctor's dashboard
 // until they decide what to do with it.
 function submitPatientRefillRequest(plan, body) {
+  const hasSideEffects = ["yes", "no"].includes(body.hasSideEffects) ? body.hasSideEffects : "";
+  const severity = hasSideEffects === "yes" && ["mild", "moderate", "high"].includes(body.sideEffectSeverity) ? body.sideEffectSeverity : "";
   db.prepare(`INSERT INTO refill_requests
-    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, has_side_effects, side_effect_severity)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(plan.id, plan.patient_id, "patient", "pending",
       String(body.sideEffects || "").slice(0, 2000), body.weightKg ? Number(body.weightKg) : null,
       String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
-      String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000), plan.dose || "");
+      String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000), plan.dose || "",
+      hasSideEffects, severity);
   db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
 }
 
@@ -1669,4 +1762,4 @@ async function handleApi(req, res, pathname) {
   return false;
 }
 
-module.exports = { handleApi, guidePageMeta };
+module.exports = { handleApi, guidePageMeta, refillPageMeta };

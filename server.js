@@ -3,7 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { handleApi, guidePageMeta } = require("./src/api");
+const { handleApi, guidePageMeta, refillPageMeta } = require("./src/api");
 
 const PORT = process.env.PORT || 4700;
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -77,6 +77,33 @@ function serveGuidePage(req, res, token) {
   });
 }
 
+// The dedicated refill-request page (/r/<token>) — a separate shareable link
+// from the guide link, so a patient can land straight on "request a refill"
+// without the whole treatment guide. Same static-shell + og-tag pattern.
+function serveRefillPage(req, res, token) {
+  fs.readFile(path.join(PUBLIC_DIR, "r", "index.html"), "utf8", (err, html) => {
+    if (err) { res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Not found"); }
+    const meta = refillPageMeta(token);
+    const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
+    const origin = `${proto}://${req.headers.host || "localhost"}`;
+    const title = meta && meta.clinic ? `Request a refill — ${meta.clinic}` : "Request a refill";
+    const tags = [
+      `<meta property="og:type" content="website">`,
+      `<meta property="og:title" content="${escAttr(title)}">`,
+      `<meta property="og:description" content="Tap to request your next refill — your doctor will review and confirm.">`,
+      meta && meta.clinic ? `<meta property="og:site_name" content="${escAttr(meta.clinic)}">` : "",
+      meta && meta.logoUrl ? `<meta property="og:image" content="${escAttr(origin + meta.logoUrl)}">` : "",
+    ].filter(Boolean).join("\n");
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Robots-Tag": "noindex, nofollow",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end(html.replace("<!--OG-->", tags));
+  });
+}
+
 // One-shot legacy data import on boot (idempotent — skips existing patients).
 // Set IMPORT_SUPABASE=1 in the environment to enable; new PINs print to logs.
 if (process.env.IMPORT_SUPABASE === "1") {
@@ -98,6 +125,9 @@ const server = http.createServer(async (req, res) => {
 
   const guideMatch = pathname.match(/^\/g\/([A-Za-z0-9_-]{20,64})\/?$/);
   if (guideMatch) return serveGuidePage(req, res, guideMatch[1]);
+
+  const refillMatch = pathname.match(/^\/r\/([A-Za-z0-9_-]{20,64})\/?$/);
+  if (refillMatch) return serveRefillPage(req, res, refillMatch[1]);
 
   if (PAGE_ROUTES[pathname]) {
     return serveFile(res, path.join(PUBLIC_DIR, PAGE_ROUTES[pathname]));

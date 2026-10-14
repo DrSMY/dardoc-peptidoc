@@ -260,7 +260,7 @@ async function viewDashboard() {
             <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
             <div class="alert-body">
               <div class="alert-name">${esc(r.patient_name)}</div>
-              <div class="alert-sym">${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}${r.dose_action ? " — " + esc(doseActionLabel(r.dose_action, r.requested_dose)) : ""}${r.side_effects ? " · side effects reported" : ""}</div>
+              <div class="alert-sym">${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}${r.dose_action ? " — " + esc(doseActionLabel(r.dose_action, r.requested_dose)) : ""}${r.has_side_effects === "yes" ? ` · side effects (${esc(r.side_effect_severity || "unspecified")})` : ""}</div>
               <div class="alert-meta">${timeAgo(r.refill_requested_at)}</div>
             </div>
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
@@ -589,8 +589,12 @@ async function viewPatient(id) {
   const { patient: p, plans, doses, checkins, messages, refillRequests } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
-  if (p.start_weight_kg && !weights.length) weights.push({ x: p.created_at.slice(0, 10), y: p.start_weight_kg });
+  // The patient's actual current weight — from a real check-in if there is
+  // one, otherwise the most recently recorded weight (a refill updates this
+  // too), falling back to their starting weight. Computed before the chart's
+  // synthetic starting point below, which must never override this.
   const latestWeight = weights.length ? weights[weights.length - 1].y : (p.current_weight_kg || p.start_weight_kg);
+  if (p.start_weight_kg && !weights.length) weights.push({ x: p.created_at.slice(0, 10), y: p.start_weight_kg });
   const bmi = calcBMIClient(p.height_cm, latestWeight);
   const wtChange = weights.length > 1 ? (weights[weights.length - 1].y - weights[0].y) : null;
 
@@ -795,6 +799,7 @@ async function viewPatient(id) {
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
           <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
+          <button class="btn btn-secondary btn-sm" id="btn-refilllink">${icon("syringe", 16)} Send refill link</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send guide link</button>
         </div>
         ${guidePickerHTML(guidePlans, activeId)}
@@ -813,6 +818,7 @@ async function viewPatient(id) {
         });
         document.getElementById("btn-print").addEventListener("click", () => window.print());
         document.getElementById("btn-wa").addEventListener("click", () => guideLinkModal(p));
+        document.getElementById("btn-refilllink").addEventListener("click", () => refillLinkModal(p));
       }
     }
 
@@ -1025,6 +1031,91 @@ async function guideLinkModal(patient) {
   });
 }
 
+// ── dedicated refill link ────────────────────────────────────────
+// A separate link from the guide link — sendable on its own ("time for your
+// refill?") so the patient lands straight on the request form, not the
+// whole treatment guide.
+function refillLinkMessage(patient, url) {
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
+  const u = S.user;
+  const signature = [
+    [u.name, u.credentials].filter(Boolean).join(" "),
+    u.signature,
+    u.clinic || u.orgName || "DarDoc Healthcare",
+  ].filter(Boolean);
+  return [
+    `Hi ${patient.title ? patient.title + " " : ""}${firstName},`,
+    "",
+    "Looks like you're due for your next refill. Tap the link below to let me know how you're doing and your dose preference — I'll review it and confirm:",
+    "",
+    url,
+    "",
+    "",
+    ...signature,
+  ].join("\n");
+}
+
+async function refillLinkModal(patient) {
+  const scrim = modal(`
+    <div class="modal-head"><h3>Send refill link</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin:-6px 0 14px">A private link to request a refill for <b>${esc(patient.name)}</b> — separate from the guide link, so it can be sent on its own. Opens straight to the request form, no sign-in.</p>
+    <div id="rl-body"><div class="skel" style="height:190px"></div></div>`);
+  const body = scrim.querySelector("#rl-body");
+  let link;
+  const urlOf = (l) => `${location.origin}/r/${l.token}`;
+  const metaText = (l) => `Active until ${fmtDate(l.expiresAt)} · ${l.views ? `opened ${l.views} time${l.views === 1 ? "" : "s"}, last ${timeAgo(l.lastViewedAt)}` : "not opened yet"}`;
+  try { link = await api("POST", `/api/patients/${patient.id}/refill-link`, {}); }
+  catch (ex) { body.innerHTML = `<p class="err-text">${esc(ex.message)}</p>`; return; }
+
+  body.innerHTML = `
+    <div class="field"><label for="rl-msg">Message</label><textarea class="input" id="rl-msg" rows="10"></textarea></div>
+    <div class="card" style="background:var(--bg);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+      <span id="rl-url" style="flex:1;min-width:0;font-size:12.5px;color:var(--muted);word-break:break-all"></span>
+      <button class="btn btn-ghost btn-sm" id="rl-copylink" type="button">${icon("copy", 15)} Link</button>
+      <a class="btn btn-ghost btn-sm" id="rl-open" target="_blank" rel="noopener">Open</a>
+    </div>
+    <p class="hint" id="rl-meta" style="margin-bottom:14px"></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-accent" style="flex:1;min-width:180px" id="rl-wa" type="button">${icon("whatsapp", 18)} Send via WhatsApp</button>
+      <button class="btn btn-secondary" id="rl-copy" type="button">${icon("copy", 18)} Copy message</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="linklike" id="rl-renew" type="button">Generate a new link</button>
+      <button class="linklike" id="rl-off" type="button">Disable link</button>
+    </div>`;
+  const $ = (id) => scrim.querySelector("#" + id);
+  const msg = $("rl-msg");
+  const paint = () => {
+    $("rl-url").textContent = urlOf(link);
+    $("rl-open").href = urlOf(link);
+    $("rl-meta").textContent = metaText(link);
+  };
+  msg.value = refillLinkMessage(patient, urlOf(link));
+  paint();
+
+  $("rl-wa").addEventListener("click", () => {
+    if (!patient.mobile) return toast("This patient has no mobile number on file", "bad");
+    window.open(waLink(patient.mobile, msg.value), "_blank");
+  });
+  $("rl-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); });
+  $("rl-copylink").addEventListener("click", async () => { await navigator.clipboard.writeText(urlOf(link)); toast("Link copied"); });
+  $("rl-renew").addEventListener("click", async () => {
+    if (!confirm("Generate a new link? Any link already sent to the patient will stop working.")) return;
+    try {
+      const old = urlOf(link);
+      link = await api("POST", `/api/patients/${patient.id}/refill-link`, { renew: true });
+      msg.value = msg.value.includes(old) ? msg.value.split(old).join(urlOf(link)) : refillLinkMessage(patient, urlOf(link));
+      paint();
+      toast("New link generated — the old one no longer works");
+    } catch (ex) { toast(ex.message, "bad"); }
+  });
+  $("rl-off").addEventListener("click", async () => {
+    if (!confirm("Disable this link? The patient will no longer be able to request a refill with it.")) return;
+    try { await api("DELETE", `/api/patients/${patient.id}/refill-link`); scrim.remove(); toast("Link disabled"); }
+    catch (ex) { toast(ex.message, "bad"); }
+  });
+}
+
 // ── organisation logo ────────────────────────────────────────────
 // The clinic's own logo heads every patient guide. Any image is redrawn on a
 // canvas at a sensible size and uploaded as PNG, so a phone photo of a
@@ -1174,7 +1265,15 @@ function doseActionLabel(action, requestedDose) {
   if (action === "increase") return "Increase dose";
   if (action === "decrease") return "Decrease dose";
   if (action === "custom") return `Switch to ${requestedDose || "a specific dose"}`;
+  if (action === "talk") return "Wants to talk to you first";
   return "Stay the same";
+}
+
+// The structured side-effects answer, formatted for a doctor-facing summary.
+function sideEffectsSummary(r) {
+  if (r.has_side_effects === "yes") return `Side effects: yes${r.side_effect_severity ? ` (${r.side_effect_severity})` : ""}`;
+  if (r.has_side_effects === "no") return "Side effects: none reported";
+  return r.side_effects ? "Side effects reported" : "";
 }
 
 // The one form behind every refill: logged in clinic (applies immediately,
@@ -1186,6 +1285,8 @@ function refillFormModal(patient, pl, reqRow) {
   const isGlp1 = pl.category === "glp1";
   const isPeptide = pl.category === "peptide";
   const doseOptions = pl.doseOptions || [];
+  // "talk" carries no dose preference at all — leave the dose exactly where
+  // it is and let the doctor decide after they've actually spoken.
   const suggestedDose = !reqRow ? pl.dose
     : reqRow.dose_action === "increase" ? stepDose(doseOptions, pl.dose, "increase")
     : reqRow.dose_action === "decrease" ? stepDose(doseOptions, pl.dose, "decrease")
@@ -1202,11 +1303,13 @@ function refillFormModal(patient, pl, reqRow) {
     <div class="card card-pad" style="background:var(--bg);box-shadow:none;margin-bottom:14px">
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">${esc(patient.name)} asked for this${askedAt ? " " + timeAgo(askedAt) : ""}</div>
       ${reqRow.weight_kg ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Reported weight:</b> ${esc(reqRow.weight_kg)} kg</div>` : ""}
-      ${reqRow.side_effects ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Side effects:</b> ${esc(reqRow.side_effects)}</div>` : ""}
+      ${sideEffectsSummary(reqRow) ? `<div style="font-size:13.5px;margin-bottom:4px"><b>${esc(sideEffectsSummary(reqRow))}</b></div>` : ""}
+      ${reqRow.side_effects ? `<div style="font-size:13.5px;margin-bottom:4px">${esc(reqRow.side_effects)}</div>` : ""}
       ${reqRow.results_felt ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Results felt:</b> ${esc(reqRow.results_felt)}</div>` : ""}
       ${reqRow.dose_action ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Asked for:</b> ${esc(doseActionLabel(reqRow.dose_action, reqRow.requested_dose))}</div>` : ""}
       ${reqRow.notes ? `<div style="font-size:13.5px"><b>Notes:</b> ${esc(reqRow.notes)}</div>` : ""}
-    </div>` : `
+    </div>
+    ${reqRow.dose_action === "talk" ? `<p class="hint" style="margin:-6px 0 14px">They'd like to talk before any dose change — the dose below is left unchanged until you do.</p>` : ""}` : `
     <div class="field"><label for="rf-weight">Current weight (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" value="${esc(patient.current_weight_kg || patient.start_weight_kg || "")}"></div>
     <div class="field"><label for="rf-side">Side effects since last visit</label><textarea class="input" id="rf-side" rows="2" placeholder="Optional"></textarea></div>
     ${isPeptide ? `<div class="field"><label for="rf-results">Results felt</label><textarea class="input" id="rf-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
@@ -1278,7 +1381,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
         <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
         <div class="alert-body">
           <div class="alert-name">${esc(planName(r.plan_id))}</div>
-          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.side_effects ? " · side effects reported" : ""}</div>
+          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.has_side_effects === "yes" ? ` · side effects (${esc(r.side_effect_severity || "unspecified")})` : ""}</div>
           <div class="alert-meta">${timeAgo(r.created_at)}</div>
         </div>
         <button class="btn btn-secondary btn-sm" data-review-refill="${r.plan_id}">Review</button>
