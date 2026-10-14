@@ -6,6 +6,7 @@
 
 // guide.js and shared.js read a global `S` for per-medication colours.
 const S = { medColors: {} };
+let activePlan = null; // tracked across picker-chip clicks, for the refill button
 
 (async function boot() {
   const root = document.getElementById("gp");
@@ -33,6 +34,7 @@ const S = { medColors: {} };
 
   S.medColors = medColorMap(plans);
   const primary = plans[0];
+  activePlan = primary;
   const renderOne = (plan) => buildGuide(plan, patient, plan.signedBy && plan.signedBy.name, { shared: true });
 
   root.innerHTML = `
@@ -44,9 +46,38 @@ const S = { medColors: {} };
       </div>
     </div>
     ${guidePickerHTML(plans, primary.id)}
-    <div id="g-active-guide">${renderOne(primary)}</div>`;
+    <div id="g-active-guide">${renderOne(primary)}</div>
+    <div style="margin-top:18px">
+      <button class="btn btn-secondary btn-block" id="gp-refill" type="button"></button>
+    </div>`;
 
   wireGuidePicker(root, plans, renderOne, primary.id);
+  // Track which plan is active so the refill button always targets the one
+  // the patient is currently reading, not always the first.
+  root.querySelectorAll("[data-gpick]").forEach((b) => b.addEventListener("click", () => {
+    activePlan = plans.find((pl) => pl.id === Number(b.dataset.gpick)) || activePlan;
+    renderRefillButton();
+  }));
+
+  function renderRefillButton() {
+    const btn = document.getElementById("gp-refill");
+    if (!btn) return;
+    if (activePlan.needs_refill) {
+      btn.disabled = true;
+      btn.innerHTML = `${icon("checkCircle", 15)} Refill request sent — awaiting your doctor`;
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = `${icon("syringe", 15)} Request a refill / update`;
+    }
+  }
+  renderRefillButton();
+  document.getElementById("gp-refill").addEventListener("click", () => {
+    openRefillRequestModal(activePlan, async (payload) => {
+      await api("POST", `/api/guide/${encodeURIComponent(token)}/plans/${activePlan.id}/refill-request`, payload);
+      activePlan.needs_refill = true;
+      renderRefillButton();
+    });
+  });
 
   const toggle = document.getElementById("gp-toggle");
   toggle.addEventListener("click", () => {

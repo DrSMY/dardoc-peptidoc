@@ -268,6 +268,36 @@ CREATE TABLE IF NOT EXISTS guide_links (
 );
 CREATE INDEX IF NOT EXISTS idx_guide_links_patient ON guide_links(patient_id);`);
 
+// ── refill requests / updates ─────────────────────────────────────
+// Every refill is logged here, whether the doctor records it directly in
+// clinic or a patient asks for it through their guide link or portal. A
+// patient-submitted request starts 'pending' until the doctor reviews it; a
+// doctor-entered refill is logged already 'approved', since the doctor is
+// the one deciding on the spot. This is the patient's refill history — a log
+// of updates, not a new consultation record.
+db.exec(`
+CREATE TABLE IF NOT EXISTS refill_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES plans(id),
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  source TEXT NOT NULL DEFAULT 'doctor',        -- doctor | patient
+  status TEXT NOT NULL DEFAULT 'pending',       -- pending | approved | declined
+  side_effects TEXT DEFAULT '',
+  weight_kg REAL,
+  results_felt TEXT DEFAULT '',                 -- peptide programs: how it's working
+  dose_action TEXT DEFAULT '',                  -- glp1 programs: increase | decrease | same | custom
+  requested_dose TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  prior_dose TEXT DEFAULT '',
+  decided_dose TEXT DEFAULT '',
+  quantity INTEGER,
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_refill_requests_patient ON refill_requests(patient_id);
+CREATE INDEX IF NOT EXISTS idx_refill_requests_plan ON refill_requests(plan_id);`);
+
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
 // never guessed or auto-filled — shown in the guide only once set.

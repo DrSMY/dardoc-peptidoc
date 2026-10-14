@@ -750,10 +750,22 @@ route("DELETE", "/api/admin/kb/:id", (req, res, p) => {
 });
 
 // ── dashboard ────────────────────────────────────────────────────
+// "range" scopes the practice-statistics block (prescriptions, consultations,
+// category/medication/doctor breakdowns) to a trailing window — the rest of
+// the dashboard (open alerts, pending refills, due follow-ups) always shows
+// everything outstanding regardless of range, since those are todo lists, not
+// historical reporting.
+const DASHBOARD_RANGES = { "14": 14, "30": 30, "90": 90, "180": 180 };
+function rangeSinceSql(range) {
+  const days = DASHBOARD_RANGES[range];
+  return days ? `datetime('now','-${days} days')` : "datetime('0001-01-01')";
+}
+
 route("GET", "/api/dashboard", (req, res) => {
   const me = getDoctor(req);
   if (!me) return json(res, 401, { error: "Not signed in." });
   const org = me.org_id;
+  const since = rangeSinceSql(req.query && req.query.range);
   const activePatients = db.prepare(`SELECT COUNT(DISTINCT patient_id) AS n FROM plans WHERE status = 'active' AND ${IN_ORG}`).get(org).n;
   const totalPatients = db.prepare("SELECT COUNT(*) AS n FROM patients WHERE archived = 0 AND org_id = ?").get(org).n;
   const checkins7 = db.prepare(`SELECT COUNT(*) AS n FROM checkins WHERE created_at > datetime('now','-7 days') AND ${IN_ORG}`).get(org).n;
@@ -766,8 +778,13 @@ route("GET", "/api/dashboard", (req, res) => {
     ORDER BY c.created_at DESC LIMIT 30`).all(org)
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   const refillRequests = db.prepare(`
-    SELECT pl.id, pl.medication, pl.dose, pl.refill_requested_at, p.id AS patient_id, p.name AS patient_name, p.mobile
-    FROM plans pl JOIN patients p ON p.id = pl.patient_id
+    SELECT pl.id AS plan_id, pl.category, pl.medication, pl.dose, pl.quantity, pl.refill_requested_at,
+      p.id AS patient_id, p.name AS patient_name, p.mobile,
+      rr.id AS request_id, rr.side_effects, rr.weight_kg, rr.results_felt, rr.dose_action, rr.requested_dose, rr.notes
+    FROM plans pl
+    JOIN patients p ON p.id = pl.patient_id
+    LEFT JOIN refill_requests rr ON rr.id = (
+      SELECT id FROM refill_requests WHERE plan_id = pl.id AND status = 'pending' ORDER BY id DESC LIMIT 1)
     WHERE pl.needs_refill = 1 AND p.org_id = ?
     ORDER BY pl.refill_requested_at DESC LIMIT 30`).all(org);
   const dueFollowups = db.prepare(`
@@ -788,20 +805,34 @@ route("GET", "/api/dashboard", (req, res) => {
 
   // Practice statistics (prescriptions = every published plan; consultations
   // completed = every registered patient, since both are created together at
-  // publish time in this app's flow).
-  const prescriptionsTotal = db.prepare(`SELECT COUNT(*) AS n FROM plans WHERE ${IN_ORG}`).get(org).n;
-  const consultationsTotal = totalPatients;
-  const categoryBreakdown = db.prepare(`SELECT category, COUNT(*) AS n FROM plans WHERE ${IN_ORG} GROUP BY category`).all(org);
+  // publish time in this app's flow) — scoped to the selected range.
+  const prescriptionsTotal = db.prepare(`SELECT COUNT(*) AS n FROM plans WHERE created_at >= ${since} AND ${IN_ORG}`).get(org).n;
+  const consultationsTotal = db.prepare(`SELECT COUNT(*) AS n FROM patients WHERE archived = 0 AND org_id = ? AND created_at >= ${since}`).get(org).n;
+  const categoryBreakdown = db.prepare(`
+    SELECT category, COUNT(*) AS n FROM plans WHERE created_at >= ${since} AND ${IN_ORG} GROUP BY category`).all(org);
   const medBreakdown = db.prepare(`
-    SELECT medication, category, COUNT(*) AS n FROM plans WHERE ${IN_ORG}
+    SELECT medication, category, COUNT(*) AS n FROM plans WHERE created_at >= ${since} AND ${IN_ORG}
     GROUP BY medication, category ORDER BY n DESC LIMIT 8`).all(org);
   const recentPlans = db.prepare(`
     SELECT created_at, category FROM plans
     WHERE created_at > datetime('now','-14 days') AND ${IN_ORG}`).all(org);
+  // One row per clinician on staff, so a practice with several doctors can see
+  // who's seeing whom — zero rows for a solo practice collapse this panel
+  // away client-side rather than showing a lone, redundant total.
+  const doctorBreakdown = db.prepare(`
+    SELECT u.id AS doctor_id, u.name AS doctor_name,
+      (SELECT COUNT(*) FROM patients WHERE doctor_id = u.id AND created_at >= ${since}) AS consultations,
+      (SELECT COUNT(*) FROM plans WHERE doctor_id = u.id AND created_at >= ${since}) AS prescriptions
+    FROM users u
+    WHERE u.org_id = ? AND u.role IN ('doctor','superadmin') AND u.active = 1
+    ORDER BY consultations DESC, u.name ASC`).all(org);
+  const refillsTotal = db.prepare(`
+    SELECT COUNT(*) AS n FROM refill_requests
+    WHERE status = 'approved' AND decided_at >= ${since} AND patient_id IN (SELECT id FROM patients WHERE org_id = ?)`).get(org).n;
 
   json(res, 200, {
     activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent, refillRequests,
-    prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans,
+    prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans, doctorBreakdown, refillsTotal,
   });
 });
 
@@ -904,9 +935,13 @@ route("GET", "/api/patients/:id", (req, res, p) => {
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   const messages = db.prepare("SELECT * FROM messages WHERE patient_id = ? ORDER BY created_at ASC").all(p.id);
   db.prepare("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND sender = 'patient' AND read_at IS NULL").run(p.id);
+  const refillRequests = db.prepare(`
+    SELECT rr.*, u.name AS decided_by_name FROM refill_requests rr
+    LEFT JOIN users u ON u.id = rr.decided_by
+    WHERE rr.patient_id = ? ORDER BY rr.created_at DESC`).all(p.id);
   const intake = JSON.parse(patient.intake_json || "{}");
   json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake },
-    plans, doses, checkins, messages: withSender(messages, patient.doctor_id) });
+    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
@@ -1059,6 +1094,7 @@ function sharedPlan(row) {
     diet: p.diet, blood_test: p.blood_test, supplements: p.supplements, labTests: p.labTests, suppList: p.suppList,
     next_followup: p.next_followup, created_at: p.created_at, updated_at: p.updated_at, status: p.status,
     signedBy: p.signedBy, revisedBy: p.revisedBy, doseOptions: p.doseOptions, guideInfo: p.guideInfo,
+    needs_refill: !!p.needs_refill,
   };
 }
 
@@ -1080,6 +1116,18 @@ route("GET", "/api/guide/:token", (req, res, p) => {
     clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
     plans: rows.map(sharedPlan),
   }, NOINDEX);
+});
+
+// Patient requests a refill through their guide link — no sign-in, the token
+// is the credential. Never applies anything by itself; it only logs the
+// request as 'pending' for the doctor to review and decide.
+route("POST", "/api/guide/:token/plans/:id/refill-request", async (req, res, p, body) => {
+  const link = db.prepare("SELECT * FROM guide_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(p.token);
+  if (!link) return json(res, 404, { error: "This guide link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ? AND status = 'active'").get(p.id, link.patient_id);
+  if (!plan) return json(res, 404, { error: "This program is no longer active." }, NOINDEX);
+  submitPatientRefillRequest(plan, body);
+  json(res, 200, { ok: true }, NOINDEX);
 });
 
 // What a link-preview crawler (WhatsApp) should show for /g/<token>. It reads
@@ -1402,6 +1450,88 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
   json(res, 200, { ok: true });
 });
 
+// ── refills: a lightweight update logged against an existing program ─────
+// Separate from a brand-new consultation: refilling only ever touches dose,
+// quantity and next follow-up on the program that already exists, plus the
+// patient's current weight. Every refill — doctor-entered or patient-
+// requested — is logged in refill_requests so it shows as a dated update on
+// the patient's chart, never as a second consultation.
+function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, weightKg }) {
+  const sets = ["needs_refill = 0", "updated_at = datetime('now')", "last_edited_by = ?", "last_edited_at = datetime('now')"];
+  const vals = [editor.id];
+  if (dose !== undefined && dose !== "") { sets.push("dose = ?"); vals.push(dose); }
+  if (quantity !== undefined && quantity !== "" && quantity != null) { sets.push("quantity = ?"); vals.push(Number(quantity)); }
+  if (nextFollowup !== undefined && nextFollowup !== "") { sets.push("next_followup = ?"); vals.push(nextFollowup); }
+  vals.push(plan.id);
+  db.prepare(`UPDATE plans SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+  if (weightKg) db.prepare("UPDATE patients SET current_weight_kg = ? WHERE id = ?").run(Number(weightKg), plan.patient_id);
+}
+
+// A patient's own report — submitted through the portal or a shareable guide
+// link, with no sign-in beyond the link's token — never changes the plan by
+// itself. It's logged as 'pending' and surfaces on the doctor's dashboard
+// until they decide what to do with it.
+function submitPatientRefillRequest(plan, body) {
+  db.prepare(`INSERT INTO refill_requests
+    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(plan.id, plan.patient_id, "patient", "pending",
+      String(body.sideEffects || "").slice(0, 2000), body.weightKg ? Number(body.weightKg) : null,
+      String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
+      String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000), plan.dose || "");
+  db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
+}
+
+// Doctor records a refill in clinic — applies immediately, since the doctor
+// is the one deciding right now (no separate review step needed).
+route("POST", "/api/plans/:id/refill", async (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(p.id);
+  if (!plan) return json(res, 404, { error: "Program not found." });
+  if (!patientInOrg(plan.patient_id, me)) return json(res, 404, NOT_IN_ORG);
+  const dose = body.dose !== undefined ? String(body.dose).trim() : plan.dose;
+  const r = db.prepare(`INSERT INTO refill_requests
+    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, decided_dose, quantity, decided_by, decided_at)
+    VALUES (?,?,'doctor','approved',?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+    .run(plan.id, plan.patient_id,
+      String(body.sideEffects || "").slice(0, 2000), body.weightKg ? Number(body.weightKg) : null,
+      String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
+      String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000),
+      plan.dose || "", dose, body.quantity ? Number(body.quantity) : null, me.id);
+  applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, weightKg: body.weightKg });
+  if (body.message && String(body.message).trim()) {
+    db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
+      .run(plan.patient_id, "doctor", String(body.message).trim(), me.id);
+  }
+  json(res, 200, { id: Number(r.lastInsertRowid), ok: true });
+});
+
+// Doctor reviews a patient-submitted request — the final decision. Approving
+// writes whatever dose/quantity/follow-up the doctor confirms (pre-filled
+// client-side from what the patient asked for, but editable); declining just
+// closes it out.
+route("POST", "/api/refill-requests/:id/decide", async (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const reqRow = db.prepare("SELECT * FROM refill_requests WHERE id = ?").get(p.id);
+  if (!reqRow) return json(res, 404, { error: "Request not found." });
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ?").get(reqRow.plan_id);
+  if (!plan || !patientInOrg(plan.patient_id, me)) return json(res, 404, NOT_IN_ORG);
+  if (reqRow.status !== "pending") return json(res, 400, { error: "This request was already reviewed." });
+  const approve = body.decision === "approved";
+  const dose = approve ? (body.dose !== undefined ? String(body.dose).trim() : plan.dose) : "";
+  db.prepare(`UPDATE refill_requests SET status = ?, decided_dose = ?, quantity = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?`)
+    .run(approve ? "approved" : "declined", dose, body.quantity ? Number(body.quantity) : null, me.id, p.id);
+  if (approve) applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, weightKg: body.weightKg });
+  else db.prepare("UPDATE plans SET needs_refill = 0 WHERE id = ?").run(plan.id);
+  if (body.message && String(body.message).trim()) {
+    db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
+      .run(plan.patient_id, "doctor", String(body.message).trim(), me.id);
+  }
+  json(res, 200, { ok: true });
+});
+
 // ── doctor: review & messages ────────────────────────────────────
 route("POST", "/api/checkins/:id/review", (req, res, p) => {
   const me = requireClinician(req);
@@ -1477,14 +1607,15 @@ route("POST", "/api/portal/doses", async (req, res, _p, body) => {
   json(res, 200, { ok: true });
 });
 
-// Patient reports a medication vial/pen as finished — flags the doctor to
-// arrange a refill rather than silently letting the program lapse.
-route("POST", "/api/portal/plans/:id/finished", (req, res, p) => {
+// Patient requests a refill from their own portal — side effects, current
+// weight, (peptides) how it's working, and for GLP-1 programs a dose
+// preference. Logged as 'pending'; the doctor makes the final call.
+route("POST", "/api/portal/plans/:id/refill-request", async (req, res, p, body) => {
   const patient = getPatient(req);
   if (!patient) return json(res, 401, { error: "Not signed in." });
-  const plan = db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ?").get(p.id, patient.id);
+  const plan = db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ? AND status = 'active'").get(p.id, patient.id);
   if (!plan) return json(res, 404, { error: "Program not found." });
-  db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
+  submitPatientRefillRequest(plan, body);
   json(res, 200, { ok: true });
 });
 

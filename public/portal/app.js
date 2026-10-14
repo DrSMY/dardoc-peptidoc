@@ -430,12 +430,15 @@ function paintHome(v) {
   v.querySelectorAll("[data-med-log]").forEach((b) => b.addEventListener("click", () => {
     S.logPlanId = Number(b.dataset.medLog); S.tab = "log"; S.logMode = "dose"; paint();
   }));
-  v.querySelectorAll("[data-med-finish]").forEach((b) => b.addEventListener("click", async () => {
-    if (!confirm(`Tell ${S.me.doctorName} you've finished this medication and need a refill?`)) return;
-    await api("POST", `/api/portal/plans/${b.dataset.medFinish}/finished`, {});
-    S.me = await api("GET", "/api/portal/me");
-    toast("Your doctor has been notified to arrange a refill.");
-    paint();
+  v.querySelectorAll("[data-med-refill]").forEach((b) => b.addEventListener("click", () => {
+    const pl = (S.me.plans || []).find((x) => x.id === Number(b.dataset.medRefill));
+    if (!pl) return;
+    openRefillRequestModal(pl, async (payload) => {
+      await api("POST", `/api/portal/plans/${pl.id}/refill-request`, payload);
+      S.me = await api("GET", "/api/portal/me");
+      toast("Your doctor has been notified and will confirm the next step.");
+      paint();
+    });
   }));
 }
 
@@ -477,7 +480,7 @@ function medRowHTML(pl) {
       <div class="med-row-actions">
         <button type="button" class="btn btn-secondary btn-sm" data-med-guide="${pl.id}">${icon("book", 14)} Guide</button>
         <button type="button" class="btn btn-secondary btn-sm" data-med-log="${pl.id}">${icon(routeIcon(pl.route), 14)} Log dose</button>
-        ${!pl.needs_refill ? `<button type="button" class="btn btn-ghost btn-sm" data-med-finish="${pl.id}">${icon("checkCircle", 14)} Finished — need refill</button>` : ""}
+        ${!pl.needs_refill ? `<button type="button" class="btn btn-ghost btn-sm" data-med-refill="${pl.id}">${icon("syringe", 14)} Request refill / update</button>` : ""}
       </div>
     </div>
   </details>`;

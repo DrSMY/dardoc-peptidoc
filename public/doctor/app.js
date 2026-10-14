@@ -256,16 +256,16 @@ async function viewDashboard() {
         </div>
         <div id="refill-box">
         ${d.refillRequests.length ? d.refillRequests.map((r) => `
-          <div class="alert-item" data-rid="${r.id}">
+          <div class="alert-item">
             <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
             <div class="alert-body">
               <div class="alert-name">${esc(r.patient_name)}</div>
-              <div class="alert-sym">Finished ${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}</div>
+              <div class="alert-sym">${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}${r.dose_action ? " — " + esc(doseActionLabel(r.dose_action, r.requested_dose)) : ""}${r.side_effects ? " · side effects reported" : ""}</div>
               <div class="alert-meta">${timeAgo(r.refill_requested_at)}</div>
             </div>
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-              <a class="btn btn-secondary btn-sm" href="#/patient/${r.patient_id}">Open</a>
-              <button class="btn btn-ghost btn-sm" data-refilled="${r.id}">Mark refilled</button>
+              <button class="btn btn-secondary btn-sm" data-review-refill="${r.plan_id}" data-review-patient="${r.patient_id}">Review</button>
+              <a class="btn btn-ghost btn-sm" href="#/patient/${r.patient_id}">Open chart</a>
             </div>
           </div>`).join("") : `
           <div class="empty">${icon("checkCircle", 34)}<div class="empty-title">No pending refills</div><p>When a patient reports finishing a medication, it will appear here.</p></div>`}
@@ -307,10 +307,14 @@ async function viewDashboard() {
     toast("Alert marked as reviewed");
     viewDashboard();
   }));
-  view().querySelectorAll("[data-refilled]").forEach((b) => b.addEventListener("click", async () => {
-    await api("PATCH", `/api/plans/${b.dataset.refilled}`, { needsRefill: 0 });
-    toast("Marked as refilled");
-    viewDashboard();
+  view().querySelectorAll("[data-review-refill]").forEach((b) => b.addEventListener("click", async () => {
+    const planId = Number(b.dataset.reviewRefill);
+    const detail = await api("GET", `/api/patients/${b.dataset.reviewPatient}`);
+    const pl = detail.plans.find((x) => x.id === planId);
+    // Older flags (set before this feature) may have no backing request row
+    // — still reviewable, just without the "patient asked for" panel.
+    const reqRow = (detail.refillRequests || []).find((r) => r.plan_id === planId && r.status === "pending");
+    if (pl) refillFormModal(detail.patient, pl, reqRow);
   }));
 
   renderPracticeStats(d);
@@ -374,8 +378,17 @@ const CATEGORY_META = {
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
 
+const DASH_RANGES = [
+  { key: "all", label: "All time" },
+  { key: "14", label: "Last 2 weeks" },
+  { key: "30", label: "Last month" },
+  { key: "90", label: "Last 3 months" },
+  { key: "180", label: "Last 6 months" },
+];
+
 function practiceStatsHTML(d) {
   const filter = S.dashFilter || "all";
+  const range = S.dashRange || "all";
   const catCount = (cat) => (d.categoryBreakdown.find((c) => c.category === cat) || {}).n || 0;
   const filteredRxTotal = filter === "all" ? d.prescriptionsTotal : catCount(filter);
   const pctPrescribedVsConsulted = d.consultationsTotal ? Math.round((filteredRxTotal / d.consultationsTotal) * 100) : 0;
@@ -403,10 +416,12 @@ function practiceStatsHTML(d) {
 
   const medRows = (d.medBreakdown || []).filter((m) => filter === "all" || m.category === filter).slice(0, 6);
   const medTotal = medRows.reduce((s, m) => s + m.n, 0) || 1;
+  const doctorRows = (d.doctorBreakdown || []).filter((x) => x.consultations || x.prescriptions);
+  const doctorMax = Math.max(1, ...doctorRows.map((x) => x.consultations));
 
   return `
   <div class="card card-pad" style="margin-bottom:20px">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">
       <div>
         <div class="card-title" style="margin:0">${icon("activity", 19)} Practice Statistics</div>
         <p class="hint" style="margin-top:2px">Prescriptions, consultations &amp; medication mix</p>
@@ -415,6 +430,11 @@ function practiceStatsHTML(d) {
         <button class="pstat-tab ${filter === "all" ? "on" : ""}" data-dashfilter="all">All</button>
         <button class="pstat-tab ${filter === "glp1" ? "on" : ""}" data-dashfilter="glp1">${icon("scale", 13)} GLP-1</button>
         <button class="pstat-tab ${filter === "peptide" ? "on" : ""}" data-dashfilter="peptide">${icon("droplet", 13)} Peptides</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <div class="pstat-tabs">
+        ${DASH_RANGES.map((r) => `<button class="pstat-tab ${range === r.key ? "on" : ""}" data-dashrange="${r.key}">${r.label}</button>`).join("")}
       </div>
     </div>
 
@@ -433,6 +453,11 @@ function practiceStatsHTML(d) {
         <div class="stat-ico" style="background:var(--accent-soft);color:var(--accent)">${icon("trend", 19)}</div>
         <div class="stat-val" data-count="${pctPrescribedVsConsulted}" data-suffix="%">0%</div>
         <div class="stat-lbl">Prescribed vs. consulted</div>
+      </div>
+      <div class="stat pstat-kpi">
+        <div class="stat-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 19)}</div>
+        <div class="stat-val" data-count="${d.refillsTotal || 0}">0</div>
+        <div class="stat-lbl">Refills processed</div>
       </div>
     </div>
 
@@ -467,12 +492,25 @@ function practiceStatsHTML(d) {
         </div>`;
       }).join("")}
     </div>` : ""}
+
+    ${doctorRows.length > 1 ? `
+    <div style="margin-top:18px">
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Consultations by doctor</div>
+      ${doctorRows.map((x) => {
+        const pct = Math.round((x.consultations / doctorMax) * 100);
+        return `<div style="margin-bottom:9px">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${esc(x.doctor_name)}</span><b>${x.consultations} consult${x.consultations === 1 ? "" : "s"} <span class="hint">· ${x.prescriptions} Rx</span></b></div>
+          <div style="height:6px;border-radius:4px;background:#ECEBE3;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:#283618;border-radius:4px"></div></div>
+        </div>`;
+      }).join("")}
+    </div>` : ""}
   </div>`;
 }
 
 function renderPracticeStats(d) {
   const box = document.getElementById("practice-stats");
   if (!box) return;
+  box.style.opacity = "";
   box.innerHTML = practiceStatsHTML(d);
   box.querySelectorAll("[data-count]").forEach((el) => {
     const target = Number(el.dataset.count) || 0;
@@ -480,6 +518,14 @@ function renderPracticeStats(d) {
   });
   box.querySelectorAll("[data-dashfilter]").forEach((b) => b.addEventListener("click", () => {
     S.dashFilter = b.dataset.dashfilter;
+    renderPracticeStats(d);
+  }));
+  box.querySelectorAll("[data-dashrange]").forEach((b) => b.addEventListener("click", async () => {
+    S.dashRange = b.dataset.dashrange;
+    box.style.opacity = "0.5";
+    try {
+      Object.assign(d, await api("GET", `/api/dashboard?range=${encodeURIComponent(S.dashRange)}`));
+    } catch { /* keep showing the previous range on failure */ }
     renderPracticeStats(d);
   }));
 }
@@ -540,7 +586,7 @@ async function viewPatient(id) {
   let d;
   try { d = await api("GET", `/api/patients/${id}`); }
   catch (e) { view().innerHTML = `<div class="empty">${icon("alert", 34)}<div class="empty-title">${esc(e.message)}</div></div>`; return; }
-  const { patient: p, plans, doses, checkins, messages } = d;
+  const { patient: p, plans, doses, checkins, messages, refillRequests } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
   if (p.start_weight_kg && !weights.length) weights.push({ x: p.created_at.slice(0, 10), y: p.start_weight_kg });
@@ -562,7 +608,7 @@ async function viewPatient(id) {
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       ${canPrescribe() ? `
       <button class="btn btn-secondary btn-sm" id="btn-share">${icon("key", 16)} Share access</button>
-      <a class="btn btn-primary btn-sm" href="#/consult?patient=${p.id}">${icon("plus", 16)} New program</a>` : ""}
+      <button class="btn btn-primary btn-sm" id="btn-new-program">${icon("plus", 16)} New program</button>` : ""}
     </div>
   </div>
 
@@ -589,6 +635,13 @@ async function viewPatient(id) {
 
   const shareBtn = document.getElementById("btn-share");
   if (shareBtn) shareBtn.addEventListener("click", () => sharePinModal(p));
+
+  const newProgBtn = document.getElementById("btn-new-program");
+  if (newProgBtn) newProgBtn.addEventListener("click", () => {
+    const active = plans.filter((pl) => pl.status === "active");
+    if (!active.length) { location.hash = `#/consult?patient=${p.id}`; return; }
+    refillOrNewChooserModal(p, active);
+  });
 
   function paintTab() {
     const box = document.getElementById("tab-body");
@@ -654,11 +707,13 @@ async function viewPatient(id) {
                   ${canPrescribe() ? `
                   <a class="btn btn-secondary btn-sm" href="#/plan/${pl.id}">${icon("edit", 15)} Edit program</a>
                   ${pl.status === "active" ? `
-                  <button class="btn btn-ghost btn-sm" data-edit-dose="${pl.id}">Dose</button>
+                  <button class="btn btn-ghost btn-sm" data-refill="${pl.id}">${icon("syringe", 15)} Refill</button>
                   <button class="btn btn-ghost btn-sm" data-stop="${pl.id}">Stop</button>` : ""}` : ""}
                 </div>
               </div>`).join("") : `<div class="empty">${icon("layers", 30)}<p>No programs yet. Start a consultation to publish one.</p></div>`}
           </div>
+
+          ${refillHistoryCardHTML(plans, refillRequests)}
         </div>
 
         <div style="display:flex;flex-direction:column;gap:18px">
@@ -711,9 +766,15 @@ async function viewPatient(id) {
         toast("Program stopped");
         viewPatient(id);
       }));
-      box.querySelectorAll("[data-edit-dose]").forEach((b) => b.addEventListener("click", () => {
-        const pl = plans.find((x) => x.id === Number(b.dataset.editDose));
-        editDoseModal(pl, () => viewPatient(id));
+      box.querySelectorAll("[data-refill]").forEach((b) => b.addEventListener("click", () => {
+        const pl = plans.find((x) => x.id === Number(b.dataset.refill));
+        if (pl) refillFormModal(p, pl);
+      }));
+      box.querySelectorAll("[data-review-refill]").forEach((b) => b.addEventListener("click", () => {
+        const planId = Number(b.dataset.reviewRefill);
+        const pl = plans.find((x) => x.id === planId);
+        const reqRow = refillRequests.find((r) => r.plan_id === planId && r.status === "pending");
+        if (pl) refillFormModal(p, pl, reqRow);
       }));
       box.querySelectorAll("[data-open-guide]").forEach((b) => b.addEventListener("click", () => {
         S.guidePlanId = Number(b.dataset.openGuide);
@@ -867,17 +928,7 @@ function checkinCard(c) {
   </div>`;
 }
 
-// ── modals ───────────────────────────────────────────────────────
-function modal(html, wide) {
-  const scrim = document.createElement("div");
-  scrim.className = "modal-scrim";
-  scrim.innerHTML = `<div class="modal${wide ? " modal-wide" : ""}" role="dialog" aria-modal="true">${html}</div>`;
-  scrim.addEventListener("click", (e) => { if (e.target === scrim) scrim.remove(); });
-  document.addEventListener("keydown", function onEsc(e) { if (e.key === "Escape") { scrim.remove(); document.removeEventListener("keydown", onEsc); } });
-  document.body.appendChild(scrim);
-  scrim.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => scrim.remove()));
-  return scrim;
-}
+// modal() lives in shared.js — used across doctor/portal/guide pages.
 
 // ── shareable guide link ─────────────────────────────────────────
 // The link opens the patient's active guide as a web page (no sign-in), with
@@ -1069,27 +1120,182 @@ async function sharePinModal(p) {
   });
 }
 
-function editDoseModal(pl, done) {
-  const tpl = S.templates.find((t) => t.category === "glp1" && t.config.medication === pl.medication);
-  const doses = tpl ? tpl.config.doses : null;
+// ── refills: quick update on an existing program ──────────────────
+// Starting a new program for a patient who already has one active asks
+// first whether this is a refill (a quick check-in that updates the
+// existing program) or a genuinely new program (the full consultation).
+function refillOrNewChooserModal(patient, activePlans) {
   const scrim = modal(`
-    <div class="modal-head"><h3>Adjust dose — ${esc(pl.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
-    <div class="field">
-      <label for="nd-dose">New dose</label>
-      ${doses ? `<select class="input" id="nd-dose">${doses.map((d) => `<option ${d === pl.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>`
-              : `<input class="input" id="nd-dose" value="${esc(pl.dose)}">`}
-    </div>
-    <div class="field"><label for="nd-note">Note for the patient (optional)</label><input class="input" id="nd-note" placeholder="e.g. Increase as discussed in follow-up"></div>
-    <button class="btn btn-primary btn-block" id="nd-save">Save new dose</button>`);
-  scrim.querySelector("#nd-save").addEventListener("click", async () => {
-    const dose = scrim.querySelector("#nd-dose").value;
-    const note = scrim.querySelector("#nd-note").value.trim();
-    await api("PATCH", `/api/plans/${pl.id}`, { dose });
-    if (note) await api("POST", `/api/patients/${pl.patient_id}/messages`, { body: `Dose update: ${pl.medication} is now ${dose}. ${note}` });
+    <div class="modal-head"><h3>New program for ${esc(patient.name)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin-top:-6px;margin-bottom:16px">Refilling is a quick update to an existing program. Starting a new program runs the full consultation.</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-primary btn-block" id="choose-refill" type="button">${icon("syringe", 16)} Refill an existing program</button>
+      <button class="btn btn-secondary btn-block" id="choose-new" type="button">${icon("plus", 16)} Start a new program</button>
+    </div>`);
+  scrim.querySelector("#choose-new").addEventListener("click", () => {
     scrim.remove();
-    toast(`Dose updated to ${dose}`);
-    done && done();
+    location.hash = `#/consult?patient=${patient.id}`;
   });
+  scrim.querySelector("#choose-refill").addEventListener("click", () => {
+    scrim.remove();
+    if (activePlans.length === 1) refillFormModal(patient, activePlans[0]);
+    else refillPlanPickerModal(patient, activePlans);
+  });
+}
+
+function refillPlanPickerModal(patient, activePlans) {
+  const scrim = modal(`
+    <div class="modal-head"><h3>Which program?</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${activePlans.map((pl) => `
+        <button class="btn btn-secondary btn-block" data-pick-plan="${pl.id}" type="button" style="justify-content:flex-start;gap:8px">
+          ${icon(routeIcon(pl.route), 16)} ${esc(pl.medication)}${pl.dose ? " · " + esc(pl.dose) : ""}
+        </button>`).join("")}
+    </div>`);
+  scrim.querySelectorAll("[data-pick-plan]").forEach((b) => b.addEventListener("click", () => {
+    const pl = activePlans.find((x) => x.id === Number(b.dataset.pickPlan));
+    scrim.remove();
+    if (pl) refillFormModal(patient, pl);
+  }));
+}
+
+// Next/previous rung on the medication's approved dose ladder, clamped at
+// the ends — "increase" at the top dose has nowhere higher to go, so it
+// just stays put and the doctor can still pick a dose manually.
+function stepDose(options, current, dir) {
+  if (!options || !options.length) return current;
+  const i = options.indexOf(current);
+  if (i === -1) return dir === "increase" ? options[0] : current;
+  const j = i + (dir === "increase" ? 1 : -1);
+  return options[Math.max(0, Math.min(options.length - 1, j))];
+}
+
+function doseActionLabel(action, requestedDose) {
+  if (action === "increase") return "Increase dose";
+  if (action === "decrease") return "Decrease dose";
+  if (action === "custom") return `Switch to ${requestedDose || "a specific dose"}`;
+  return "Stay the same";
+}
+
+// The one form behind every refill: logged in clinic (applies immediately,
+// `reqRow` omitted) or reviewing a patient-submitted request (`reqRow` is the
+// pending refill_requests row — shown read-only, with Approve/Decline instead
+// of a plain save). Either way it's logged to refill_requests, never treated
+// as a new consultation.
+function refillFormModal(patient, pl, reqRow) {
+  const isGlp1 = pl.category === "glp1";
+  const isPeptide = pl.category === "peptide";
+  const doseOptions = pl.doseOptions || [];
+  const suggestedDose = !reqRow ? pl.dose
+    : reqRow.dose_action === "increase" ? stepDose(doseOptions, pl.dose, "increase")
+    : reqRow.dose_action === "decrease" ? stepDose(doseOptions, pl.dose, "decrease")
+    : reqRow.dose_action === "custom" && reqRow.requested_dose ? reqRow.requested_dose
+    : pl.dose;
+  const followupDefault = (() => {
+    const dt = new Date(); dt.setDate(dt.getDate() + (pl.followup_days || 28));
+    return dt.toISOString().slice(0, 10);
+  })();
+  const askedAt = reqRow && (reqRow.created_at || reqRow.refill_requested_at);
+  const scrim = modal(`
+    <div class="modal-head"><h3>${reqRow ? "Review refill request" : "Refill"} — ${esc(pl.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    ${reqRow ? `
+    <div class="card card-pad" style="background:var(--bg);box-shadow:none;margin-bottom:14px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">${esc(patient.name)} asked for this${askedAt ? " " + timeAgo(askedAt) : ""}</div>
+      ${reqRow.weight_kg ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Reported weight:</b> ${esc(reqRow.weight_kg)} kg</div>` : ""}
+      ${reqRow.side_effects ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Side effects:</b> ${esc(reqRow.side_effects)}</div>` : ""}
+      ${reqRow.results_felt ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Results felt:</b> ${esc(reqRow.results_felt)}</div>` : ""}
+      ${reqRow.dose_action ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Asked for:</b> ${esc(doseActionLabel(reqRow.dose_action, reqRow.requested_dose))}</div>` : ""}
+      ${reqRow.notes ? `<div style="font-size:13.5px"><b>Notes:</b> ${esc(reqRow.notes)}</div>` : ""}
+    </div>` : `
+    <div class="field"><label for="rf-weight">Current weight (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" value="${esc(patient.current_weight_kg || patient.start_weight_kg || "")}"></div>
+    <div class="field"><label for="rf-side">Side effects since last visit</label><textarea class="input" id="rf-side" rows="2" placeholder="Optional"></textarea></div>
+    ${isPeptide ? `<div class="field"><label for="rf-results">Results felt</label><textarea class="input" id="rf-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
+    `}
+    <div class="field">
+      <label for="rf-dose">New dose</label>
+      ${isGlp1 && doseOptions.length
+        ? `<select class="input" id="rf-dose">${doseOptions.map((dd) => `<option ${dd === suggestedDose ? "selected" : ""}>${esc(dd)}</option>`).join("")}</select>`
+        : `<input class="input" id="rf-dose" value="${esc(suggestedDose || pl.dose || "")}">`}
+    </div>
+    <div class="field"><label for="rf-qty">Quantity dispensed</label><input class="input" id="rf-qty" type="number" min="1" value="${esc(pl.quantity || 1)}"></div>
+    <div class="field"><label for="rf-followup">Next follow-up</label><input class="input" id="rf-followup" type="date" value="${followupDefault}"></div>
+    <div class="field"><label for="rf-msg">Message to patient (optional)</label><input class="input" id="rf-msg" placeholder="e.g. Great progress — keep going at this dose"></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      ${reqRow ? `<button class="btn btn-ghost btn-block" id="rf-decline" type="button">Decline</button>` : ""}
+      <button class="btn btn-primary btn-block" id="rf-save" type="button">${reqRow ? "Approve & apply" : "Save refill"}</button>
+    </div>`);
+
+  scrim.querySelector("#rf-save").addEventListener("click", async () => {
+    const dose = scrim.querySelector("#rf-dose").value.trim();
+    const quantity = Number(scrim.querySelector("#rf-qty").value) || 1;
+    const nextFollowup = scrim.querySelector("#rf-followup").value || null;
+    const message = scrim.querySelector("#rf-msg").value.trim();
+    // Reviewing a request: the weight was reported with it, read-only — not
+    // re-collected in this form — so it comes from the request row itself.
+    const weightEl = scrim.querySelector("#rf-weight");
+    const weightKg = reqRow ? (reqRow.weight_kg || null) : (weightEl ? Number(weightEl.value) || null : null);
+    const sideEffects = scrim.querySelector("#rf-side") ? scrim.querySelector("#rf-side").value.trim() : "";
+    const resultsFelt = scrim.querySelector("#rf-results") ? scrim.querySelector("#rf-results").value.trim() : "";
+    try {
+      if (reqRow) {
+        await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "approved", dose, quantity, nextFollowup, weightKg, message });
+      } else {
+        await api("POST", `/api/plans/${pl.id}/refill`, { dose, quantity, nextFollowup, weightKg, sideEffects, resultsFelt, message });
+      }
+      scrim.remove();
+      toast("Refill saved");
+      if (location.hash.startsWith("#/patient/")) viewPatient(patient.id); else viewDashboard();
+    } catch (ex) { toast(ex.message || "Could not save", "bad"); }
+  });
+  const declineBtn = scrim.querySelector("#rf-decline");
+  if (declineBtn) declineBtn.addEventListener("click", async () => {
+    const message = scrim.querySelector("#rf-msg").value.trim();
+    try {
+      await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "declined", message });
+      scrim.remove();
+      toast("Request declined");
+      if (location.hash.startsWith("#/patient/")) viewPatient(patient.id); else viewDashboard();
+    } catch (ex) { toast(ex.message || "Could not decline", "bad"); }
+  });
+}
+
+// The patient chart's refill panel: pending requests awaiting a decision,
+// then a dated log of every refill already resolved — doctor-entered or
+// patient-requested — so it reads as history, never as another consultation.
+function refillHistoryCardHTML(plans, refillRequests) {
+  if (!refillRequests || !refillRequests.length) return "";
+  const pending = refillRequests.filter((r) => r.status === "pending");
+  const resolved = refillRequests.filter((r) => r.status !== "pending");
+  const planName = (id) => { const pl = plans.find((x) => x.id === id); return pl ? `${pl.medication}${pl.dose ? " · " + pl.dose : ""}` : "Program"; };
+  return `
+  <div class="card card-pad">
+    <div class="card-title" style="justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:10px">${icon("syringe", 19)} Refill requests &amp; history</span>
+      ${pending.length ? `<span class="badge badge-amber">${pending.length} pending</span>` : ""}
+    </div>
+    ${pending.map((r) => `
+      <div class="alert-item">
+        <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
+        <div class="alert-body">
+          <div class="alert-name">${esc(planName(r.plan_id))}</div>
+          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.side_effects ? " · side effects reported" : ""}</div>
+          <div class="alert-meta">${timeAgo(r.created_at)}</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" data-review-refill="${r.plan_id}">Review</button>
+      </div>`).join("")}
+    ${resolved.length ? resolved.slice(0, 8).map((r) => `
+      <div class="timeline-item">
+        <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("syringe", 15)}</div>
+        <div style="flex:1">
+          <div style="font-size:13.5px"><b>${esc(planName(r.plan_id))}</b> ${r.status === "approved" ? `<span class="badge badge-green">refilled</span>` : `<span class="badge badge-gray">declined</span>`}</div>
+          <div style="font-size:12.5px;color:var(--muted)">
+            ${r.source === "patient" ? "Patient request" : "Logged in clinic"}
+            ${r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose ? ` · ${esc(r.prior_dose)} → ${esc(r.decided_dose)}` : ""}
+            ${r.decided_by_name ? ` · by ${esc(r.decided_by_name)}` : ""} · ${timeAgo(r.decided_at || r.created_at)}
+          </div>
+        </div>
+      </div>`).join("") : (!pending.length ? `<p class="hint">No refills logged yet.</p>` : "")}
+  </div>`;
 }
 
 // ── consultation wizard ──────────────────────────────────────────

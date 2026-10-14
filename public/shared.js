@@ -339,6 +339,18 @@ function severityBars(level, total) {
   return `<svg class="sev-bars" viewBox="0 0 ${w.toFixed(2)} ${H}" width="${w.toFixed(2)}" height="${H}" aria-hidden="true">${bars}</svg>`;
 }
 
+// ── modal ────────────────────────────────────────────────────────
+function modal(html, wide) {
+  const scrim = document.createElement("div");
+  scrim.className = "modal-scrim";
+  scrim.innerHTML = `<div class="modal${wide ? " modal-wide" : ""}" role="dialog" aria-modal="true">${html}</div>`;
+  scrim.addEventListener("click", (e) => { if (e.target === scrim) scrim.remove(); });
+  document.addEventListener("keydown", function onEsc(e) { if (e.key === "Escape") { scrim.remove(); document.removeEventListener("keydown", onEsc); } });
+  document.body.appendChild(scrim);
+  scrim.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => scrim.remove()));
+  return scrim;
+}
+
 // ── toast ────────────────────────────────────────────────────────
 function toast(msg, type = "ok") {
   let wrap = document.querySelector(".toast-wrap");

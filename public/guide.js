@@ -715,3 +715,74 @@ function injectGuideCss() {
     document.head.appendChild(st);
   }
 }
+
+// ── refill request (shared by the portal and the public guide link) ─────
+// Same form in both places: current weight, side effects, (peptides) how
+// it's working, and for GLP-1 programs a dose preference. Submitting never
+// changes the program itself — it only logs a request the doctor reviews
+// and makes the final call on.
+function refillRequestFormHTML(plan) {
+  const isGlp1 = plan.category === "glp1";
+  const isPeptide = plan.category === "peptide";
+  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  const radio = (val, label, checked) => `
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:400;margin-bottom:6px">
+      <input type="radio" name="rr-dose" value="${val}" ${checked ? "checked" : ""}> ${label}
+    </label>`;
+  return `
+  <div class="modal-head"><h3>Request a refill — ${esc(plan.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+  <div class="field"><label for="rr-weight">Current weight (kg)</label><input class="input" id="rr-weight" type="number" step="0.1" inputmode="decimal" placeholder="Optional"></div>
+  <div class="field"><label for="rr-side">Any side effects to report?</label><textarea class="input" id="rr-side" rows="2" placeholder="Optional"></textarea></div>
+  ${isPeptide ? `<div class="field"><label for="rr-results">How has it been working for you? Any results noticed?</label><textarea class="input" id="rr-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
+  ${isGlp1 ? `
+  <div class="field">
+    <label>Dose for your next refill</label>
+    <div style="margin-top:6px">
+      ${radio("same", "Stay the same", true)}
+      ${radio("increase", "Increase dose")}
+      ${radio("decrease", "Decrease dose")}
+      ${radio("custom", "Choose a specific dose")}
+    </div>
+    ${doseOptions.length ? `<select class="input" id="rr-customdose" style="margin-top:4px" hidden>${doseOptions.map((d) => `<option ${d === plan.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>` : ""}
+  </div>` : ""}
+  <div class="field"><label for="rr-notes">Anything else your doctor should know?</label><textarea class="input" id="rr-notes" rows="2" placeholder="Optional"></textarea></div>
+  <button class="btn btn-primary btn-block" id="rr-submit" type="button">Send request</button>
+  <p class="hint" style="margin-top:10px;text-align:center">Your doctor will review this and confirm the next step.</p>`;
+}
+
+// Opens the form in a modal; submitFn(payload) does the actual POST (the
+// endpoint differs between the portal, which is already signed in, and the
+// public guide link, which authenticates by its token).
+function openRefillRequestModal(plan, submitFn) {
+  const scrim = modal(refillRequestFormHTML(plan));
+  const customSel = scrim.querySelector("#rr-customdose");
+  scrim.querySelectorAll('input[name="rr-dose"]').forEach((r) => r.addEventListener("change", () => {
+    if (customSel) customSel.hidden = r.value !== "custom";
+  }));
+  scrim.querySelector("#rr-submit").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const doseRadio = scrim.querySelector('input[name="rr-dose"]:checked');
+    const payload = {
+      weightKg: Number(scrim.querySelector("#rr-weight").value) || null,
+      sideEffects: scrim.querySelector("#rr-side").value.trim(),
+      resultsFelt: scrim.querySelector("#rr-results") ? scrim.querySelector("#rr-results").value.trim() : "",
+      doseAction: doseRadio ? doseRadio.value : "",
+      requestedDose: customSel && !customSel.hidden ? customSel.value : "",
+      notes: scrim.querySelector("#rr-notes").value.trim(),
+    };
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      await submitFn(payload);
+      scrim.querySelector(".modal").innerHTML = `
+        <div style="text-align:center;padding:10px 4px">
+          ${icon("checkCircle", 40)}
+          <h3 style="margin:14px 0 6px">Request sent</h3>
+          <p class="hint">Your doctor will review this and confirm the next step.</p>
+        </div>`;
+      setTimeout(() => scrim.remove(), 2200);
+    } catch (ex) {
+      btn.disabled = false; btn.textContent = "Send request";
+      toast((ex && ex.message) || "Could not send your request", "bad");
+    }
+  });
+}
