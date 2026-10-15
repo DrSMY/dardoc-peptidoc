@@ -589,14 +589,19 @@ async function viewPatient(id) {
   const { patient: p, plans, doses, checkins, messages, refillRequests } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
-  // The patient's actual current weight — from a real check-in if there is
-  // one, otherwise the most recently recorded weight (a refill updates this
-  // too), falling back to their starting weight. Computed before the chart's
-  // synthetic starting point below, which must never override this.
+  // The patient's actual current weight — the latest logged weight (check-ins
+  // and refills both log one), else their recorded current weight, else their
+  // starting weight. Computed before the starting-weight anchor below.
   const latestWeight = weights.length ? weights[weights.length - 1].y : (p.current_weight_kg || p.start_weight_kg);
-  if (p.start_weight_kg && !weights.length) weights.push({ x: p.created_at.slice(0, 10), y: p.start_weight_kg });
+  // Anchor the trend at the weight they started on, so "Change" means change
+  // since registration even when only one weight has been logged since.
+  const startDate = p.created_at.slice(0, 10);
+  if (p.start_weight_kg && (!weights.length || weights[0].x > startDate)) weights.unshift({ x: startDate, y: p.start_weight_kg });
   const bmi = calcBMIClient(p.height_cm, latestWeight);
   const wtChange = weights.length > 1 ? (weights[weights.length - 1].y - weights[0].y) : null;
+  // The consultation record, followed by every refill since, so "Copy record"
+  // carries the refills into the practice's EMR too.
+  const clinicalRecord = [activePlan && activePlan.clinical_suggestion, refillRecordText(p, plans, refillRequests)].filter(Boolean).join("\n\n");
 
   view().innerHTML = `
   <a href="#/patients" class="btn btn-ghost btn-sm" style="margin-bottom:14px">${icon("back", 16)} All patients</a>
@@ -661,6 +666,7 @@ async function viewPatient(id) {
             <div class="card-title">${icon("user", 19)} Patient chart</div>
             <div class="emr-grid">
               <div><span class="emr-lbl">Name</span><span class="emr-val">${esc(p.title ? p.title + " " : "")}${esc(p.name)}</span></div>
+              <div><span class="emr-lbl">Patient no.</span><span class="emr-val">${esc(p.id)}</span></div>
               <div><span class="emr-lbl">Age</span><span class="emr-val">${p.age ? esc(p.age) + " years" : "—"}</span></div>
               ${p.dob ? `<div><span class="emr-lbl">Date of birth</span><span class="emr-val">${esc(fmtDate(p.dob))}</span></div>` : ""}
               <div><span class="emr-lbl">Gender</span><span class="emr-val">${esc(p.gender || "—")}</span></div>
@@ -678,16 +684,17 @@ async function viewPatient(id) {
               <div class="full"><span class="emr-lbl">Cancer / tumor history</span><span class="emr-val">${esc(intake.cancer_history || "No")}</span></div>
               ${goals.length ? `<div class="full"><span class="emr-lbl">Health goals</span><span class="emr-val">${goals.map((g) => `<span class="badge badge-cyan">${esc(g)}</span>`).join(" ")}</span></div>` : ""}
               ${p.notes ? `<div class="full"><span class="emr-lbl">Notes</span><span class="emr-val">${esc(p.notes)}</span></div>` : ""}
+              ${refillRequests.length ? `<div class="full"><span class="emr-lbl">Latest refill</span><span class="emr-val">${latestRefillSummaryHTML(refillRequests[0], plans)}</span></div>` : ""}
             </div>
           </div>
 
-          ${activePlan && activePlan.clinical_suggestion ? `
+          ${clinicalRecord ? `
           <div class="card card-pad">
             <div class="card-title" style="justify-content:space-between">
               <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
               <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy record</button>
             </div>
-            <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(activePlan.clinical_suggestion)}</pre>
+            <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(clinicalRecord)}</pre>
           </div>` : ""}
 
           <div class="card card-pad">
@@ -763,7 +770,7 @@ async function viewPatient(id) {
         </div>
       </div>`;
       const recCopy = box.querySelector("#rec-copy");
-      if (recCopy) recCopy.addEventListener("click", async () => { await navigator.clipboard.writeText(activePlan.clinical_suggestion); toast("Clinical record copied"); });
+      if (recCopy) recCopy.addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalRecord); toast("Clinical record copied"); });
       box.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", async () => {
         if (!confirm("Stop this program? The patient will see it as stopped.")) return;
         await api("PATCH", `/api/plans/${b.dataset.stop}`, { status: "stopped" });
@@ -846,7 +853,7 @@ async function viewPatient(id) {
         <div class="msg-list" id="msg-list">
           ${messages.length ? messages.map((m) => `
             <div class="msg ${m.sender}">
-              ${esc(m.body)}
+              <span class="msg-body">${esc(m.body)}</span>
               <div class="msg-time">${m.sender === "doctor" && m.senderName ? esc(m.senderName) + " · " : ""}${timeAgo(m.created_at)}</div>
             </div>`).join("") : `<div class="empty">${icon("message", 30)}<p>No messages yet. Send the first note below.</p></div>`}
         </div>
@@ -1318,7 +1325,7 @@ function refillFormModal(patient, pl, reqRow) {
       ${reqRow.notes ? `<div style="font-size:13.5px"><b>Notes:</b> ${esc(reqRow.notes)}</div>` : ""}
     </div>
     ${reqRow.dose_action === "talk" ? `<p class="hint" style="margin:-6px 0 14px">They'd like to talk before any dose change — the dose below is left unchanged until you do.</p>` : ""}` : `
-    <div class="field"><label for="rf-weight">Current weight (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" value="${esc(patient.current_weight_kg || patient.start_weight_kg || "")}"></div>
+    <div class="field"><label for="rf-weight">Weight today (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" inputmode="decimal" placeholder="${esc(patient.current_weight_kg || patient.start_weight_kg ? `Last recorded: ${patient.current_weight_kg || patient.start_weight_kg} kg` : "Optional")}"></div>
     <div class="field"><label for="rf-side">Side effects since last visit</label><textarea class="input" id="rf-side" rows="2" placeholder="Optional"></textarea></div>
     ${isPeptide ? `<div class="field"><label for="rf-results">Results felt</label><textarea class="input" id="rf-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
     `}
@@ -1341,15 +1348,15 @@ function refillFormModal(patient, pl, reqRow) {
     const quantity = Number(scrim.querySelector("#rf-qty").value) || 1;
     const nextFollowup = scrim.querySelector("#rf-followup").value || null;
     const message = scrim.querySelector("#rf-msg").value.trim();
-    // Reviewing a request: the weight was reported with it, read-only — not
-    // re-collected in this form — so it comes from the request row itself.
+    // A patient's reported weight was already logged when they sent the
+    // request, so only a weight typed in clinic is sent from here.
     const weightEl = scrim.querySelector("#rf-weight");
-    const weightKg = reqRow ? (reqRow.weight_kg || null) : (weightEl ? Number(weightEl.value) || null : null);
+    const weightKg = weightEl ? Number(weightEl.value) || null : null;
     const sideEffects = scrim.querySelector("#rf-side") ? scrim.querySelector("#rf-side").value.trim() : "";
     const resultsFelt = scrim.querySelector("#rf-results") ? scrim.querySelector("#rf-results").value.trim() : "";
     try {
       if (reqRow) {
-        await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "approved", dose, quantity, nextFollowup, weightKg, message });
+        await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "approved", dose, quantity, nextFollowup, message });
       } else {
         await api("POST", `/api/plans/${pl.id}/refill`, { dose, quantity, nextFollowup, weightKg, sideEffects, resultsFelt, message });
       }
@@ -1377,7 +1384,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
   if (!refillRequests || !refillRequests.length) return "";
   const pending = refillRequests.filter((r) => r.status === "pending");
   const resolved = refillRequests.filter((r) => r.status !== "pending");
-  const planName = (id) => { const pl = plans.find((x) => x.id === id); return pl ? `${pl.medication}${pl.dose ? " · " + pl.dose : ""}` : "Program"; };
+  const planName = (id) => { const pl = plans.find((x) => x.id === id); return pl ? pl.medication : "Program"; };
   return `
   <div class="card card-pad">
     <div class="card-title" style="justify-content:space-between">
@@ -1388,25 +1395,101 @@ function refillHistoryCardHTML(plans, refillRequests) {
       <div class="alert-item">
         <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
         <div class="alert-body">
-          <div class="alert-name">${esc(planName(r.plan_id))}</div>
-          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.has_side_effects === "yes" ? ` · side effects ${severityBadgeHTML(r.side_effect_severity)}` : ""}</div>
-          <div class="alert-meta">${timeAgo(r.created_at)}</div>
+          <div class="alert-name">${esc(planName(r.plan_id))}${r.prior_dose ? ` · ${esc(r.prior_dose)}` : ""}</div>
+          <div class="alert-meta">Patient request · ${esc(fmtDate(r.created_at))} · ${timeAgo(r.created_at)}</div>
+          ${refillDetailsHTML(r)}
         </div>
-        <button class="btn btn-secondary btn-sm" data-review-refill="${r.plan_id}">Review</button>
+        <button class="btn btn-secondary btn-sm" style="align-self:flex-start" data-review-refill="${r.plan_id}">Review</button>
       </div>`).join("")}
-    ${resolved.length ? resolved.slice(0, 8).map((r) => `
+    ${resolved.length ? resolved.slice(0, 10).map((r) => `
       <div class="timeline-item">
         <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("syringe", 15)}</div>
-        <div style="flex:1">
-          <div style="font-size:13.5px"><b>${esc(planName(r.plan_id))}</b> ${r.status === "approved" ? `<span class="badge badge-green">refilled</span>` : `<span class="badge badge-gray">declined</span>`}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px"><b>${esc(planName(r.plan_id))}</b>
+            ${r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose ? `${esc(r.prior_dose)} → ${esc(r.decided_dose)}` : esc(r.decided_dose || r.prior_dose || "")}
+            ${r.status === "approved" ? `<span class="badge badge-green">refilled</span>` : `<span class="badge badge-gray">declined</span>`}</div>
           <div style="font-size:12.5px;color:var(--muted)">
-            ${r.source === "patient" ? "Patient request" : "Logged in clinic"}
-            ${r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose ? ` · ${esc(r.prior_dose)} → ${esc(r.decided_dose)}` : ""}
-            ${r.decided_by_name ? ` · by ${esc(r.decided_by_name)}` : ""} · ${timeAgo(r.decided_at || r.created_at)}
+            ${r.source === "patient" ? "Patient request" : "Logged in clinic"} · ${esc(fmtDate(r.decided_at || r.created_at))}${r.decided_by_name ? ` · by ${esc(r.decided_by_name)}` : ""}
           </div>
+          ${refillDetailsHTML(r)}
         </div>
       </div>`).join("") : (!pending.length ? `<p class="hint">No refills logged yet.</p>` : "")}
   </div>`;
+}
+
+// What was reported with a refill — weight, side effects, dose preference
+// and the patient's own words — so it stays in the patient's file.
+function refillDetailsHTML(r) {
+  const facts = [
+    r.weight_kg ? `<span>Weight <b>${esc(r.weight_kg)} kg</b></span>` : "",
+    sideEffectsSummaryHTML(r) ? `<span>${sideEffectsSummaryHTML(r)}</span>` : "",
+    r.dose_action ? `<span>Asked for <b>${esc(doseActionLabel(r.dose_action, r.requested_dose))}</b></span>` : "",
+  ].filter(Boolean);
+  const quotes = [
+    r.side_effects ? ["Side-effect details", r.side_effects] : null,
+    r.results_felt ? ["How it's working", r.results_felt] : null,
+    r.notes ? ["Message", r.notes] : null,
+  ].filter(Boolean);
+  if (!facts.length && !quotes.length) return "";
+  return `<div class="rf-details">
+    ${facts.length ? `<div class="rf-facts">${facts.join("")}</div>` : ""}
+    ${quotes.map(([k, v]) => `<div class="rf-quote"><span>${k}</span>${esc(v)}</div>`).join("")}
+  </div>`;
+}
+
+// One line for the patient summary: the most recent refill at a glance.
+function latestRefillSummaryHTML(r, plans) {
+  const pl = plans.find((x) => x.id === r.plan_id);
+  const dose = r.status === "approved" && r.decided_dose
+    ? (r.prior_dose && r.prior_dose !== r.decided_dose ? `${r.prior_dose} → ${r.decided_dose}` : r.decided_dose)
+    : (r.prior_dose || "");
+  const status = r.status === "approved" ? `<span class="badge badge-green">refilled</span>`
+    : r.status === "declined" ? `<span class="badge badge-gray">declined</span>`
+    : `<span class="badge badge-amber">awaiting review</span>`;
+  const bits = [
+    esc(fmtDate(r.decided_at || r.created_at)),
+    esc(`${pl ? pl.medication : "Program"}${dose ? " " + dose : ""}`),
+    r.weight_kg ? `${esc(r.weight_kg)} kg` : "",
+    r.has_side_effects === "yes" ? `side effects ${severityBadgeHTML(r.side_effect_severity)}` : r.has_side_effects === "no" ? "no side effects" : "",
+  ].filter(Boolean);
+  return `${bits.join(" · ")} ${status}`;
+}
+
+// Refills written in the clinical record's own plain-text style, oldest
+// first, so the record reads as one running history and copies as one.
+function refillRecordText(p, plans, refillRequests) {
+  if (!refillRequests || !refillRequests.length) return "";
+  const sev = {
+    mild: "Mild (did not disrupt daily routine)",
+    moderate: "Moderate (disrupted daily activities)",
+    severe: "Severe (hard to tolerate / needed medical help)",
+  };
+  return [...refillRequests].reverse().map((r) => {
+    const pl = plans.find((x) => x.id === r.plan_id) || {};
+    const bmi = r.weight_kg ? calcBMIClient(p.height_cm, r.weight_kg) : null;
+    const lines = [
+      `REFILL UPDATE — ${fmtDate(r.decided_at || r.created_at)}`,
+      "",
+      `Patient: ${p.name} · Patient no. ${p.id} · Mobile +${p.mobile}`,
+      `Medication: ${pl.medication || "—"}`,
+      `Source: ${r.source === "patient" ? "Patient refill request" : "Recorded in clinic"}`,
+    ];
+    if (r.weight_kg) lines.push(`Weight: ${r.weight_kg} kg${bmi ? ` (BMI ${bmi})` : ""}`);
+    if (r.has_side_effects === "yes") lines.push(`Side effects: ${sev[r.side_effect_severity] || "Yes"}`);
+    else if (r.has_side_effects === "no") lines.push("Side effects: None reported");
+    if (r.side_effects) lines.push(`Side-effect details: ${r.side_effects}`);
+    if (r.results_felt) lines.push(`Response to treatment: ${r.results_felt}`);
+    if (r.dose_action) lines.push(`Patient preference: ${doseActionLabel(r.dose_action, r.requested_dose)}`);
+    if (r.notes) lines.push(`Patient message: ${r.notes}`);
+    if (r.status === "approved") {
+      const change = r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose
+        ? `dose changed ${r.prior_dose} → ${r.decided_dose}` : `dose continued at ${r.decided_dose || r.prior_dose || "—"}`;
+      lines.push(`Outcome: Refill approved — ${change}${r.quantity ? `, quantity ${r.quantity}` : ""}`);
+    } else if (r.status === "declined") lines.push("Outcome: Request declined");
+    else lines.push("Outcome: Awaiting doctor review");
+    if (r.decided_by_name) lines.push(`Reviewed by: ${r.decided_by_name}`);
+    return lines.join("\n");
+  }).join("\n\n");
 }
 
 // ── consultation wizard ──────────────────────────────────────────

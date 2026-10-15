@@ -879,7 +879,7 @@ route("GET", "/api/patients", (req, res) => {
     SELECT p.*,
       (SELECT COUNT(*) FROM plans pl WHERE pl.patient_id = p.id AND pl.status = 'active') AS active_plans,
       (SELECT title FROM plans pl WHERE pl.patient_id = p.id AND pl.status = 'active' ORDER BY pl.created_at DESC LIMIT 1) AS current_plan,
-      (SELECT weight_kg FROM checkins c WHERE c.patient_id = p.id AND c.weight_kg IS NOT NULL ORDER BY c.date DESC LIMIT 1) AS last_weight,
+      (SELECT weight_kg FROM checkins c WHERE c.patient_id = p.id AND c.weight_kg IS NOT NULL ORDER BY c.date DESC, c.id DESC LIMIT 1) AS last_weight,
       (SELECT MAX(created_at) FROM (
          SELECT created_at FROM dose_logs WHERE patient_id = p.id
          UNION ALL SELECT created_at FROM checkins WHERE patient_id = p.id
@@ -932,7 +932,7 @@ route("GET", "/api/patients/:id", (req, res, p) => {
   if (!patient) return json(res, 404, NOT_IN_ORG);
   const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(p.id).map(parsePlan);
   const doses = db.prepare("SELECT * FROM dose_logs WHERE patient_id = ? ORDER BY taken_at DESC LIMIT 200").all(p.id);
-  const checkins = db.prepare("SELECT * FROM checkins WHERE patient_id = ? ORDER BY date DESC LIMIT 200").all(p.id)
+  const checkins = db.prepare("SELECT * FROM checkins WHERE patient_id = ? ORDER BY date DESC, id DESC LIMIT 200").all(p.id)
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   const messages = db.prepare("SELECT * FROM messages WHERE patient_id = ? ORDER BY created_at ASC").all(p.id);
   db.prepare("UPDATE messages SET read_at = datetime('now') WHERE patient_id = ? AND sender = 'patient' AND read_at IS NULL").run(p.id);
@@ -1546,7 +1546,7 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
 // patient's current weight. Every refill — doctor-entered or patient-
 // requested — is logged in refill_requests so it shows as a dated update on
 // the patient's chart, never as a second consultation.
-function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, weightKg }) {
+function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup }) {
   const sets = ["needs_refill = 0", "updated_at = datetime('now')", "last_edited_by = ?", "last_edited_at = datetime('now')"];
   const vals = [editor.id];
   if (dose !== undefined && dose !== "") { sets.push("dose = ?"); vals.push(dose); }
@@ -1554,25 +1554,84 @@ function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, weigh
   if (nextFollowup !== undefined && nextFollowup !== "") { sets.push("next_followup = ?"); vals.push(nextFollowup); }
   vals.push(plan.id);
   db.prepare(`UPDATE plans SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
-  if (weightKg) db.prepare("UPDATE patients SET current_weight_kg = ? WHERE id = ?").run(Number(weightKg), plan.patient_id);
 }
 
-// A patient's own report — submitted through the portal or a shareable guide
-// link, with no sign-in beyond the link's token — never changes the plan by
-// itself. It's logged as 'pending' and surfaces on the doctor's dashboard
-// until they decide what to do with it.
+// A weight given with a refill is an observation, not a decision, so it goes
+// straight into the patient's record: a dated weight entry (the same log
+// check-ins write to, so it charts and counts as their latest weight) plus
+// their current weight.
+function logRefillWeight(plan, weightKg, note) {
+  const kg = Number(weightKg);
+  if (!kg || kg < 20 || kg > 400) return;
+  db.prepare("INSERT INTO checkins (patient_id, plan_id, date, weight_kg, symptoms_json, notes, flagged) VALUES (?,?,?,?,'{}',?,0)")
+    .run(plan.patient_id, plan.id, new Date().toISOString().slice(0, 10), kg, note);
+  db.prepare("UPDATE patients SET current_weight_kg = ? WHERE id = ?").run(kg, plan.patient_id);
+}
+
+const SEVERITY_TEXT = {
+  mild: "Mild — noticeable, but didn't disrupt their daily routine",
+  moderate: "Moderate — disrupted daily activities (rest, time off or changes needed)",
+  severe: "Severe — hard to tolerate, seriously affected daily life, or needed medical help",
+};
+
+function refillDoseText(plan, action, requestedDose) {
+  const ladder = doseOptionsFor(plan.category, plan.medication);
+  const i = ladder.indexOf(plan.dose);
+  const step = (d) => (i === -1 ? null : ladder[i + d] || null);
+  if (action === "same") return `Keep current dose${plan.dose ? ` (${plan.dose})` : ""}`;
+  if (action === "increase") return `Increase dose${step(1) ? ` (next step ${step(1)})` : ""}`;
+  if (action === "decrease") return `Lower dose${step(-1) ? ` (previous step ${step(-1)})` : ""}`;
+  if (action === "custom") return `Switch to ${requestedDose || "a specific dose"}`;
+  if (action === "talk") return "Wants to talk to the doctor before any dose change";
+  return "";
+}
+
+// The refill request as one readable message — what lands in the doctor's
+// Messages, identifying the patient by name, patient number and mobile.
+function refillSummaryText(patient, plan, r) {
+  const lines = [
+    `Refill request — ${plan.medication}${plan.dose ? " " + plan.dose : ""}`,
+    `${patient.name} · Patient no. ${patient.id} · Mobile +${patient.mobile}`,
+    "",
+  ];
+  if (r.weight_kg) lines.push(`Weight: ${r.weight_kg} kg`);
+  if (r.has_side_effects === "yes") lines.push(`Side effects: ${SEVERITY_TEXT[r.side_effect_severity] || "Yes (severity not given)"}`);
+  else if (r.has_side_effects === "no") lines.push("Side effects: None");
+  if (r.side_effects) lines.push(`Details: ${r.side_effects}`);
+  if (r.results_felt) lines.push(`How it's working: ${r.results_felt}`);
+  const dose = refillDoseText(plan, r.dose_action, r.requested_dose);
+  if (dose) lines.push(`Next dose: ${dose}`);
+  if (r.notes) lines.push(`Message: ${r.notes}`);
+  return lines.join("\n");
+}
+
+// A patient's own report — submitted through the portal or a shareable link,
+// with no sign-in beyond the link's token. It never changes the plan by
+// itself: it's logged as 'pending' for the doctor to decide on. Their weight
+// is recorded straight away, and the whole request arrives in the doctor's
+// Messages as a summary.
 function submitPatientRefillRequest(plan, body) {
   const hasSideEffects = ["yes", "no"].includes(body.hasSideEffects) ? body.hasSideEffects : "";
   const severity = hasSideEffects === "yes" && ["mild", "moderate", "severe"].includes(body.sideEffectSeverity) ? body.sideEffectSeverity : "";
+  const r = {
+    side_effects: String(body.sideEffects || "").trim().slice(0, 2000),
+    weight_kg: body.weightKg ? Number(body.weightKg) : null,
+    results_felt: String(body.resultsFelt || "").trim().slice(0, 2000),
+    dose_action: String(body.doseAction || "").slice(0, 20),
+    requested_dose: String(body.requestedDose || "").slice(0, 40),
+    notes: String(body.notes || "").trim().slice(0, 2000),
+    has_side_effects: hasSideEffects, side_effect_severity: severity,
+  };
   db.prepare(`INSERT INTO refill_requests
     (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, has_side_effects, side_effect_severity)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(plan.id, plan.patient_id, "patient", "pending",
-      String(body.sideEffects || "").slice(0, 2000), body.weightKg ? Number(body.weightKg) : null,
-      String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
-      String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000), plan.dose || "",
-      hasSideEffects, severity);
+    .run(plan.id, plan.patient_id, "patient", "pending", r.side_effects, r.weight_kg, r.results_felt, r.dose_action,
+      r.requested_dose, r.notes, plan.dose || "", r.has_side_effects, r.side_effect_severity);
   db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
+  logRefillWeight(plan, r.weight_kg, `Reported with refill request (${plan.medication})`);
+  const patient = db.prepare("SELECT id, name, mobile FROM patients WHERE id = ?").get(plan.patient_id);
+  db.prepare("INSERT INTO messages (patient_id, sender, body) VALUES (?,?,?)")
+    .run(plan.patient_id, "patient", refillSummaryText(patient, plan, r));
 }
 
 // Doctor records a refill in clinic — applies immediately, since the doctor
@@ -1592,7 +1651,8 @@ route("POST", "/api/plans/:id/refill", async (req, res, p, body) => {
       String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
       String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000),
       plan.dose || "", dose, body.quantity ? Number(body.quantity) : null, me.id);
-  applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, weightKg: body.weightKg });
+  applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup });
+  logRefillWeight(plan, body.weightKg, `Recorded at refill (${plan.medication})`);
   if (body.message && String(body.message).trim()) {
     db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
       .run(plan.patient_id, "doctor", String(body.message).trim(), me.id);
@@ -1616,7 +1676,7 @@ route("POST", "/api/refill-requests/:id/decide", async (req, res, p, body) => {
   const dose = approve ? (body.dose !== undefined ? String(body.dose).trim() : plan.dose) : "";
   db.prepare(`UPDATE refill_requests SET status = ?, decided_dose = ?, quantity = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?`)
     .run(approve ? "approved" : "declined", dose, body.quantity ? Number(body.quantity) : null, me.id, p.id);
-  if (approve) applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, weightKg: body.weightKg });
+  if (approve) applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup });
   else db.prepare("UPDATE plans SET needs_refill = 0 WHERE id = ?").run(plan.id);
   if (body.message && String(body.message).trim()) {
     db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
@@ -1680,7 +1740,7 @@ route("GET", "/api/portal/data", (req, res) => {
   const patient = getPatient(req);
   if (!patient) return json(res, 401, { error: "Not signed in." });
   const doses = db.prepare("SELECT * FROM dose_logs WHERE patient_id = ? ORDER BY taken_at DESC LIMIT 400").all(patient.id);
-  const checkins = db.prepare("SELECT * FROM checkins WHERE patient_id = ? ORDER BY date DESC LIMIT 400").all(patient.id)
+  const checkins = db.prepare("SELECT * FROM checkins WHERE patient_id = ? ORDER BY date DESC, id DESC LIMIT 400").all(patient.id)
     .map((c) => ({ ...c, symptoms: JSON.parse(c.symptoms_json || "{}"), symptoms_json: undefined }));
   json(res, 200, { doses, checkins });
 });

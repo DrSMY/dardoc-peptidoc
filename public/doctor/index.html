@@ -137,6 +137,12 @@
   .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; font-size: 14.5px; }
   .msg.doctor { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
   .msg.patient { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rf-details { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .rf-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  .rf-facts b { color: var(--text); font-weight: 600; }
+  .rf-quote { font-size: 13px; line-height: 1.5; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; overflow-wrap: anywhere; }
+  .rf-quote span { display: block; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
   .msg-time { font-size: 10.5px; opacity: .65; margin-top: 3px; }
   .timeline-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .timeline-item:last-child { border-bottom: none; }
@@ -283,9 +289,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare66"></script>
+<script src="/shared.js?v=docare68"></script>
 <script src="/patient-guides.js?v=docare25"></script>
-<script src="/guide.js?v=docare66"></script>
-<script src="/doctor/app.js?v=docare66"></script>
+<script src="/guide.js?v=docare68"></script>
+<script src="/doctor/app.js?v=docare68"></script>
 </body>
 </html>
