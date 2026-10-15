@@ -260,7 +260,7 @@ async function viewDashboard() {
             <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
             <div class="alert-body">
               <div class="alert-name">${esc(r.patient_name)}</div>
-              <div class="alert-sym">${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}${r.dose_action ? " — " + esc(doseActionLabel(r.dose_action, r.requested_dose)) : ""}${r.has_side_effects === "yes" ? ` · side effects (${esc(r.side_effect_severity || "unspecified")})` : ""}</div>
+              <div class="alert-sym">${esc(r.medication)}${r.dose ? " · " + esc(r.dose) : ""}${r.dose_action ? " — " + esc(doseActionLabel(r.dose_action, r.requested_dose)) : ""}${r.has_side_effects === "yes" ? ` · side effects ${severityBadgeHTML(r.side_effect_severity)}` : ""}</div>
               <div class="alert-meta">${timeAgo(r.refill_requested_at)}</div>
             </div>
             <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
@@ -1269,10 +1269,18 @@ function doseActionLabel(action, requestedDose) {
   return "Stay the same";
 }
 
+// Severity as a colour-coded badge (with the word, never colour alone), so a
+// severe report stands out wherever a request is listed.
+function severityBadgeHTML(sev) {
+  if (!sev) return `<span class="badge badge-gray">severity not given</span>`;
+  const cls = { mild: "badge-green", moderate: "badge-amber", severe: "badge-red" }[sev] || "badge-gray";
+  return `<span class="badge ${cls}">${esc(sev)}</span>`;
+}
+
 // The structured side-effects answer, formatted for a doctor-facing summary.
-function sideEffectsSummary(r) {
-  if (r.has_side_effects === "yes") return `Side effects: yes${r.side_effect_severity ? ` (${r.side_effect_severity})` : ""}`;
-  if (r.has_side_effects === "no") return "Side effects: none reported";
+function sideEffectsSummaryHTML(r) {
+  if (r.has_side_effects === "yes") return `Side effects ${severityBadgeHTML(r.side_effect_severity)}`;
+  if (r.has_side_effects === "no") return "No side effects reported";
   return r.side_effects ? "Side effects reported" : "";
 }
 
@@ -1303,7 +1311,7 @@ function refillFormModal(patient, pl, reqRow) {
     <div class="card card-pad" style="background:var(--bg);box-shadow:none;margin-bottom:14px">
       <div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">${esc(patient.name)} asked for this${askedAt ? " " + timeAgo(askedAt) : ""}</div>
       ${reqRow.weight_kg ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Reported weight:</b> ${esc(reqRow.weight_kg)} kg</div>` : ""}
-      ${sideEffectsSummary(reqRow) ? `<div style="font-size:13.5px;margin-bottom:4px"><b>${esc(sideEffectsSummary(reqRow))}</b></div>` : ""}
+      ${sideEffectsSummaryHTML(reqRow) ? `<div style="font-size:13.5px;margin-bottom:4px;font-weight:700">${sideEffectsSummaryHTML(reqRow)}</div>` : ""}
       ${reqRow.side_effects ? `<div style="font-size:13.5px;margin-bottom:4px">${esc(reqRow.side_effects)}</div>` : ""}
       ${reqRow.results_felt ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Results felt:</b> ${esc(reqRow.results_felt)}</div>` : ""}
       ${reqRow.dose_action ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Asked for:</b> ${esc(doseActionLabel(reqRow.dose_action, reqRow.requested_dose))}</div>` : ""}
@@ -1381,7 +1389,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
         <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
         <div class="alert-body">
           <div class="alert-name">${esc(planName(r.plan_id))}</div>
-          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.has_side_effects === "yes" ? ` · side effects (${esc(r.side_effect_severity || "unspecified")})` : ""}</div>
+          <div class="alert-sym">${r.dose_action ? esc(doseActionLabel(r.dose_action, r.requested_dose)) : "Refill requested"}${r.has_side_effects === "yes" ? ` · side effects ${severityBadgeHTML(r.side_effect_severity)}` : ""}</div>
           <div class="alert-meta">${timeAgo(r.created_at)}</div>
         </div>
         <button class="btn btn-secondary btn-sm" data-review-refill="${r.plan_id}">Review</button>

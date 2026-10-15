@@ -301,7 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_refill_requests_plan ON refill_requests(plan_id);
 // severity) — `side_effects` stays the free-text "anything else" box, always
 // optional and shown regardless of the yes/no answer.
 addColumn("refill_requests", "has_side_effects", "TEXT DEFAULT ''");     // 'yes' | 'no'
-addColumn("refill_requests", "side_effect_severity", "TEXT DEFAULT ''"); // 'mild' | 'moderate' | 'high'
+addColumn("refill_requests", "side_effect_severity", "TEXT DEFAULT ''"); // 'mild' | 'moderate' | 'severe'
 
 // ── dedicated refill links ─────────────────────────────────────────
 // A separate shareable link just for requesting a refill — distinct from the

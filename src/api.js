@@ -1563,7 +1563,7 @@ function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, weigh
 // until they decide what to do with it.
 function submitPatientRefillRequest(plan, body) {
   const hasSideEffects = ["yes", "no"].includes(body.hasSideEffects) ? body.hasSideEffects : "";
-  const severity = hasSideEffects === "yes" && ["mild", "moderate", "high"].includes(body.sideEffectSeverity) ? body.sideEffectSeverity : "";
+  const severity = hasSideEffects === "yes" && ["mild", "moderate", "severe"].includes(body.sideEffectSeverity) ? body.sideEffectSeverity : "";
   db.prepare(`INSERT INTO refill_requests
     (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, has_side_effects, side_effect_severity)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)

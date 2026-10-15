@@ -705,17 +705,86 @@ const GUIDE_CSS = `
 .g-supp b { font-family: var(--font-head); font-size: 14.5px; }
 .g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .g-toolbar .btn { flex-shrink: 0; }
-/* refill request: choice cards shared by the portal, guide link and dedicated refill link */
-.rr-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.rr-choices-row { flex-direction: row; flex-wrap: wrap; }
-.rr-choices-row .rr-choice { flex: 1; min-width: 90px; justify-content: center; }
-.rr-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: var(--r-md); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
-.rr-choice:hover { border-color: var(--brand); }
-.rr-choice:has(:focus-visible) { outline: 2px solid var(--brand); outline-offset: 2px; }
-.rr-choice.on { border-color: var(--brand); background: var(--brand-soft); }
-.rr-choice input[type="radio"] { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
-.rr-choice-label { font-size: 14px; font-weight: 600; }
-.rr-choice-info { margin: 10px 0 0; padding: 11px 14px; background: var(--bg); border-left: 3px solid var(--brand); border-radius: 0 var(--r-md) var(--r-md) 0; font-size: 13px; color: var(--muted); line-height: 1.55; }
+/* ── refill request form (portal sheet, guide-link sheet, dedicated /r/ page) ── */
+.rr-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.rr-form .input { font-size: 16px; }            /* 16px stops iOS zooming into the field */
+.rr-form textarea.input { min-height: 88px; }
+.rr-sec { padding: 20px 0; border-bottom: 1px solid var(--border); }
+.rr-sec:first-child { padding-top: 16px; }
+.rr-sec:last-child { border-bottom: 0; }
+.rr-sec-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+.rr-step { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--brand); color: #fff; font: 700 13px/1 var(--font-head); margin-top: 1px; }
+.rr-q { margin: 0; font: 700 16.5px/1.3 var(--font-head); color: var(--text); }
+.rr-hint { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.rr-sublabel { display: block; margin: 16px 0 8px; padding: 0; font-size: 14.5px; font-weight: 600; color: var(--text); }
+.rr-suffix { position: relative; }
+.rr-suffix .input { padding-right: 46px; }
+.rr-suffix > span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 15px; font-weight: 600; color: var(--muted); pointer-events: none; }
+/* option cards — every choice its own clearly bordered, tappable card */
+.rr-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.rr-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rr-opt { position: relative; background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 14px;
+  transition: border-color .15s ease, box-shadow .15s ease; }
+.rr-opt-head { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 12px 14px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.rr-seg .rr-opt-head { justify-content: center; }
+.rr-opt-head input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.rr-radio { width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: 2px solid var(--border-strong); display: grid; place-items: center;
+  transition: border-color .15s ease; }
+.rr-radio::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--brand); transform: scale(0); transition: transform .15s ease; }
+.rr-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rr-opt-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--text); }
+.rr-opt-sub { font-size: 13px; line-height: 1.35; color: var(--muted); }
+.rr-opt.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.rr-opt.on .rr-radio { border-color: var(--brand); }
+.rr-opt.on .rr-radio::after { transform: scale(1); }
+.rr-opt:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rr-opt-body { padding: 0 14px 14px; }
+.rr-opt-body .input { margin-bottom: 10px; }
+@media (hover: hover) { .rr-opt:not(.on):hover { border-color: var(--sage); } }
+.rr-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.rr-dot-mild { background: var(--accent); }
+.rr-dot-moderate { background: var(--amber); }
+.rr-dot-severe { background: var(--danger); }
+/* explanation boxes — each in its own bounded box */
+.rr-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px;
+  background: var(--bg); border: 1px solid var(--border); }
+.rr-note + .rr-note { margin-top: 8px; }
+.rr-note svg { flex-shrink: 0; margin-top: 2px; color: var(--brand); }
+.rr-note p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text); }
+.rr-note-soft { background: var(--primary-soft); border-color: #EADBB8; }
+.rr-note-soft svg { color: var(--gold-bronze); }
+.rr-note-warn { background: var(--danger-soft); border-color: #EBC9C2; }
+.rr-note-warn svg { color: var(--danger); }
+.rr-yes .rr-group { margin-top: 16px; }
+.rr-group > legend.rr-sublabel { margin: 0 0 8px; }
+.rr-err { margin: 8px 0 0; font-size: 13.5px; font-weight: 600; color: var(--danger); }
+/* modal → solid sheet; a bottom sheet on phones, with the send button always in reach */
+.rr-sheet .modal { display: flex; flex-direction: column; overflow: hidden; padding: 0; max-height: 90vh; max-height: 90dvh;
+  background: var(--surface); backdrop-filter: none; border: 1px solid var(--border); }
+.rr-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-shrink: 0;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+.rr-kicker { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--gold-bronze); }
+.rr-sheet-head h3 { margin: 2px 0 0; font: 700 19px/1.25 var(--font-head); color: var(--text); }
+.rr-sheet-head h3 span { font-weight: 500; color: var(--muted); }
+.rr-sheet-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 20px; }
+.rr-sheet-foot { flex-shrink: 0; padding: 12px 20px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--surface); }
+.rr-submit { min-height: 52px; font-size: 16px; }
+.rr-foot-hint { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+.rr-done { text-align: center; padding: 36px 24px calc(32px + env(safe-area-inset-bottom)); }
+.rr-done-ico { width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+.rr-done h3 { margin: 0 0 6px; font: 700 20px/1.3 var(--font-head); }
+.rr-done p { margin: 0 auto; max-width: 340px; font-size: 14.5px; line-height: 1.55; color: var(--muted); }
+@media (max-width: 560px) {
+  .rr-sheet { align-items: flex-end; padding: 0; }
+  .rr-sheet .modal { width: 100%; max-height: 94vh; max-height: 94dvh; border-radius: 20px 20px 0 0; border-bottom: 0;
+    animation: rrSheetUp .26s cubic-bezier(.2,.8,.2,1); }
+  .rr-sheet-head { padding: 16px 16px 12px; }
+  .rr-sheet-body { padding: 0 16px; }
+  .rr-sheet-foot { padding-left: 16px; padding-right: 16px; }
+}
+@keyframes rrSheetUp { from { transform: translateY(40px); opacity: 0; } }
 @media (prefers-reduced-motion: no-preference) {
   .rr-reveal { animation: rrFadeIn .2s ease-out; }
 }
@@ -733,105 +802,207 @@ function injectGuideCss() {
 
 // ── refill request (shared by the portal, the guide link and the dedicated
 // refill link) ───────────────────────────────────────────────────────────
-// Same fields everywhere: current weight, a structured side-effects
-// question, (peptides) how it's working, and for GLP-1 programs a dose
-// preference with a plain-language explanation under whichever choice is
-// selected. Submitting never changes the program itself — it only logs a
-// request the doctor reviews and makes the final call on.
+// One form everywhere: weight, a structured side-effects question, (peptides)
+// how it's working, and for GLP-1 programs a dose preference. Every choice is
+// its own card; picking one opens a short explanation inside that card, so
+// the decision is informed rather than a blind pick. Submitting never changes
+// the program — it only logs a request the doctor reviews and decides on.
 
-// Shown under the selected dose choice so the decision is informed rather
-// than a blind pick. Deliberately factual, calm and non-prescriptive — these
-// describe what a choice means, not clinical advice, and every one of them
-// ends with the doctor confirming before anything actually changes.
-const DOSE_CHOICE_INFO = {
-  same: "You'll stay on your current dose. A good option if side effects feel manageable and you're seeing the progress you want.",
-  increase: "A higher dose is usually only considered once your current one is well tolerated. It can help if progress has slowed — your doctor will confirm you're ready before anything changes.",
-  decrease: "A lower dose can ease side effects while keeping you on treatment. Your doctor will confirm it's still enough to support your goals.",
-  custom: "Pick the exact dose you'd like to discuss. Your doctor will review it and confirm before it's applied.",
-  talk: "No dose will be changed yet. Your doctor will follow up with you directly to talk through how things are going first.",
-};
-const DOSE_CHOICE_LABELS = {
-  same: "Stay the same", increase: "Increase dose", decrease: "Decrease dose",
-  custom: "Choose a specific dose", talk: "I'd rather talk to my doctor first",
+// The approved dose one step up or down from the current one, or null when
+// the current dose isn't on the ladder or there's no step in that direction.
+function doseLadderStep(options, current, dir) {
+  const i = (options || []).indexOf(current);
+  if (i === -1) return null;
+  return options[i + (dir === "up" ? 1 : -1)] || null;
+}
+
+// Plain-language copy for each dose choice. Factual and non-prescriptive:
+// each one describes what the choice means and that the doctor confirms
+// before anything changes.
+function doseChoiceCopy(plan) {
+  const doses = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  const cur = plan.dose || "your current dose";
+  const up = doseLadderStep(doses, plan.dose, "up");
+  const down = doseLadderStep(doses, plan.dose, "down");
+  const onLadder = doses.includes(plan.dose);
+  return {
+    same: {
+      title: "Keep my current dose", sub: plan.dose ? `Stay on ${plan.dose}` : "",
+      body: `You'll continue on ${cur}. A good choice if any side effects are manageable and you're happy with your progress.`,
+    },
+    increase: {
+      title: "Increase my dose", sub: up ? `Next step: ${up}` : onLadder ? "You're on the highest dose" : "",
+      body: up || !onLadder
+        ? "Usually considered once your current dose feels comfortable and progress has slowed. Your doctor will check you're ready before making the change."
+        : "You're already on the highest approved dose. Your doctor can talk you through other ways to keep your progress going.",
+    },
+    decrease: {
+      title: "Lower my dose", sub: down ? `Previous step: ${down}` : onLadder ? "You're on the starting dose" : "",
+      body: down || !onLadder
+        ? "Stepping down can ease side effects while keeping you on treatment. Your doctor will make sure it still supports your goals."
+        : "You're on the starting dose, so there isn't a lower one. Your doctor can suggest other ways to ease side effects.",
+    },
+    custom: {
+      title: "Choose a specific dose", sub: "Pick from the approved doses",
+      body: "Your doctor will review the dose you choose before anything changes.",
+    },
+    talk: {
+      title: "Talk to my doctor first", sub: "No dose change for now",
+      body: "Nothing will change yet. Your doctor will contact you to talk things through before deciding on your next dose.",
+    },
+  };
+}
+
+const SEVERITY_COPY = {
+  mild: {
+    title: "Mild", sub: "Noticeable, but manageable",
+    body: "Your side effects were noticeable but didn't get in the way of your day — you've been able to carry on with your normal routine.",
+  },
+  moderate: {
+    title: "Moderate", sub: "Disrupted my day",
+    body: "Your side effects disrupted your daily activities — you needed to rest, take time off, or change how you'd normally go about your day.",
+  },
+  severe: {
+    title: "Severe", sub: "Hard to tolerate",
+    body: "Your side effects were hard to tolerate, seriously affected your daily life, or you needed medical help.",
+  },
 };
 
-function doseChoiceFieldHTML(plan) {
-  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
-  const radio = (val, checked) => `
-    <label class="rr-choice">
-      <input type="radio" name="rr-dose" value="${val}" ${checked ? "checked" : ""}>
-      <span class="rr-choice-label">${esc(DOSE_CHOICE_LABELS[val])}</span>
-    </label>`;
+function rrNote(text, tone) {
+  const ico = tone === "warn" ? "alert" : tone === "soft" ? "heart" : "info";
+  return `<div class="rr-note${tone ? " rr-note-" + tone : ""}">${icon(ico, 16)}<p>${text}</p></div>`;
+}
+
+// One choice card. Its explanation (bodyHTML) sits inside the card and only
+// shows while the card is selected.
+function rrOption(name, value, { title, sub, dot }, bodyHTML, checked) {
   return `
-  <div class="field">
-    <label id="rr-dose-legend">Dose for your next refill</label>
-    <div class="rr-choices" role="radiogroup" aria-labelledby="rr-dose-legend">
-      ${radio("same", true)}${radio("increase")}${radio("decrease")}${radio("custom")}${radio("talk")}
-    </div>
-    ${doseOptions.length ? `<select class="input" id="rr-customdose" style="margin-top:8px" hidden>${doseOptions.map((d) => `<option ${d === plan.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>` : ""}
-    <p class="rr-choice-info" id="rr-dose-info">${esc(DOSE_CHOICE_INFO.same)}</p>
+  <div class="rr-opt${checked ? " on" : ""}">
+    <label class="rr-opt-head">
+      <input type="radio" name="${name}" value="${value}"${checked ? " checked" : ""}>
+      <span class="rr-radio" aria-hidden="true"></span>
+      <span class="rr-opt-text">
+        <span class="rr-opt-title">${dot ? `<span class="rr-dot rr-dot-${dot}" aria-hidden="true"></span>` : ""}${esc(title)}</span>
+        ${sub ? `<span class="rr-opt-sub">${esc(sub)}</span>` : ""}
+      </span>
+    </label>
+    ${bodyHTML ? `<div class="rr-opt-body"${checked ? "" : " hidden"}>${bodyHTML}</div>` : ""}
   </div>`;
 }
 
-function sideEffectsFieldHTML() {
+function rrSection(step, question, hint, inner) {
   return `
-  <div class="field">
-    <label id="rr-se-legend">Have you had any side effects?</label>
-    <div class="rr-choices rr-choices-row" role="radiogroup" aria-labelledby="rr-se-legend">
-      <label class="rr-choice"><input type="radio" name="rr-se" value="no" checked><span class="rr-choice-label">No</span></label>
-      <label class="rr-choice"><input type="radio" name="rr-se" value="yes"><span class="rr-choice-label">Yes</span></label>
+  <section class="rr-sec">
+    <div class="rr-sec-head">
+      <span class="rr-step" aria-hidden="true">${step}</span>
+      <div><h4 class="rr-q">${question}</h4>${hint ? `<p class="rr-hint">${hint}</p>` : ""}</div>
     </div>
-  </div>
-  <div class="field" id="rr-se-severity-field" hidden>
-    <label id="rr-sev-legend">How severe?</label>
-    <div class="rr-choices rr-choices-row" role="radiogroup" aria-labelledby="rr-sev-legend">
-      <label class="rr-choice"><input type="radio" name="rr-severity" value="mild"><span class="rr-choice-label">Mild</span></label>
-      <label class="rr-choice"><input type="radio" name="rr-severity" value="moderate"><span class="rr-choice-label">Moderate</span></label>
-      <label class="rr-choice"><input type="radio" name="rr-severity" value="high"><span class="rr-choice-label">High</span></label>
-    </div>
-  </div>
-  <div class="field"><label for="rr-side">Anything else about how you're feeling? (optional)</label><textarea class="input" id="rr-side" rows="2" placeholder="Optional"></textarea></div>`;
+    ${inner}
+  </section>`;
 }
 
 // Just the fields — no modal chrome, no submit button — so the same markup
-// works inside a modal (portal, guide link) and inline on the dedicated
-// refill page.
+// works inside the sheet (portal, guide link) and inline on the /r/ page.
 function refillRequestFieldsHTML(plan) {
   const isGlp1 = plan.category === "glp1";
   const isPeptide = plan.category === "peptide";
-  return `
-  <div class="field"><label for="rr-weight">Current weight (kg)</label><input class="input" id="rr-weight" type="number" step="0.1" inputmode="decimal" placeholder="Optional"></div>
-  ${sideEffectsFieldHTML()}
-  ${isPeptide ? `<div class="field"><label for="rr-results">How has it been working for you? Any results noticed?</label><textarea class="input" id="rr-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
-  ${isGlp1 ? doseChoiceFieldHTML(plan) : ""}
-  <div class="field"><label for="rr-notes">Anything else your doctor should know?</label><textarea class="input" id="rr-notes" rows="2" placeholder="Optional"></textarea></div>`;
+  const doseOptions = Array.isArray(plan.doseOptions) ? plan.doseOptions : [];
+  let step = 0;
+  const sections = [];
+
+  sections.push(rrSection(++step, "What's your weight today?", "Optional — it helps your doctor track your progress.", `
+    <label class="rr-sr" for="rr-weight">Weight in kilograms</label>
+    <div class="rr-suffix">
+      <input class="input" id="rr-weight" type="number" step="0.1" min="20" max="400" inputmode="decimal" placeholder="e.g. 82.5">
+      <span aria-hidden="true">kg</span>
+    </div>`));
+
+  sections.push(rrSection(++step, "Have you had any side effects?", "Since your last dose or refill.", `
+    <fieldset class="rr-group rr-seg">
+      <legend class="rr-sr">Have you had any side effects?</legend>
+      ${rrOption("rr-se", "no", { title: "No" }, "", true)}
+      ${rrOption("rr-se", "yes", { title: "Yes" }, "")}
+    </fieldset>
+    <div class="rr-yes" id="rr-se-yes" hidden>
+      <div style="margin-top:12px">${rrNote("We're sorry you're dealing with side effects. Let us know how much they've affected you, so we can suggest ways to ease them and adjust your plan going forward.", "soft")}</div>
+      <fieldset class="rr-group" id="rr-sev-group">
+        <legend class="rr-sublabel">How much have they affected you?</legend>
+        ${rrOption("rr-severity", "mild", { ...SEVERITY_COPY.mild, dot: "mild" }, rrNote(SEVERITY_COPY.mild.body))}
+        ${rrOption("rr-severity", "moderate", { ...SEVERITY_COPY.moderate, dot: "moderate" }, rrNote(SEVERITY_COPY.moderate.body))}
+        ${rrOption("rr-severity", "severe", { ...SEVERITY_COPY.severe, dot: "severe" },
+          rrNote(SEVERITY_COPY.severe.body) + rrNote("If you're feeling unwell right now, please don't wait for this request — contact your clinic or seek urgent medical care.", "warn"))}
+      </fieldset>
+      <p class="rr-err" id="rr-sev-err" role="alert" hidden>Please choose how much they've affected you.</p>
+    </div>
+    <label class="rr-sublabel" for="rr-side">Anything you'd like to add? <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+    <textarea class="input" id="rr-side" rows="3" placeholder="What you've noticed, when it happens, what helps"></textarea>`));
+
+  if (isPeptide) {
+    sections.push(rrSection(++step, "How has it been working for you?", "Any changes you've noticed — energy, sleep, recovery, skin, anything at all.", `
+      <label class="rr-sr" for="rr-results">How it has been working</label>
+      <textarea class="input" id="rr-results" rows="3" placeholder="Optional"></textarea>`));
+  }
+
+  if (isGlp1) {
+    const copy = doseChoiceCopy(plan);
+    const customBody = (doseOptions.length
+      ? `<label class="rr-sr" for="rr-customdose">Dose</label>
+         <select class="input" id="rr-customdose">${doseOptions.map((d) => `<option ${d === plan.dose ? "selected" : ""}>${esc(d)}</option>`).join("")}</select>`
+      : "") + rrNote(copy.custom.body);
+    sections.push(rrSection(++step, "What would you like for your next dose?", "Your doctor makes the final decision. Tap an option to see what it means.", `
+      <fieldset class="rr-group">
+        <legend class="rr-sr">Your preference for your next dose</legend>
+        ${rrOption("rr-dose", "same", copy.same, rrNote(copy.same.body), true)}
+        ${rrOption("rr-dose", "increase", copy.increase, rrNote(copy.increase.body))}
+        ${rrOption("rr-dose", "decrease", copy.decrease, rrNote(copy.decrease.body))}
+        ${rrOption("rr-dose", "custom", copy.custom, customBody)}
+        ${rrOption("rr-dose", "talk", copy.talk, rrNote(copy.talk.body))}
+      </fieldset>`));
+  }
+
+  sections.push(rrSection(++step, "Anything else for your doctor?", "Optional.", `
+    <label class="rr-sr" for="rr-notes">Anything else for your doctor</label>
+    <textarea class="input" id="rr-notes" rows="3" placeholder="Questions, travel plans, anything we should know"></textarea>`));
+
+  return sections.join("");
 }
 
-// Wires every conditional reveal: side-effects severity (only once "Yes" is
-// picked) and the dose-choice explanation + custom-dose picker.
+function rrReveal(el) {
+  el.classList.remove("rr-reveal");
+  void el.offsetWidth;
+  el.classList.add("rr-reveal");
+}
+
+// Selecting a card marks it, opens its explanation and closes the others;
+// "Yes" to side effects opens the empathy note and the severity question.
 function wireRefillRequestFields(root) {
-  const sevField = root.querySelector("#rr-se-severity-field");
-  root.querySelectorAll('input[name="rr-se"]').forEach((r) => r.addEventListener("change", () => {
-    if (!r.checked) return;
-    const show = r.value === "yes";
-    if (sevField) { sevField.hidden = !show; if (show) sevField.classList.add("rr-reveal"); }
-  }));
-  const customSel = root.querySelector("#rr-customdose");
-  const doseInfo = root.querySelector("#rr-dose-info");
-  root.querySelectorAll('input[name="rr-dose"]').forEach((r) => r.addEventListener("change", () => {
-    if (!r.checked) return;
-    if (customSel) customSel.hidden = r.value !== "custom";
-    if (doseInfo) { doseInfo.textContent = DOSE_CHOICE_INFO[r.value] || ""; doseInfo.classList.remove("rr-reveal"); void doseInfo.offsetWidth; doseInfo.classList.add("rr-reveal"); }
-  }));
-  root.querySelectorAll(".rr-choice").forEach((label) => {
-    const input = label.querySelector("input[type=radio]");
-    if (!input) return;
-    const sync = () => label.classList.toggle("on", input.checked);
-    input.addEventListener("change", () => {
-      root.querySelectorAll(`input[name="${input.name}"]`).forEach((r) => r.closest(".rr-choice").classList.toggle("on", r.checked));
+  root.querySelectorAll(".rr-opt input[type=radio]").forEach((input) => input.addEventListener("change", () => {
+    if (!input.checked) return;
+    root.querySelectorAll(`input[name="${input.name}"]`).forEach((r) => {
+      const opt = r.closest(".rr-opt");
+      opt.classList.toggle("on", r.checked);
+      const body = opt.querySelector(".rr-opt-body");
+      if (body) { body.hidden = !r.checked; if (r.checked) rrReveal(body); }
     });
-    sync();
-  });
+    if (input.name === "rr-se") {
+      const yes = root.querySelector("#rr-se-yes");
+      yes.hidden = input.value !== "yes";
+      if (!yes.hidden) rrReveal(yes);
+    }
+    if (input.name === "rr-severity") root.querySelector("#rr-sev-err").hidden = true;
+  }));
+}
+
+// Returns true when the form can be sent; otherwise points at what's missing.
+function checkRefillRequestFields(root) {
+  const yes = root.querySelector('input[name="rr-se"][value="yes"]');
+  if (yes && yes.checked && !root.querySelector('input[name="rr-severity"]:checked')) {
+    const err = root.querySelector("#rr-sev-err");
+    err.hidden = false;
+    root.querySelector("#rr-sev-group").scrollIntoView({ behavior: "smooth", block: "center" });
+    return false;
+  }
+  return true;
 }
 
 function readRefillRequestFields(root) {
@@ -841,45 +1012,55 @@ function readRefillRequestFields(root) {
   const customSel = root.querySelector("#rr-customdose");
   const val = (id) => { const el = root.querySelector("#" + id); return el ? el.value.trim() : ""; };
   const hasSideEffects = seRadio ? seRadio.value : "";
+  const doseAction = doseRadio ? doseRadio.value : "";
   return {
     weightKg: Number(val("rr-weight")) || null,
     hasSideEffects,
     sideEffectSeverity: hasSideEffects === "yes" && sevRadio ? sevRadio.value : "",
     sideEffects: val("rr-side"),
     resultsFelt: val("rr-results"),
-    doseAction: doseRadio ? doseRadio.value : "",
-    requestedDose: customSel && !customSel.hidden ? customSel.value : "",
+    doseAction,
+    requestedDose: doseAction === "custom" && customSel ? customSel.value : "",
     notes: val("rr-notes"),
   };
 }
 
 function refillRequestFormHTML(plan) {
   return `
-  <div class="modal-head"><h3>Request a refill — ${esc(plan.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
-  ${refillRequestFieldsHTML(plan)}
-  <button class="btn btn-primary btn-block" id="rr-submit" type="button" style="margin-top:4px">Send request</button>
-  <p class="hint" style="margin-top:10px;text-align:center">Your doctor will review this and confirm the next step.</p>`;
+  <div class="rr-sheet-head">
+    <div>
+      <div class="rr-kicker">Request a refill</div>
+      <h3>${esc(plan.medication)}${plan.dose ? ` <span>· ${esc(plan.dose)}</span>` : ""}</h3>
+    </div>
+    <button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button>
+  </div>
+  <div class="rr-sheet-body rr-form">${refillRequestFieldsHTML(plan)}</div>
+  <div class="rr-sheet-foot">
+    <button class="btn btn-primary btn-block rr-submit" id="rr-submit" type="button">Send request</button>
+    <p class="rr-foot-hint">Your doctor reviews every request before anything changes.</p>
+  </div>`;
 }
 
-// Opens the form in a modal; submitFn(payload) does the actual POST (the
+function refillDoneHTML(title, text) {
+  return `<div class="rr-done"><div class="rr-done-ico">${icon("checkCircle", 32)}</div><h3>${esc(title)}</h3><p>${esc(text)}</p></div>`;
+}
+
+// Opens the form as a sheet; submitFn(payload) does the actual POST (the
 // endpoint differs between the portal, which is already signed in, and a
 // public link, which authenticates by its token).
 function openRefillRequestModal(plan, submitFn) {
   const scrim = modal(refillRequestFormHTML(plan));
+  scrim.classList.add("rr-sheet");
   wireRefillRequestFields(scrim);
   scrim.querySelector("#rr-submit").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
+    if (!checkRefillRequestFields(scrim)) return;
     const payload = readRefillRequestFields(scrim);
     btn.disabled = true; btn.textContent = "Sending…";
     try {
       await submitFn(payload);
-      scrim.querySelector(".modal").innerHTML = `
-        <div style="text-align:center;padding:10px 4px">
-          ${icon("checkCircle", 40)}
-          <h3 style="margin:14px 0 6px">Request sent</h3>
-          <p class="hint">Your doctor will review this and confirm the next step.</p>
-        </div>`;
-      setTimeout(() => scrim.remove(), 2200);
+      scrim.querySelector(".modal").innerHTML = refillDoneHTML("Request sent", "Thank you. Your doctor will review your answers and confirm your next step with you.");
+      setTimeout(() => scrim.remove(), 2600);
     } catch (ex) {
       btn.disabled = false; btn.textContent = "Send request";
       toast((ex && ex.message) || "Could not send your request", "bad");
