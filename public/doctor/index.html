@@ -138,6 +138,24 @@
   .msg.doctor { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
   .msg.patient { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
   .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .due-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-top: 1px solid var(--border); }
+  .due-row[hidden] { display: none; }
+  .due-info { flex: 1; min-width: 0; }
+  .due-name { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font: 700 14.5px/1.3 var(--font-head); }
+  .due-name a { color: var(--text); text-decoration: none; }
+  .due-name a:hover { text-decoration: underline; }
+  .due-actions { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+  @media (max-width: 760px) {
+    .due-row { flex-wrap: wrap; }
+    .due-row > .avatar { display: none; }
+    .due-actions { width: 100%; }
+    .due-actions .btn { flex: 1; justify-content: center; min-height: 44px; }
+  }
+  .de-plate { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 10px; }
+  .de-meal { margin-bottom: 12px; }
+  .de-meal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .de-meal-g { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+  .de-meal-g .input { width: 76px; min-height: 36px; padding: 6px 10px; }
   .rf-details { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
   .rf-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
   .rf-facts b { color: var(--text); font-weight: 600; }
@@ -289,9 +307,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare68"></script>
+<script src="/shared.js?v=docare70"></script>
 <script src="/patient-guides.js?v=docare25"></script>
-<script src="/guide.js?v=docare68"></script>
-<script src="/doctor/app.js?v=docare68"></script>
+<script src="/guide.js?v=docare70"></script>
+<script src="/doctor/app.js?v=docare70"></script>
 </body>
 </html>

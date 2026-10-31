@@ -386,6 +386,13 @@ function paintHome(v) {
     <button class="qa" id="qa-msg"><span class="qa-ico">${icon("message", 20)}</span><b>Message doctor</b><span>Chat with ${esc(S.me.doctorName)}</span></button>
   </div>
 
+  ${!primary && S.me.visit ? `
+  <div class="list-card card-pad dose-card">
+    <div class="dose-head"><span class="qa-ico">${icon("utensils", 18)}</span><b>Your health plan</b></div>
+    <p class="dose-text">Your nutrition plan is ready, with your daily targets, an example day, and how medication could help.</p>
+    <button class="linklike-p" id="visit-guide">Open your plan ${icon("chevR", 14)}</button>
+  </div>` : ""}
+
   ${primary ? `
   <div class="list-card card-pad dose-card">
     <div class="dose-head"><span class="qa-ico">${icon(routeIcon(primary.route), 18)}</span><b>Your dose &amp; how to take it</b></div>
@@ -415,6 +422,9 @@ function paintHome(v) {
   </div>` : ""}`;
 
   if (primary) wirePhaseStrip(v, primary, ph);
+
+  const visitGuide = v.querySelector("#visit-guide");
+  if (visitGuide) visitGuide.addEventListener("click", () => { S.tab = "guide"; paint(); });
 
   const fullGuide = v.querySelector("#dose-fullguide");
   if (fullGuide) fullGuide.addEventListener("click", () => { S.guidePlanId = primary.id; S.tab = "guide"; paint(); });
@@ -529,6 +539,28 @@ function guideMedChooser(plans, activeId) {
 function paintGuide(v) {
   injectGuideCss();
   const active = S.me.plans.filter((p) => p.status === "active");
+  // Nothing prescribed at the latest visit: their guide is their health plan.
+  if (!active.length && S.me.visit) {
+    v.innerHTML = `
+    <div class="home-band">
+      <div class="hero-card g-hero-card">
+        <div class="hero-lbl">Personal health plan</div>
+        <h2 class="hero-title">Your nutrition plan</h2>
+        <p class="hero-desc">Your daily targets, an example day, and how medication could help.</p>
+      </div>
+    </div>
+    <div class="g-toolbar">
+      <button class="btn btn-secondary btn-sm" id="g-copytext">${icon("copy", 15)} Copy guide text</button>
+      <button class="btn btn-secondary btn-sm" id="g-print">${icon("printer", 15)} Save PDF</button>
+    </div>
+    <div id="g-active-guide">${buildVisitGuide(S.me.visit, S.me.patient, S.me.doctorName, { portal: true })}</div>`;
+    v.querySelector("#g-print").addEventListener("click", () => window.print());
+    v.querySelector("#g-copytext").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(buildVisitGuideText(S.me.visit, S.me.patient, S.me.doctorName));
+      toast("Guide text copied");
+    });
+    return;
+  }
   const plans = active.length ? active : (S.me.plans[0] ? [S.me.plans[0]] : []);
   if (!plans.length) {
     v.innerHTML = `<div class="list-card card-pad empty">${icon("book", 34)}<div class="empty-title">No guide yet</div><p>Your personalised treatment guide will appear here once your doctor publishes it.</p></div>`;

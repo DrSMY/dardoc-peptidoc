@@ -31,7 +31,7 @@ const GLP1_MEDICATIONS = {
     ],
   },
   "Wegovy Pill": {
-    generic: "oral semaglutide 25mg (SNAC absorption enhancer)", route: "oral", frequency: "daily", halfLifeHours: 168,
+    generic: "oral semaglutide (SNAC absorption enhancer)", route: "oral", frequency: "daily", halfLifeHours: 168,
     doses: ["1.5mg", "4mg", "9mg", "25mg"],
     administration: "Take 1 tablet on an empty stomach (after ≥8h fasting), swallow with up to 120 mL plain water, then wait 30 minutes before eating or drinking anything else.",
     titration: [

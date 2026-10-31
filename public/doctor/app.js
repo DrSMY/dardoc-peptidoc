@@ -164,6 +164,7 @@ function renderShell() {
   // fires the work so far is saved to Drafts.
   ["input", "click"].forEach((ev) => document.getElementById("view").addEventListener(ev, scheduleAutosave));
   refreshDraftBadge();
+  refreshRefillBadge();
 }
 
 function setActiveNav() {
@@ -215,6 +216,8 @@ async function viewDashboard() {
     </div>
     ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
+
+  <div id="refill-due">${refillDueCardHTML(d.refillDue)}</div>
 
   <div id="practice-stats"></div>
 
@@ -272,6 +275,9 @@ async function viewDashboard() {
         </div>
       </div>
 
+    </div>
+
+    <div>
       <div class="card">
         <div class="card-title" style="padding:18px 18px 0">${icon("activity", 19)} Recent patient activity</div>
         ${d.recent.length ? d.recent.map((r) => `
@@ -286,19 +292,6 @@ async function viewDashboard() {
             <div class="pt-side">${timeAgo(r.created_at)}</div>
           </a>`).join("") : `<div class="empty">${icon("activity", 34)}<div class="empty-title">No activity yet</div><p>Patient dose logs and check-ins will show up here.</p></div>`}
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title" style="padding:18px 18px 0">${icon("calendar", 19)} Follow-ups due</div>
-      ${d.dueFollowups.length ? d.dueFollowups.map((f) => `
-        <a class="pt-row" href="#/patient/${f.patient_id}">
-          <div class="avatar">${esc(initials(f.patient_name))}</div>
-          <div class="pt-info">
-            <div class="pt-name">${esc(f.patient_name)}</div>
-            <div class="pt-meta">${esc(f.medication)} · due ${esc(fmtDate(f.next_followup))}</div>
-          </div>
-          ${icon("chevR", 17)}
-        </a>`).join("") : `<div class="empty">${icon("calendar", 34)}<div class="empty-title">Nothing due</div><p>Follow-ups due in the next 3 days appear here.</p></div>`}
     </div>
   </div>`;
 
@@ -317,7 +310,91 @@ async function viewDashboard() {
     if (pl) refillFormModal(detail.patient, pl, reqRow);
   }));
 
+  wireRefillDue(d.refillDue);
+  paintRefillBadge(d.refillDue.length);
   renderPracticeStats(d);
+}
+
+// ── who is up for refill ─────────────────────────────────────────────
+// Everyone in the practice sees the same list and can contact a patient
+// straight from it. WhatsApp and email carry the patient's refill link.
+const REFILL_DUE_SHOWN = 6;
+
+function dueLabel(due) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const days = Math.round((new Date(String(due).slice(0, 10) + "T12:00:00") - today) / 864e5);
+  if (days < 0) return { text: `Overdue by ${-days} day${days === -1 ? "" : "s"}`, cls: "badge-red" };
+  if (days === 0) return { text: "Due today", cls: "badge-amber" };
+  return { text: `Due in ${days} day${days === 1 ? "" : "s"}`, cls: "badge-amber" };
+}
+
+function refillDueRowHTML(r, i) {
+  const due = dueLabel(r.due);
+  const what = r.kind === "followup" ? "Follow-up visit, no medication" : r.medications.join(", ");
+  return `
+  <div class="due-row"${i >= REFILL_DUE_SHOWN ? " hidden" : ""}>
+    <div class="avatar">${esc(initials(r.patient_name))}</div>
+    <div class="due-info">
+      <div class="due-name"><a href="#/patient/${r.patient_id}">${esc(r.title ? r.title + " " : "")}${esc(r.patient_name)}</a> <span class="badge ${due.cls}">${esc(due.text)}</span></div>
+      <div class="pt-meta">${esc(what)}${r.doctor_name ? ` · ${esc(r.doctor_name)}` : ""} · +${esc(r.mobile)}</div>
+    </div>
+    <div class="due-actions">
+      <button class="btn btn-accent btn-sm" type="button" data-due-wa="${i}">${icon("whatsapp", 15)} WhatsApp</button>
+      <a class="btn btn-secondary btn-sm" href="${esc(telHref(r.mobile))}">${icon("phone", 15)} Call</a>
+      <button class="btn btn-secondary btn-sm" type="button" data-due-email="${i}">${icon("mail", 15)} Email</button>
+    </div>
+  </div>`;
+}
+
+function refillDueCardHTML(rows) {
+  return `
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-title" style="padding:18px 18px 4px;flex-wrap:wrap">${icon("calendar", 19)} Up for refill
+      ${rows.length ? `<span class="badge badge-amber">${rows.length}</span>` : `<span class="badge badge-green">All clear</span>`}
+    </div>
+    ${rows.length ? `
+      <p class="hint" style="padding:0 18px 8px;margin:0">Patients due in the next 7 days or overdue. Contact them here; the WhatsApp and email messages include their refill link.</p>
+      ${rows.map(refillDueRowHTML).join("")}
+      ${rows.length > REFILL_DUE_SHOWN ? `<div style="padding:12px 18px"><button class="linklike" type="button" id="due-more">Show all ${rows.length}</button></div>` : ""}`
+    : `<p class="hint" style="padding:0 18px 18px;margin:0">No one is due in the next 7 days.</p>`}
+  </div>`;
+}
+
+// The message for one row: a refill request link when the patient has a
+// program and this user may create one, otherwise a plain reminder.
+async function refillDueMessage(r) {
+  const clinic = S.user.clinic || S.user.orgName || "";
+  const subject = r.kind === "followup" ? `Time for your follow-up${clinic ? ` — ${clinic}` : ""}` : `Time for your refill${clinic ? ` — ${clinic}` : ""}`;
+  const person = { name: r.patient_name, title: r.title };
+  if (r.kind === "refill" && canPrescribe()) {
+    try {
+      const link = await api("POST", `/api/patients/${r.patient_id}/refill-link`, {});
+      return { subject, text: refillLinkMessage(person, `${location.origin}/r/${link.token}`) };
+    } catch { /* fall through to the plain reminder */ }
+  }
+  const firstName = String(r.patient_name || "").trim().split(/\s+/)[0] || "there";
+  const ask = r.kind === "followup" ? "It's time for your follow-up." : "Looks like you're due for your next refill.";
+  return { subject, text: `Hi ${r.title ? r.title + " " : ""}${firstName},\n\n${ask} Please reply to this message and we'll arrange it for you.\n\n${signatureBlock(S.user)}` };
+}
+
+function wireRefillDue(rows) {
+  const more = document.getElementById("due-more");
+  if (more) more.addEventListener("click", () => {
+    view().querySelectorAll(".due-row[hidden]").forEach((el) => { el.hidden = false; });
+    more.parentNode.remove();
+  });
+  view().querySelectorAll("[data-due-wa]").forEach((b) => b.addEventListener("click", async () => {
+    // Opened before the link is fetched, or the browser treats it as a pop-up.
+    const win = window.open("", "_blank");
+    const r = rows[Number(b.dataset.dueWa)];
+    const { text } = await refillDueMessage(r);
+    win.location = waLink(r.mobile, text);
+  }));
+  view().querySelectorAll("[data-due-email]").forEach((b) => b.addEventListener("click", async () => {
+    const r = rows[Number(b.dataset.dueEmail)];
+    const { subject, text } = await refillDueMessage(r);
+    openEmail(r.email, subject, text);
+  }));
 }
 
 // ── messages inbox (every patient thread, most recent first) ─────
@@ -586,7 +663,7 @@ async function viewPatient(id) {
   let d;
   try { d = await api("GET", `/api/patients/${id}`); }
   catch (e) { view().innerHTML = `<div class="empty">${icon("alert", 34)}<div class="empty-title">${esc(e.message)}</div></div>`; return; }
-  const { patient: p, plans, doses, checkins, messages, refillRequests } = d;
+  const { patient: p, plans, doses, checkins, messages, refillRequests, visits } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
   // The patient's actual current weight — the latest logged weight (check-ins
@@ -601,7 +678,8 @@ async function viewPatient(id) {
   const wtChange = weights.length > 1 ? (weights[weights.length - 1].y - weights[0].y) : null;
   // The consultation record, followed by every refill since, so "Copy record"
   // carries the refills into the practice's EMR too.
-  const clinicalRecord = [activePlan && activePlan.clinical_suggestion, refillRecordText(p, plans, refillRequests)].filter(Boolean).join("\n\n");
+  const visitRecords = [...visits].reverse().map((v) => v.clinical_suggestion);
+  const clinicalRecord = [activePlan && activePlan.clinical_suggestion, ...visitRecords, refillRecordText(p, plans, refillRequests)].filter(Boolean).join("\n\n");
 
   view().innerHTML = `
   <a href="#/patients" class="btn btn-ghost btn-sm" style="margin-bottom:14px">${icon("back", 16)} All patients</a>
@@ -798,6 +876,24 @@ async function viewPatient(id) {
     if (S.detailTab === "guide") {
       injectGuideCss();
       const active = plans.filter((pl) => pl.status === "active");
+      // Nothing active and the latest visit prescribed nothing: their guide is
+      // their health plan.
+      if (!active.length && visits.length) {
+        box.innerHTML = `
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
+          <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
+          <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send guide link</button>
+        </div>
+        ${buildVisitGuide(visits[0], p, S.user.name)}`;
+        document.getElementById("btn-copytext").addEventListener("click", async () => {
+          await navigator.clipboard.writeText(buildVisitGuideText(visits[0], p, S.user.name));
+          toast("Guide text copied");
+        });
+        document.getElementById("btn-print").addEventListener("click", () => window.print());
+        document.getElementById("btn-wa").addEventListener("click", () => guideLinkModal({ ...p, noMedication: true }));
+        return;
+      }
       const guidePlans = active.length ? active : (plans[0] ? [plans[0]] : []);
       const primaryPl = guidePlans.find((pl) => pl.category === "glp1") || guidePlans[0];
       const activeId = S.guidePlanId && guidePlans.some((pl) => pl.id === S.guidePlanId) ? S.guidePlanId : (primaryPl && primaryPl.id);
@@ -948,6 +1044,11 @@ function checkinCard(c) {
 // the same tap-to-expand sections the doctor sees, and can be reopened until
 // it expires. Sending again reuses the same link, so the patient's earlier
 // message keeps working.
+function guideLinkSubject(patient) {
+  const clinic = S.user.clinic || S.user.orgName || "";
+  return `${patient.noMedication ? "Your personal health plan" : "Your personal treatment guide"}${clinic ? ` — ${clinic}` : ""}`;
+}
+
 function guideLinkMessage(patient, url) {
   const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
   const u = S.user;
@@ -958,6 +1059,23 @@ function guideLinkMessage(patient, url) {
     u.signature,
     u.clinic || u.orgName || "DarDoc Healthcare",
   ].filter(Boolean);
+  if (patient.noMedication) {
+    return [
+      "🩺 *PERSONAL HEALTH PLAN*",
+      "",
+      `Dear ${patient.title ? patient.title + " " : ""}${firstName},`,
+      "",
+      "Thank you for your visit. Your personal plan is ready, built around your goals.",
+      "It includes your daily protein and nutrition targets, how to build your plate, an example day of eating, and how medication could help if you need it later.",
+      "",
+      "Tap the link to open it:",
+      "",
+      url,
+      "",
+      "",
+      ...signature,
+    ].join("\n");
+  }
   return [
     "🩺 *PERSONAL TREATMENT GUIDE*",
     "",
@@ -980,7 +1098,7 @@ function guideLinkMessage(patient, url) {
 async function guideLinkModal(patient) {
   const scrim = modal(`
     <div class="modal-head"><h3>Send guide link</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
-    <p class="hint" style="margin:-6px 0 14px">A private link to <b>${esc(patient.name)}</b>'s guide. It opens like a web page on any phone or computer, with sections that expand on tap, and can be reopened anytime until it expires.</p>
+    <p class="hint" style="margin:-6px 0 14px">A private link to <b>${esc(patient.name)}</b>'s ${patient.noMedication ? "health plan" : "guide"}. It opens like a web page on any phone or computer, with sections that expand on tap, and can be reopened anytime until it expires.</p>
     <div id="gl-body"><div class="skel" style="height:190px"></div></div>`);
   const body = scrim.querySelector("#gl-body");
   let link;
@@ -999,6 +1117,7 @@ async function guideLinkModal(patient) {
     <p class="hint" id="gl-meta" style="margin-bottom:14px"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-accent" style="flex:1;min-width:180px" id="gl-wa" type="button">${icon("whatsapp", 18)} Send via WhatsApp</button>
+      <button class="btn btn-secondary" id="gl-email" type="button">${icon("mail", 18)} Email</button>
       <button class="btn btn-secondary" id="gl-copy" type="button">${icon("copy", 18)} Copy message</button>
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;flex-wrap:wrap">
@@ -1019,6 +1138,7 @@ async function guideLinkModal(patient) {
     if (!patient.mobile) return toast("This patient has no mobile number on file", "bad");
     window.open(waLink(patient.mobile, msg.value), "_blank");
   });
+  $("gl-email").addEventListener("click", () => openEmail(patient.email, guideLinkSubject(patient), msg.value));
   $("gl-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); });
   $("gl-copylink").addEventListener("click", async () => { await navigator.clipboard.writeText(urlOf(link)); toast("Link copied"); });
   $("gl-renew").addEventListener("click", async () => {
@@ -1084,6 +1204,7 @@ async function refillLinkModal(patient) {
     <p class="hint" id="rl-meta" style="margin-bottom:14px"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-accent" style="flex:1;min-width:180px" id="rl-wa" type="button">${icon("whatsapp", 18)} Send via WhatsApp</button>
+      <button class="btn btn-secondary" id="rl-email" type="button">${icon("mail", 18)} Email</button>
       <button class="btn btn-secondary" id="rl-copy" type="button">${icon("copy", 18)} Copy message</button>
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;flex-wrap:wrap">
@@ -1103,6 +1224,10 @@ async function refillLinkModal(patient) {
   $("rl-wa").addEventListener("click", () => {
     if (!patient.mobile) return toast("This patient has no mobile number on file", "bad");
     window.open(waLink(patient.mobile, msg.value), "_blank");
+  });
+  $("rl-email").addEventListener("click", () => {
+    const clinic = S.user.clinic || S.user.orgName || "";
+    openEmail(patient.email, `Time for your refill${clinic ? ` — ${clinic}` : ""}`, msg.value);
   });
   $("rl-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); });
   $("rl-copylink").addEventListener("click", async () => { await navigator.clipboard.writeText(urlOf(link)); toast("Link copied"); });
@@ -1210,10 +1335,15 @@ async function sharePinModal(p) {
       <div class="pin-display">${pin}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" style="flex:1" id="pin-wa">${icon("whatsapp", 18)} Send via WhatsApp</button>
+        <button class="btn btn-secondary" id="pin-email">${icon("mail", 18)} Email</button>
         <button class="btn btn-secondary" id="pin-copy">${icon("copy", 18)} Copy message</button>
       </div>
       <p class="hint" style="margin-top:10px">This PIN is shown once. Generating another one invalidates it.</p>`;
     scrim.querySelector("#pin-wa").addEventListener("click", () => window.open(waLink(p.mobile, waText), "_blank"));
+    scrim.querySelector("#pin-email").addEventListener("click", () => {
+      const clinic = S.user.clinic || S.user.orgName || "";
+      openEmail(p.email, `Your patient portal access${clinic ? ` — ${clinic}` : ""}`, waText);
+    });
     scrim.querySelector("#pin-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(waText); toast("Message copied"); });
   });
 }
@@ -1257,17 +1387,6 @@ function refillPlanPickerModal(patient, activePlans) {
   }));
 }
 
-// Next/previous rung on the medication's approved dose ladder, clamped at
-// the ends — "increase" at the top dose has nowhere higher to go, so it
-// just stays put and the doctor can still pick a dose manually.
-function stepDose(options, current, dir) {
-  if (!options || !options.length) return current;
-  const i = options.indexOf(current);
-  if (i === -1) return dir === "increase" ? options[0] : current;
-  const j = i + (dir === "increase" ? 1 : -1);
-  return options[Math.max(0, Math.min(options.length - 1, j))];
-}
-
 function doseActionLabel(action, requestedDose) {
   if (action === "increase") return "Increase dose";
   if (action === "decrease") return "Decrease dose";
@@ -1297,21 +1416,35 @@ function sideEffectsSummaryHTML(r) {
 // of a plain save). Either way it's logged to refill_requests, never treated
 // as a new consultation.
 function refillFormModal(patient, pl, reqRow) {
-  const isGlp1 = pl.category === "glp1";
+  injectGuideCss();
   const isPeptide = pl.category === "peptide";
-  const doseOptions = pl.doseOptions || [];
-  // "talk" carries no dose preference at all — leave the dose exactly where
-  // it is and let the doctor decide after they've actually spoken.
-  const suggestedDose = !reqRow ? pl.dose
-    : reqRow.dose_action === "increase" ? stepDose(doseOptions, pl.dose, "increase")
-    : reqRow.dose_action === "decrease" ? stepDose(doseOptions, pl.dose, "decrease")
-    : reqRow.dose_action === "custom" && reqRow.requested_dose ? reqRow.requested_dose
-    : pl.dose;
+  const ladder = pl.doseOptions || [];
+  const up = doseLadderStep(ladder, pl.dose, "up");
+  const down = doseLadderStep(ladder, pl.dose, "down");
+  const askedFor = reqRow && reqRow.dose_action;
+  const initial = (askedFor === "increase" && up) ? "increase" : (askedFor === "decrease" && down) ? "decrease" : askedFor === "custom" ? "custom" : "same";
+  const customDose = reqRow && reqRow.requested_dose ? reqRow.requested_dose : pl.dose;
   const followupDefault = (() => {
     const dt = new Date(); dt.setDate(dt.getDate() + (pl.followup_days || 28));
     return dt.toISOString().slice(0, 10);
   })();
   const askedAt = reqRow && (reqRow.created_at || reqRow.refill_requested_at);
+  const lastWeight = patient.current_weight_kg || patient.start_weight_kg;
+  const library = (cat) => S.templates.filter((t) => t.category === cat && (t.config.medication || t.name) !== pl.medication);
+  const medOptions = (cat) => library(cat).map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  const customBody = ladder.length
+    ? `<label class="rr-sr" for="rf-dose">Dose</label><select class="input" id="rf-dose">${ladder.map((dd) => `<option ${dd === customDose ? "selected" : ""}>${esc(dd)}</option>`).join("")}</select>`
+    : `<label class="rr-sr" for="rf-dose">Dose</label><input class="input" id="rf-dose" value="${esc(customDose || "")}">`;
+  const switchBody = `
+    <div class="field" style="margin-bottom:10px"><label for="rf-newmed">New medication</label>
+      <select class="input" id="rf-newmed">
+        <option value="">Choose a medication…</option>
+        <optgroup label="GLP-1 / weight loss">${medOptions("glp1")}</optgroup>
+        <optgroup label="Peptides">${medOptions("peptide")}</optgroup>
+      </select>
+    </div>
+    <div id="rf-newmed-dose"></div>
+    <p class="hint" style="margin:0">The patient's guide, instructions and warnings switch to the new medication when you save.</p>`;
   const scrim = modal(`
     <div class="modal-head"><h3>${reqRow ? "Review refill request" : "Refill"} — ${esc(pl.medication)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
     ${reqRow ? `
@@ -1324,27 +1457,88 @@ function refillFormModal(patient, pl, reqRow) {
       ${reqRow.dose_action ? `<div style="font-size:13.5px;margin-bottom:4px"><b>Asked for:</b> ${esc(doseActionLabel(reqRow.dose_action, reqRow.requested_dose))}</div>` : ""}
       ${reqRow.notes ? `<div style="font-size:13.5px"><b>Notes:</b> ${esc(reqRow.notes)}</div>` : ""}
     </div>
-    ${reqRow.dose_action === "talk" ? `<p class="hint" style="margin:-6px 0 14px">They'd like to talk before any dose change — the dose below is left unchanged until you do.</p>` : ""}` : `
-    <div class="field"><label for="rf-weight">Weight today (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" inputmode="decimal" placeholder="${esc(patient.current_weight_kg || patient.start_weight_kg ? `Last recorded: ${patient.current_weight_kg || patient.start_weight_kg} kg` : "Optional")}"></div>
+    ${reqRow.dose_action === "talk" ? `<p class="hint" style="margin:-6px 0 14px">They'd like to talk before any dose change, so the dose is left unchanged until you do.</p>` : ""}` : `
+    <div class="field"><label for="rf-weight">Weight today (kg)</label><input class="input" id="rf-weight" type="number" step="0.1" inputmode="decimal" placeholder="${esc(lastWeight ? `Last recorded: ${lastWeight} kg` : "Optional")}"></div>
     <div class="field"><label for="rf-side">Side effects since last visit</label><textarea class="input" id="rf-side" rows="2" placeholder="Optional"></textarea></div>
     ${isPeptide ? `<div class="field"><label for="rf-results">Results felt</label><textarea class="input" id="rf-results" rows="2" placeholder="Optional"></textarea></div>` : ""}
     `}
     <div class="field">
-      <label for="rf-dose">New dose</label>
-      ${isGlp1 && doseOptions.length
-        ? `<select class="input" id="rf-dose">${doseOptions.map((dd) => `<option ${dd === suggestedDose ? "selected" : ""}>${esc(dd)}</option>`).join("")}</select>`
-        : `<input class="input" id="rf-dose" value="${esc(suggestedDose || pl.dose || "")}">`}
+      <label id="rf-next-legend">Next step</label>
+      <fieldset class="rr-group" aria-labelledby="rf-next-legend">
+        ${rrOption("rf-action", "same", { title: "Keep current dose", sub: pl.dose ? `Stay on ${pl.dose}` : "" }, "", initial === "same")}
+        ${up ? rrOption("rf-action", "increase", { title: "Increase dose", sub: `To ${up}` }, "", initial === "increase") : ""}
+        ${down ? rrOption("rf-action", "decrease", { title: "Lower dose", sub: `To ${down}` }, "", initial === "decrease") : ""}
+        ${rrOption("rf-action", "custom", { title: "Choose a specific dose" }, customBody, initial === "custom")}
+        ${rrOption("rf-action", "switch", { title: "Change medication", sub: "Switch to a different medication" }, switchBody, false)}
+      </fieldset>
     </div>
     <div class="field"><label for="rf-qty">Quantity dispensed</label><input class="input" id="rf-qty" type="number" min="1" value="${esc(pl.quantity || 1)}"></div>
     <div class="field"><label for="rf-followup">Next follow-up</label><input class="input" id="rf-followup" type="date" value="${followupDefault}"></div>
-    <div class="field"><label for="rf-msg">Message to patient (optional)</label><input class="input" id="rf-msg" placeholder="e.g. Great progress — keep going at this dose"></div>
+    <div class="field"><label for="rf-msg">Message to patient (optional)</label><input class="input" id="rf-msg" placeholder="e.g. Great progress, keep going at this dose"></div>
+    <p class="err-text" id="rf-err" hidden role="alert"></p>
     <div style="display:flex;gap:8px;margin-top:4px">
       ${reqRow ? `<button class="btn btn-ghost btn-block" id="rf-decline" type="button">Decline</button>` : ""}
       <button class="btn btn-primary btn-block" id="rf-save" type="button">${reqRow ? "Approve & apply" : "Save refill"}</button>
     </div>`);
+  wireRefillRequestFields(scrim);
 
+  // The medication being switched to, in the same shape the consultation
+  // builds, so its dose, schedule, instructions and warnings come out the same.
+  let next = null;
+  const newmedDose = scrim.querySelector("#rf-newmed-dose");
+  const paintNewDose = () => {
+    if (!next) { newmedDose.innerHTML = ""; return; }
+    if (next.category === "glp1") {
+      const doses = next.template.config.doses;
+      newmedDose.innerHTML = `<div class="field" style="margin-bottom:10px"><label for="rf-newdose">Starting dose</label><select class="input" id="rf-newdose">${doses.map((dd) => `<option ${dd === next.dose ? "selected" : ""}>${esc(dd)}</option>`).join("")}</select></div>`;
+      newmedDose.querySelector("#rf-newdose").addEventListener("change", (e) => {
+        next.dose = e.target.value;
+        next.phases = suggestTitration(doses, next.dose, next.template.config.titration);
+      });
+      return;
+    }
+    const opts = peptideProtocolOptions(next.medication, next.template);
+    newmedDose.innerHTML = opts.length ? `<div class="field" style="margin-bottom:10px"><label for="rf-newproto">Protocol</label><select class="input" id="rf-newproto">${opts.map((o) => `<option value="${esc(o.key)}" ${o.key === next.protocolKey ? "selected" : ""}>${esc(o.protocol.protocolType)}${o.protocol.doseVolume || o.protocol.doseAmount ? ` — ${esc(o.protocol.doseVolume || o.protocol.doseAmount)}` : ""}</option>`).join("")}</select></div>` : "";
+    const sel = newmedDose.querySelector("#rf-newproto");
+    if (sel) sel.addEventListener("change", () => {
+      const opt = opts.find((o) => o.key === sel.value);
+      next.protocolKey = opt.key; next.protocol = opt.protocol; next.protocolBase = opt.protocol;
+      applyProtocolTo(next);
+    });
+  };
+  scrim.querySelector("#rf-newmed").addEventListener("change", (e) => {
+    const t = S.templates.find((x) => x.id === Number(e.target.value));
+    if (!t) { next = null; paintNewDose(); return; }
+    next = { ...freshDraft(t.category), template: t, medication: t.config.medication || t.name, quantity: Number(scrim.querySelector("#rf-qty").value) || 1 };
+    if (t.category === "glp1") {
+      next.route = t.config.route; next.frequency = t.config.frequency; next.halfLifeHours = t.config.halfLifeHours;
+      next.dose = t.config.doses[0];
+      next.phases = suggestTitration(t.config.doses, next.dose, t.config.titration);
+    } else {
+      const first = peptideProtocolOptions(next.medication, t)[0];
+      next.protocolKey = first ? first.key : null;
+      next.protocol = first ? first.protocol : (t.config.protocols || [])[0];
+      next.protocolBase = next.protocol;
+      if (next.protocol) applyProtocolTo(next);
+    }
+    paintNewDose();
+  });
+
+  const afterSave = () => { if (location.hash.startsWith("#/patient/")) viewPatient(patient.id); else viewDashboard(); };
+  const errBox = scrim.querySelector("#rf-err");
   scrim.querySelector("#rf-save").addEventListener("click", async () => {
-    const dose = scrim.querySelector("#rf-dose").value.trim();
+    errBox.hidden = true;
+    const action = scrim.querySelector('input[name="rf-action"]:checked').value;
+    const dose = action === "increase" ? up : action === "decrease" ? down : action === "custom" ? scrim.querySelector("#rf-dose").value.trim() : action === "switch" ? (next && next.dose) : pl.dose;
+    if (action === "switch" && !next) { errBox.textContent = "Choose the medication to change to."; errBox.hidden = false; return; }
+    const medicationChange = action === "switch" ? {
+      medication: next.medication, category: next.category, route: next.route, frequency: next.frequency, halfLifeHours: next.halfLifeHours,
+      title: `${next.medication} — ${next.category === "glp1" ? "Weight Loss Program" : "Peptide Therapy"}`,
+      phases: (next.phases || []).filter((ph) => ph.label || ph.dose),
+      instructions: defaultInstructionsFor(next), warnings: defaultWarningsFor(next),
+      // Moving onto a GLP-1 from something else brings the nutrition plan with it.
+      diet: next.category === "glp1" && pl.category !== "glp1" ? defaultDietForPatient(patient) : null,
+    } : null;
     const quantity = Number(scrim.querySelector("#rf-qty").value) || 1;
     const nextFollowup = scrim.querySelector("#rf-followup").value || null;
     const message = scrim.querySelector("#rf-msg").value.trim();
@@ -1356,14 +1550,14 @@ function refillFormModal(patient, pl, reqRow) {
     const resultsFelt = scrim.querySelector("#rf-results") ? scrim.querySelector("#rf-results").value.trim() : "";
     try {
       if (reqRow) {
-        await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "approved", dose, quantity, nextFollowup, message });
+        await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "approved", dose, quantity, nextFollowup, message, medicationChange });
       } else {
-        await api("POST", `/api/plans/${pl.id}/refill`, { dose, quantity, nextFollowup, weightKg, sideEffects, resultsFelt, message });
+        await api("POST", `/api/plans/${pl.id}/refill`, { dose, quantity, nextFollowup, weightKg, sideEffects, resultsFelt, message, medicationChange });
       }
       scrim.remove();
-      toast("Refill saved");
-      if (location.hash.startsWith("#/patient/")) viewPatient(patient.id); else viewDashboard();
-    } catch (ex) { toast(ex.message || "Could not save", "bad"); }
+      toast(medicationChange ? `Refill saved, medication changed to ${medicationChange.medication}` : "Refill saved");
+      afterSave();
+    } catch (ex) { errBox.textContent = ex.message || "Could not save"; errBox.hidden = false; }
   });
   const declineBtn = scrim.querySelector("#rf-decline");
   if (declineBtn) declineBtn.addEventListener("click", async () => {
@@ -1372,8 +1566,8 @@ function refillFormModal(patient, pl, reqRow) {
       await api("POST", `/api/refill-requests/${reqRow.id || reqRow.request_id}/decide`, { decision: "declined", message });
       scrim.remove();
       toast("Request declined");
-      if (location.hash.startsWith("#/patient/")) viewPatient(patient.id); else viewDashboard();
-    } catch (ex) { toast(ex.message || "Could not decline", "bad"); }
+      afterSave();
+    } catch (ex) { errBox.textContent = ex.message || "Could not decline"; errBox.hidden = false; }
   });
 }
 
@@ -1385,6 +1579,12 @@ function refillHistoryCardHTML(plans, refillRequests) {
   const pending = refillRequests.filter((r) => r.status === "pending");
   const resolved = refillRequests.filter((r) => r.status !== "pending");
   const planName = (id) => { const pl = plans.find((x) => x.id === id); return pl ? pl.medication : "Program"; };
+  const heading = (r) => {
+    const from = r.prior_medication || planName(r.plan_id);
+    const to = r.decided_medication || from;
+    if (to !== from) return `<b>${esc(from)}</b> ${esc(r.prior_dose || "")} → <b>${esc(to)}</b> ${esc(r.decided_dose || "")} <span class="badge badge-amber">medication changed</span>`;
+    return `<b>${esc(from)}</b> ${r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose ? `${esc(r.prior_dose)} → ${esc(r.decided_dose)}` : esc(r.decided_dose || r.prior_dose || "")}`;
+  };
   return `
   <div class="card card-pad">
     <div class="card-title" style="justify-content:space-between">
@@ -1395,7 +1595,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
       <div class="alert-item">
         <div class="alert-ico" style="background:var(--amber-soft);color:var(--amber)">${icon("syringe", 18)}</div>
         <div class="alert-body">
-          <div class="alert-name">${esc(planName(r.plan_id))}${r.prior_dose ? ` · ${esc(r.prior_dose)}` : ""}</div>
+          <div class="alert-name">${esc(r.prior_medication || planName(r.plan_id))}${r.prior_dose ? ` · ${esc(r.prior_dose)}` : ""}</div>
           <div class="alert-meta">Patient request · ${esc(fmtDate(r.created_at))} · ${timeAgo(r.created_at)}</div>
           ${refillDetailsHTML(r)}
         </div>
@@ -1405,8 +1605,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
       <div class="timeline-item">
         <div class="tl-ico" style="background:var(--brand-soft);color:var(--brand)">${icon("syringe", 15)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13.5px"><b>${esc(planName(r.plan_id))}</b>
-            ${r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose ? `${esc(r.prior_dose)} → ${esc(r.decided_dose)}` : esc(r.decided_dose || r.prior_dose || "")}
+          <div style="font-size:13.5px">${heading(r)}
             ${r.status === "approved" ? `<span class="badge badge-green">refilled</span>` : `<span class="badge badge-gray">declined</span>`}</div>
           <div style="font-size:12.5px;color:var(--muted)">
             ${r.source === "patient" ? "Patient request" : "Logged in clinic"} · ${esc(fmtDate(r.decided_at || r.created_at))}${r.decided_by_name ? ` · by ${esc(r.decided_by_name)}` : ""}
@@ -1440,15 +1639,17 @@ function refillDetailsHTML(r) {
 // One line for the patient summary: the most recent refill at a glance.
 function latestRefillSummaryHTML(r, plans) {
   const pl = plans.find((x) => x.id === r.plan_id);
+  const from = r.prior_medication || (pl ? pl.medication : "Program");
+  const to = r.status === "approved" ? (r.decided_medication || from) : from;
   const dose = r.status === "approved" && r.decided_dose
-    ? (r.prior_dose && r.prior_dose !== r.decided_dose ? `${r.prior_dose} → ${r.decided_dose}` : r.decided_dose)
+    ? (to !== from ? `${r.prior_dose || ""} → ${to} ${r.decided_dose}` : r.prior_dose && r.prior_dose !== r.decided_dose ? `${r.prior_dose} → ${r.decided_dose}` : r.decided_dose)
     : (r.prior_dose || "");
   const status = r.status === "approved" ? `<span class="badge badge-green">refilled</span>`
     : r.status === "declined" ? `<span class="badge badge-gray">declined</span>`
     : `<span class="badge badge-amber">awaiting review</span>`;
   const bits = [
     esc(fmtDate(r.decided_at || r.created_at)),
-    esc(`${pl ? pl.medication : "Program"}${dose ? " " + dose : ""}`),
+    esc(`${from}${dose ? " " + dose : ""}`),
     r.weight_kg ? `${esc(r.weight_kg)} kg` : "",
     r.has_side_effects === "yes" ? `side effects ${severityBadgeHTML(r.side_effect_severity)}` : r.has_side_effects === "no" ? "no side effects" : "",
   ].filter(Boolean);
@@ -1471,7 +1672,7 @@ function refillRecordText(p, plans, refillRequests) {
       `REFILL UPDATE — ${fmtDate(r.decided_at || r.created_at)}`,
       "",
       `Patient: ${p.name} · Patient no. ${p.id} · Mobile +${p.mobile}`,
-      `Medication: ${pl.medication || "—"}`,
+      `Medication: ${r.prior_medication || pl.medication || "—"}`,
       `Source: ${r.source === "patient" ? "Patient refill request" : "Recorded in clinic"}`,
     ];
     if (r.weight_kg) lines.push(`Weight: ${r.weight_kg} kg${bmi ? ` (BMI ${bmi})` : ""}`);
@@ -1482,8 +1683,10 @@ function refillRecordText(p, plans, refillRequests) {
     if (r.dose_action) lines.push(`Patient preference: ${doseActionLabel(r.dose_action, r.requested_dose)}`);
     if (r.notes) lines.push(`Patient message: ${r.notes}`);
     if (r.status === "approved") {
-      const change = r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose
-        ? `dose changed ${r.prior_dose} → ${r.decided_dose}` : `dose continued at ${r.decided_dose || r.prior_dose || "—"}`;
+      const switched = r.prior_medication && r.decided_medication && r.prior_medication !== r.decided_medication;
+      const change = switched ? `medication changed from ${r.prior_medication} ${r.prior_dose || ""} to ${r.decided_medication} ${r.decided_dose || ""}`.replace(/ +/g, " ").trim()
+        : r.prior_dose && r.decided_dose && r.prior_dose !== r.decided_dose
+          ? `dose changed ${r.prior_dose} → ${r.decided_dose}` : `dose continued at ${r.decided_dose || r.prior_dose || "—"}`;
       lines.push(`Outcome: Refill approved — ${change}${r.quantity ? `, quantity ${r.quantity}` : ""}`);
     } else if (r.status === "declined") lines.push("Outcome: Request declined");
     else lines.push("Outcome: Awaiting doctor review");
@@ -1691,6 +1894,22 @@ function scheduleAutosave() {
 }
 
 // Amber count on the Drafts nav link, so unfinished files are never out of sight.
+// Amber count on Dashboard: how many patients are up for refill, visible from
+// any page.
+async function refreshRefillBadge() {
+  let rows;
+  try { rows = await api("GET", "/api/refills/due"); } catch { return; }
+  paintRefillBadge(rows.length);
+}
+function paintRefillBadge(count) {
+  document.querySelectorAll('a[href="#/dashboard"]').forEach((a) => {
+    let b = a.querySelector(".badge");
+    if (!count) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement("span"); b.className = "badge badge-amber"; b.style.marginLeft = "6px"; a.appendChild(b); }
+    b.textContent = count;
+  });
+}
+
 async function refreshDraftBadge() {
   if (!S.user || !canPrescribe()) return;
   let rows;
@@ -2886,7 +3105,7 @@ function wizStepProgram() {
     ${w.noMedication && !w.cart.length ? `
     <div class="g-callout g-teal" style="margin-top:14px">
       ${icon("info", 17)}
-      <div style="flex:1">No medication will be prescribed this visit — you can still record lab tests, a clinical note, and a follow-up date. <button type="button" class="linklike" id="wz-no-med-cancel">Add a medication instead</button></div>
+      <div style="flex:1">No medication will be prescribed this visit. You'll still get the EMR note, and the patient still gets a guide with their nutrition plan and how medication could help. <button type="button" class="linklike" id="wz-no-med-cancel">Add a medication instead</button></div>
     </div>` : ""}
     ${cartHTML()}
     <p class="err-text" id="wz-err" hidden role="alert"></p>
@@ -3097,7 +3316,7 @@ function wizStepProgram() {
     if (!w.cart.length && !w.noMedication) { err.textContent = "Add at least one program before continuing, or choose to continue without a medication."; err.hidden = false; return; }
     w.step = 2;
     prefillFromIntake();
-    if (!Object.keys(w.diet).length && w.cart.some((c) => c.category === "glp1")) w.diet = defaultDiet();
+    if (!Object.keys(w.diet).length && (w.noMedication || w.cart.some((c) => c.category === "glp1"))) w.diet = defaultDiet();
     paintWizard();
   });
 }
@@ -3433,13 +3652,182 @@ function defaultWarningsFor(item) {
   return "Contact your doctor if you experience any unexpected or severe symptoms.";
 }
 
-function defaultDiet() {
-  const m = wizMetrics();
-  const diet = {};
+// Calories are set for weight loss when that's the aim: on a GLP-1, when weight
+// is a stated goal, or when BMI is above the healthy range. Otherwise they sit
+// at the level that maintains the patient's weight.
+function dietFromMetrics(m, weightLoss) {
+  const diet = { water: "2–3 L daily", plate: { ...DIET_PLATE_DEFAULT } };
   if (m.proteinMin) { diet.proteinMin = m.proteinMin; diet.proteinMax = m.proteinMax; }
-  if (m.target) diet.calories = m.target;
-  diet.water = "2–3 L daily";
+  const calories = weightLoss || Number(m.bmi) >= 25 ? m.target : m.tdee;
+  if (calories) diet.calories = calories;
+  diet.proteinTarget = dietProteinTarget(diet) || undefined;
+  diet.meals = defaultDietMeals(diet.proteinTarget);
   return diet;
+}
+
+const isWeightGoal = (goals) => (S.presets.weightLossGoals || []).some((g) => (goals || []).includes(g));
+
+function defaultDiet() {
+  const w = S.wizard;
+  return dietFromMetrics(wizMetrics(), w.cart.some((c) => c.category === "glp1") || isWeightGoal(w.patient.intake.health_goals));
+}
+
+function defaultDietForPatient(p) {
+  const m = computeMetrics({
+    heightCm: p.height_cm, weightKg: p.current_weight_kg || p.start_weight_kg, age: p.age, gender: p.gender, activityLevel: p.activity_level,
+  }, S.presets.activityLevels);
+  return dietFromMetrics(m, true);
+}
+
+// The wizard's plan follows the patient's details until the doctor edits it, so
+// going back to correct a weight updates the protein target and the example day.
+function syncWizardDiet() {
+  const w = S.wizard;
+  const fresh = defaultDiet();
+  const d = w.diet;
+  if (!d.rangeEdited) { d.proteinMin = fresh.proteinMin; d.proteinMax = fresh.proteinMax; }
+  if (!d.caloriesEdited) d.calories = fresh.calories;
+  if (!d.water) d.water = fresh.water;
+  if (!d.plate) d.plate = fresh.plate;
+  if (!d.targetEdited) d.proteinTarget = dietProteinTarget({ proteinMin: d.proteinMin, proteinMax: d.proteinMax }) || undefined;
+  if (!d.mealsEdited) d.meals = defaultDietMeals(d.proteinTarget);
+}
+
+// The doctor's review of the plan before it reaches the patient. Everything the
+// guide shows from it can be changed here, and the guide preview follows.
+function dietEditorHTML(diet, patient) {
+  const d = dietPlanFor(diet);
+  const conditions = String(patient.chronicIllnesses || patient.chronic_illnesses || "");
+  const allergies = String(patient.allergies || "").trim();
+  const inp = (id, label, value, attrs) => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" value="${esc(value ?? "")}" ${attrs || ""}></div>`;
+  return `
+  <div class="card" style="background:var(--bg);margin-bottom:14px">
+    <div class="card-title" style="padding:16px 16px 0;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span style="display:flex;align-items:center;gap:10px">${icon("utensils", 18)} Nutrition plan for the patient's guide</span>
+      <button class="btn btn-ghost btn-sm" id="de-rebuild" type="button">${icon("activity", 15)} Rebuild example day</button>
+    </div>
+    <p class="hint" style="margin:8px 16px 0">Worked out from this patient's weight. Review it and change anything you like; the patient sees what you publish.</p>
+    ${/kidney|renal|ckd|nephro/i.test(conditions) ? `<div class="g-callout g-amber" style="margin:10px 16px 0">${icon("alert", 17)}<div>Kidney disease is on file. Please check this protein target is safe for this patient.</div></div>` : ""}
+    ${allergies && !/^(none|no known)/i.test(allergies) ? `<div class="g-callout g-amber" style="margin:10px 16px 0">${icon("alert", 17)}<div>Allergies on file: ${esc(allergies)}. Please check the example day avoids them.</div></div>` : ""}
+    <div class="form-grid" style="padding:12px 16px 0">
+      ${inp("de-target", "Daily protein target (g)", d.proteinTarget, 'type="number" min="0"')}
+      ${inp("de-cal", "Calorie target (kcal/day)", d.calories, 'type="number" min="0"')}
+      <div class="field"><label>Protein range (g/day)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="input" style="flex:1;min-width:70px" id="de-pmin" type="number" value="${esc(d.proteinMin ?? "")}" aria-label="Protein minimum"> –
+          <input class="input" style="flex:1;min-width:70px" id="de-pmax" type="number" value="${esc(d.proteinMax ?? "")}" aria-label="Protein maximum">
+        </div>
+      </div>
+      ${inp("de-water", "Water", d.water)}
+    </div>
+    <div style="padding:0 16px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Plate portions</div></div>
+    <div class="de-plate" style="padding:0 16px">
+      ${inp("de-p", "Protein", d.plate.protein)}
+      ${inp("de-f", "Fibre", d.plate.fibre)}
+      ${inp("de-c", "Carbs", d.plate.carbs)}
+    </div>
+    <div style="padding:0 16px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Example day</div>
+      ${d.meals.map((m) => `
+        <div class="de-meal">
+          <div class="de-meal-head"><label for="de-items-${m.key}">${esc(m.name)}</label>
+            <span class="de-meal-g"><input class="input" id="de-g-${m.key}" type="number" min="0" value="${esc(m.proteinG ?? "")}" aria-label="${esc(m.name)} protein in grams"> g protein</span>
+          </div>
+          <textarea class="input" id="de-items-${m.key}" rows="2">${esc(m.items)}</textarea>
+        </div>`).join("")}
+    </div>
+    <div class="field" style="padding:0 16px 16px;margin:0"><label for="de-note">Note for the patient (optional)</label><textarea class="input" id="de-note" rows="2" placeholder="Anything specific to this patient, e.g. vegetarian swaps">${esc(d.note || "")}</textarea></div>
+  </div>`;
+}
+
+function wireDietEditor(root, diet) {
+  const el = (id) => root.querySelector("#" + id);
+  const num = (id) => Number(el(id).value) || undefined;
+  const paintMeals = () => diet.meals.forEach((m) => {
+    el(`de-g-${m.key}`).value = m.proteinG ?? "";
+    el(`de-items-${m.key}`).value = m.items;
+  });
+  const rebuild = () => { diet.meals = defaultDietMeals(dietProteinTarget(diet)); diet.mealsEdited = false; paintMeals(); };
+  const onRange = () => {
+    diet.proteinMin = num("de-pmin"); diet.proteinMax = num("de-pmax"); diet.rangeEdited = true;
+    if (diet.targetEdited) return;
+    diet.proteinTarget = dietProteinTarget({ proteinMin: diet.proteinMin, proteinMax: diet.proteinMax }) || undefined;
+    el("de-target").value = diet.proteinTarget ?? "";
+    if (!diet.mealsEdited) rebuild();
+  };
+  el("de-pmin").addEventListener("input", onRange);
+  el("de-pmax").addEventListener("input", onRange);
+  el("de-target").addEventListener("input", () => {
+    diet.proteinTarget = num("de-target"); diet.targetEdited = !!diet.proteinTarget;
+    if (!diet.mealsEdited) rebuild();
+  });
+  el("de-cal").addEventListener("input", () => { diet.calories = num("de-cal"); diet.caloriesEdited = true; });
+  el("de-water").addEventListener("input", () => { diet.water = el("de-water").value; });
+  [["de-p", "protein"], ["de-f", "fibre"], ["de-c", "carbs"]].forEach(([id, key]) => el(id).addEventListener("input", () => { diet.plate[key] = el(id).value; }));
+  el("de-note").addEventListener("input", () => { diet.note = el("de-note").value; });
+  // Looked up on each edit, because rebuilding replaces the meal objects.
+  const meal = (key) => diet.meals.find((x) => x.key === key);
+  diet.meals.forEach(({ key }) => {
+    el(`de-g-${key}`).addEventListener("input", () => { meal(key).proteinG = num(`de-g-${key}`) ?? null; diet.mealsEdited = true; });
+    el(`de-items-${key}`).addEventListener("input", () => { meal(key).items = el(`de-items-${key}`).value; diet.mealsEdited = true; });
+  });
+  el("de-rebuild").addEventListener("click", () => {
+    if (diet.mealsEdited && !confirm("Replace your edits to the example day with a fresh one built from the protein target?")) return;
+    rebuild();
+  });
+}
+
+// Shown in a guide when nothing was prescribed. Written for the patient's own
+// goals; the doctor reviews and edits it before publishing.
+const MEDICATION_WHY = {
+  "Weight loss": "Diet and activity are the foundation of weight loss, but the body pushes back: as weight falls, hunger rises and metabolism slows, which is why weight so often returns. GLP-1 medications act on the appetite signals between your gut and brain, helping you feel full sooner and think about food less, so a plan like this one is easier to keep up. In clinical trials, people using them alongside diet and activity lost significantly more weight than with diet and activity alone.",
+  "Improve metabolism & reduce belly fat": "Belly fat and insulin resistance are driven by hormones as well as calories. GLP-1 medications improve blood sugar control and appetite regulation, and can help reduce fat around the waist when used with a healthy diet and regular activity.",
+  "Healthy aging & longevity": "Energy, recovery and cellular repair naturally decline with age. Some peptide therapies are used to support these processes alongside good sleep, nutrition and exercise.",
+  "Build muscle & recover better": "Building muscle depends on training, protein and recovery. Some peptide therapies are used to support growth hormone signalling and tissue repair, which may help you recover between sessions.",
+  "Heal injuries & reduce pain": "Recovery depends on rest, rehabilitation and good nutrition. Some peptide therapies are used to support tissue repair and may help alongside these.",
+  "Improve sleep & reset body clock": "Good sleep habits come first. When they aren't enough, some peptide therapies are used to support the body's natural sleep rhythms.",
+  "Cognitive function & mood enhancement": "Sleep, stress and nutrition all affect focus and mood. Some peptide therapies are used to support focus, memory and resilience to stress alongside these.",
+  "Sexual health": "Sexual health is affected by hormones, blood flow and overall health. Once any underlying causes have been checked, some treatments can help support desire and function.",
+  "Immune function & inflammation": "Nutrition, sleep and activity shape how the immune system works. Some peptide therapies are used to help regulate immune activity and inflammation alongside these.",
+  "Gut health": "Diet is the first step for gut health. Some peptide therapies are used to support the repair of the gut lining and calm inflammation alongside it.",
+  "Skin & hair": "Protein, hydration and sun protection all matter for skin and hair. Some peptide therapies are used to support collagen and hair follicle health alongside these.",
+};
+
+function medicationWhyDefault(goals) {
+  const known = (goals || []).filter((g) => MEDICATION_WHY[g]);
+  const closing = "Medication isn't needed by everyone and isn't right for everyone. If your progress stalls, or you'd like to explore this, speak to your doctor, who can check whether it's safe and suitable for you.";
+  if (!known.length) return `Healthy eating and activity come first. When they aren't enough on their own, medication can add to them.\n\n${closing}`;
+  const options = (g) => ((S.presets.healthGoalPeptides || {})[g] || []).filter((x) => x.priority === "Primary").map((x) => x.name);
+  const parts = known.map((g) => {
+    const names = options(g);
+    return `**${g}**\n${MEDICATION_WHY[g]}${names.length ? `\nOptions your doctor may discuss: ${names.join(", ")}.` : ""}`;
+  });
+  return `${parts.join("\n\n")}\n\n${closing}`;
+}
+
+// What the record and the guide preview need for a visit with no medication.
+function wizVisitDraft(extra) {
+  const w = S.wizard;
+  return {
+    diet: w.diet, goals: Array.isArray(w.patient.intake.health_goals) ? w.patient.intake.health_goals.filter((g) => g !== "Other") : [],
+    medicationWhy: w.medicationWhy || "", advice: w.advice || "", ...extra,
+  };
+}
+
+// The arguments for the clinical record: the metrics reflect whatever the doctor
+// settled on in the nutrition plan, so the record and the guide always agree.
+function wizEmrArgs(labs, supps) {
+  const w = S.wizard;
+  const m = { ...wizMetrics() };
+  if (w.diet.calories) m.target = w.diet.calories;
+  if (w.diet.proteinMin) { m.proteinMin = w.diet.proteinMin; m.proteinMax = w.diet.proteinMax; }
+  if (w.diet.proteinTarget) m.proteinTarget = w.diet.proteinTarget;
+  return [
+    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
+      age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
+      chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
+      intake: w.patient.intake, noMedication: !w.cart.length && w.noMedication },
+    w.cart, m, w.clinicalNote, w.followupDays, labs, supps,
+  ];
 }
 
 // Compose a free-text summary of a multiselect intake answer (options + other + notes).
@@ -3554,7 +3942,8 @@ function intakeNotesText(intake) {
 }
 
 function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDays, labTests, suppList) {
-  if (!items.length || !patient.name) return "";
+  const noMed = !items.length && patient.noMedication;
+  if (!patient.name || (!items.length && !noMed)) return "";
   const m = metrics || {};
   const intake = patient.intake || {};
   const salutation = patient.title || (patient.gender === "Male" ? "Mr" : patient.gender === "Female" ? "Ms" : "");
@@ -3601,19 +3990,21 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
   p1 += conditions === "None reported" ? " and no significant chronic illnesses." : ` and a history of ${conditions}.`;
   if (hasGlp1) p1 += prevGlp1 ? " There is a prior history of GLP-1/peptide medication use." : " There is no prior history of GLP-1/peptide medication use.";
   p1 += noAllergies ? ` ${Pronoun} reports no known drug allergies.` : ` Allergies: ${allergyText}.`;
-  if (others.length) p1 += ` Cancer/tumor history: ${cancerHistory.toLowerCase()}.`;
-  if (others.length && goals.length) p1 += ` Stated health goals include ${goals.join(", ").toLowerCase()}.`;
-  p1 += others.length && !hasGlp1
-    ? " Following clinical review, a personalised peptide therapy plan was formulated based on presentation, goals, and safety profile. There are no identified contraindications to the prescribed regimen."
-    : " There are no identified contraindications to GLP-1 receptor agonist therapy.";
+  if (others.length || noMed) p1 += ` Cancer/tumor history: ${cancerHistory.toLowerCase()}.`;
+  if ((others.length || noMed) && goals.length) p1 += ` Stated health goals include ${goals.join(", ").toLowerCase()}.`;
+  p1 += noMed
+    ? " Following clinical review, no medication was prescribed at this visit."
+    : others.length && !hasGlp1
+      ? " Following clinical review, a personalised peptide therapy plan was formulated based on presentation, goals, and safety profile. There are no identified contraindications to the prescribed regimen."
+      : " There are no identified contraindications to GLP-1 receptor agonist therapy.";
 
   const paras = [p1];
 
-  if (hasGlp1 && (m.target || m.proteinMin)) {
+  if ((hasGlp1 || noMed) && (m.target || m.proteinMin)) {
     const bits = [];
     if (m.target) bits.push(`a daily caloric intake target of ≤${m.target} kcal/day was recommended`);
-    if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day was set`);
-    paras.push(`Based on the current assessment, ${bits.join(", and ")}. Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed.`);
+    if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day${m.proteinTarget ? ` (target ${m.proteinTarget} g/day)` : ""} was set`);
+    paras.push(`Based on the current assessment, ${bits.join(", and ")}. A personalised nutrition plan was provided, with plate portions and an example day of eating. ${noMed ? "Lifestyle modification, physical activity, treatment goals, and how medication could help if needed were discussed." : "Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed."}`);
   }
 
   if (others.length) {
@@ -3628,10 +4019,14 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
 
   // ── MEDICATION(S) PRESCRIBED ──
   const medHeader = items.length > 1 ? "MEDICATIONS PRESCRIBED" : "MEDICATION PRESCRIBED";
-  const medLines = items.length === 1
-    ? [emrMedLine(items[0]) + emrMedExtra(items[0], goals)]
-    : items.map((it, i) => `${i + 1}. ${emrMedLine(it)}${emrMedExtra(it, goals)}`);
-  const counsel = others.length
+  const medLines = noMed
+    ? ["None. No medication was prescribed at this visit."]
+    : items.length === 1
+      ? [emrMedLine(items[0]) + emrMedExtra(items[0], goals)]
+      : items.map((it, i) => `${i + 1}. ${emrMedLine(it)}${emrMedExtra(it, goals)}`);
+  const counsel = noMed
+    ? "The patient was counseled on nutrition, hydration, and physical activity, and on how medication could support their goals if needed in future."
+    : others.length
     ? "The patient was counseled regarding expected benefits, common side effects, injection technique, storage, adherence, and the importance of reporting any adverse effects promptly."
     : "The patient was counseled regarding expected benefits, common side effects, injection technique, adherence, and the importance of reporting any adverse effects promptly.";
 
@@ -3676,7 +4071,11 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     : "";
 
   // ── PLAN ──
-  const planBullets = [
+  const planBullets = noMed ? [
+    "Assess progress against the patient's goals at follow-up.",
+    "Review whether medication is appropriate at that point.",
+    "Reinforce the nutrition plan, hydration, sleep, and physical activity.",
+  ] : [
     "Assess response, tolerance, and compliance at follow-up.",
     "Consider dose titration if treatment is well tolerated.",
     hasGlp1
@@ -3951,6 +4350,10 @@ function wizStepLabs() {
 function wizStepClinical() {
   const w = S.wizard;
   const hasGlp1 = w.cart.some((c) => c.category === "glp1");
+  const noMed = !w.cart.length;
+  const showDiet = hasGlp1 || noMed;
+  if (showDiet) syncWizardDiet();
+  if (noMed && !w.whyEdited) w.medicationWhy = medicationWhyDefault(w.patient.intake.health_goals);
 
   view().innerHTML = `${wizHead()}
   <div class="two-col">
@@ -3971,16 +4374,13 @@ function wizStepClinical() {
       <div class="field"><label for="cl-meds">Current medications</label><input class="input" id="cl-meds" value="${esc(w.patient.medications)}" placeholder="None"></div>
       <div class="field"><label for="cl-allergy">Allergies</label><input class="input" id="cl-allergy" value="${esc(w.patient.allergies)}" placeholder="None"></div>
       <div class="field"><label for="cl-fu">Follow-up in (days)</label><input class="input" id="cl-fu" type="number" min="3" max="180" value="${esc(w.followupDays)}"></div>
-      ${hasGlp1 ? `
-      <div class="field"><label for="cl-cal">Calorie target (kcal/day)</label><input class="input" id="cl-cal" type="number" value="${esc(w.diet.calories ?? "")}"></div>
-      <div class="field"><label>Protein target (g/day)</label>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="input" id="cl-prot-min" type="number" value="${esc(w.diet.proteinMin ?? "")}" aria-label="Protein minimum"> –
-          <input class="input" id="cl-prot-max" type="number" value="${esc(w.diet.proteinMax ?? "")}" aria-label="Protein maximum">
-        </div>
-      </div>` : ""}
       <div class="field full"><label for="cl-note">Private clinical note (EMR — not shown to patient)</label><textarea class="input" id="cl-note" rows="3" placeholder="Consultation summary for your records…">${esc(w.clinicalNote)}</textarea></div>
+      ${noMed ? `
+      <div class="field full"><label for="cl-advice">Advice for the patient (shown in their guide)</label><textarea class="input" id="cl-advice" rows="3" placeholder="Optional">${esc(w.advice || "")}</textarea></div>
+      <div class="field full"><label for="cl-why">How medication could help (shown in their guide)</label><textarea class="input" id="cl-why" rows="9">${esc(w.medicationWhy || "")}</textarea><span class="hint">Written from the patient's goals. Edit it, or clear it to leave this section out.</span></div>` : ""}
     </div>
+
+    ${showDiet ? dietEditorHTML(w.diet, w.patient) : ""}
 
     <div class="card" style="background:var(--bg);margin-top:6px">
       <div class="card-title" style="padding:16px 16px 0;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -4012,16 +4412,10 @@ function wizStepClinical() {
   // (an explicit, confirmed action) discards hand edits and starts over.
   const emrBox = document.getElementById("cl-emr");
   const customFlag = document.getElementById("cl-custom-flag");
+  if (showDiet) wireDietEditor(view(), w.diet);
   const computeAutoEmr = () => buildMultiClinicalSuggestion(
-    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
-      age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
-      chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
-      intake: w.patient.intake },
-    w.cart, wizMetrics(), w.clinicalNote, w.followupDays,
-    (w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on)
-  ) || (w.noMedication
-    ? "No medication was prescribed this visit — your private clinical note above is the record for this consultation."
-    : "Add a medication and patient details to generate the clinical record.");
+    ...wizEmrArgs((w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on))
+  ) || "Add a medication and patient details to generate the clinical record.";
   const refreshEmr = () => {
     collect();
     if (w.emrCustomized) return;
@@ -4063,10 +4457,11 @@ function wizStepClinical() {
     w.patient.allergies = document.getElementById("cl-allergy").value;
     w.followupDays = Number(document.getElementById("cl-fu").value) || 28;
     w.clinicalNote = document.getElementById("cl-note").value;
-    if (hasGlp1) {
-      w.diet.calories = Number(document.getElementById("cl-cal").value) || undefined;
-      w.diet.proteinMin = Number(document.getElementById("cl-prot-min").value) || undefined;
-      w.diet.proteinMax = Number(document.getElementById("cl-prot-max").value) || undefined;
+    if (noMed) {
+      w.advice = document.getElementById("cl-advice").value;
+      const why = document.getElementById("cl-why").value;
+      if (why !== w.medicationWhy) w.whyEdited = true;
+      w.medicationWhy = why;
     }
   }
 }
@@ -4114,24 +4509,19 @@ function wizStepReview() {
   // A hand-edited record from the Clinical step is the doctor's final word
   // on it and is published as-is; otherwise it's regenerated fresh here so
   // late changes (e.g. going back and adjusting labs) are reflected.
-  const clinicalSuggestion = w.emrCustomized ? (w.clinicalSuggestion || "") : buildMultiClinicalSuggestion(
-    { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
-      age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
-      chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
-      intake: w.patient.intake },
-    w.cart, wizMetrics(), w.clinicalNote, w.followupDays, previewLabs, previewSupps
-  );
+  const clinicalSuggestion = w.emrCustomized ? (w.clinicalSuggestion || "") : buildMultiClinicalSuggestion(...wizEmrArgs(previewLabs, previewSupps));
   w.clinicalSuggestion = clinicalSuggestion;
-  const guideText = fakePlans.length ? buildComboGuideText(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name) : "";
-  const guideHtml = fakePlans.length ? buildComboGuide(fakePlans, { name: w.patient.name, title: w.patient.title }, S.user.name)
-    : `<div class="empty">${icon("file", 34)}<div class="empty-title">No medication this visit</div><p>No guide is generated when nothing is prescribed — the clinical note and follow-up date are still saved.</p></div>`;
+  const guidePerson = { name: w.patient.name, title: w.patient.title };
+  const previewVisit = wizVisitDraft({ signedBy: previewSigner, labTests: previewLabs, suppList: previewSupps, next_followup: nextFollowup, created_at: createdAt });
+  const guideText = fakePlans.length ? buildComboGuideText(fakePlans, guidePerson, S.user.name) : buildVisitGuideText(previewVisit, guidePerson, S.user.name);
+  const guideHtml = fakePlans.length ? buildComboGuide(fakePlans, guidePerson, S.user.name) : buildVisitGuide(previewVisit, guidePerson, S.user.name);
   const publishSaves = w.cart.length > 1 ? `${w.cart.length} programs` : w.cart.length === 1 ? "the program" : "this consultation";
   view().innerHTML = `${wizHead()}
   <div class="two-col" style="grid-template-columns:1fr 340px">
     <div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
         <div class="card-title" style="margin:0">${icon("file", 19)} Guide preview — what the patient sees</div>
-        ${fakePlans.length ? `<button class="btn btn-secondary btn-sm" id="rv-guide-copy" type="button">${icon("copy", 15)} Copy guide text</button>` : ""}
+        <button class="btn btn-secondary btn-sm" id="rv-guide-copy" type="button">${icon("copy", 15)} Copy guide text</button>
       </div>
       <div id="guide-preview" style="display:flex;flex-direction:column;gap:18px">
         ${guideHtml}
@@ -4161,8 +4551,7 @@ function wizStepReview() {
   wireNotesPanel(view());
   wirePeptideInfoButtons(view());
   if (clinicalSuggestion) document.getElementById("rv-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalSuggestion); toast("Clinical record copied"); });
-  const guideCopyBtn = document.getElementById("rv-guide-copy");
-  if (guideCopyBtn) guideCopyBtn.addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
+  document.getElementById("rv-guide-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
 
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 3; paintWizard(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
@@ -4223,6 +4612,14 @@ function wizStepReview() {
         });
         w.plansSaved = i + 1;
       }
+      // Nothing prescribed: the record and the guide are saved with the visit.
+      if (!w.cart.length && !w.visitSaved) {
+        await api("POST", `/api/patients/${patientId}/visits`, wizVisitDraft({
+          clinicalNote: w.clinicalNote, clinicalSuggestion: w.clinicalSuggestion, followupDays: w.followupDays,
+          labTests: cleanLabs, suppList: cleanSupps,
+        }));
+        w.visitSaved = true;
+      }
       // Only now — patient and every program safely saved — does the draft go.
       w.published = true;
       clearTimeout(autosaveTimer);
@@ -4246,29 +4643,31 @@ function publishedModal(patientId, w, pin) {
   const name = `${w.patient.title ? w.patient.title + " " : ""}${w.patient.name}`;
   const companyName = S.user.clinic || S.user.orgName || "DarDoc Healthcare";
   const hasProgram = w.cart.length > 0;
+  const emailSubject = hasProgram ? `Your personal treatment guide — ${companyName}` : `Your personal health plan — ${companyName}`;
   const medSummary = w.cart.length > 1 ? `${w.cart.length} programs` : hasProgram ? `${w.cart[0].medication}${w.cart[0].dose ? " " + w.cart[0].dose : ""}` : "";
   const waText = hasProgram
     ? (pin
       ? `Hello ${name}, your personal treatment guide for ${medSummary} is ready! 🎉\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nView your guide, log your doses, and check in regularly — I'll be following your progress.\n\n— ${S.user.name}, ${companyName}`
       : `Hello ${name}, your updated treatment guide for ${medSummary} is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, ${companyName}`)
     : (pin
-      ? `Hello ${name}, thank you for your visit today. Your portal access is ready:\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nWe'll be in touch ahead of your next follow-up.\n\n— ${S.user.name}, ${companyName}`
-      : `Hello ${name}, thank you for your visit today. We'll be in touch ahead of your next follow-up.\n\n— ${S.user.name}, ${companyName}`);
+      ? `Hello ${name}, thank you for your visit today. Your personal health plan is ready in your portal:\n\n🔗 Your portal: ${link}\n📱 Mobile: +${w.patient.mobile}\n🔑 PIN: ${pin}\n\nWe'll be in touch ahead of your next follow-up.\n\n— ${S.user.name}, ${companyName}`
+      : `Hello ${name}, thank you for your visit today. Your personal health plan is ready in your portal:\n\n🔗 ${link}\n\nSign in with your mobile number and your existing PIN (ask me for a new one if needed).\n\n— ${S.user.name}, ${companyName}`);
   const scrim = modal(`
     <div style="text-align:center;padding:6px 0 2px">
       <div style="width:60px;height:60px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">${icon("checkCircle", 30)}</div>
-      <h3 style="font-size:20px">${hasProgram ? "Guide published" : "Consultation saved"}</h3>
-      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${hasProgram ? `${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.` : `${esc(w.patient.name)}'s visit has been recorded — no medication was prescribed this time.`}</p>
+      <h3 style="font-size:20px">Guide published</h3>
+      <p style="font-size:14px;color:var(--muted);margin:6px 0 14px">${hasProgram ? `${esc(w.patient.name)}'s program${w.cart.length > 1 ? "s are" : " is"} live in their patient portal.` : `${esc(w.patient.name)}'s visit is recorded and their health plan is live in their patient portal. No medication was prescribed this time.`}</p>
       ${pin ? `<div class="pin-display">${pin}</div><p class="hint" style="margin-bottom:14px">Their portal PIN — shown once. You can regenerate it any time from the patient page.</p>` : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${hasProgram ? `<button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-guide">${icon("whatsapp", 18)} Send guide link</button>` : ""}
-        <button class="btn ${hasProgram ? "btn-secondary" : "btn-accent"}" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} ${hasProgram ? "Send portal login" : "Send via WhatsApp"}</button>
+        <button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-guide">${icon("whatsapp", 18)} Send guide link</button>
+        <button class="btn btn-secondary" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} Send portal login</button>
+        <button class="btn btn-secondary" id="pub-email">${icon("mail", 18)} Email login</button>
         <button class="btn btn-secondary" id="pub-copy">${icon("copy", 18)} Copy</button>
       </div>
       <a class="btn btn-ghost btn-block" style="margin-top:8px" href="#/patient/${patientId}" id="pub-open">Open patient record</a>
     </div>`);
-  const pubGuide = scrim.querySelector("#pub-guide");
-  if (pubGuide) pubGuide.addEventListener("click", () => guideLinkModal({ id: patientId, name: w.patient.name, title: w.patient.title, mobile: w.patient.mobile }));
+  scrim.querySelector("#pub-guide").addEventListener("click", () => guideLinkModal({ id: patientId, name: w.patient.name, title: w.patient.title, mobile: w.patient.mobile, email: w.patient.email, noMedication: !hasProgram }));
+  scrim.querySelector("#pub-email").addEventListener("click", () => openEmail(w.patient.email, emailSubject, waText));
   scrim.querySelector("#pub-wa").addEventListener("click", () => window.open(waLink(w.patient.mobile, waText), "_blank"));
   scrim.querySelector("#pub-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(waText); toast("Message copied"); });
   scrim.querySelector("#pub-open").addEventListener("click", () => scrim.remove());
@@ -4408,6 +4807,15 @@ async function viewEditPlan(planId) {
     labTests: (plan.labTests || []).map((l) => ({ ...l, on: true })),
     suppList: (plan.suppList || []).map((s) => ({ ...s, on: true })),
     changedMedication: false,
+    diet: { ...(plan.diet || {}) },
+  };
+  // A program published before nutrition plans existed gets one to start from.
+  const ensureDiet = () => {
+    if (Array.isArray(state.diet.meals) && state.diet.meals.length) return;
+    const start = { ...defaultDietForPatient(patient), ...state.diet };
+    start.proteinTarget = dietProteinTarget(state.diet.proteinMin ? state.diet : start) || undefined;
+    start.meals = defaultDietMeals(start.proteinTarget);
+    state.diet = start;
   };
   d.template = S.templates.find((t) => t.category === plan.category && (t.config.medication || t.name) === plan.medication) || null;
 
@@ -4419,6 +4827,7 @@ async function viewEditPlan(planId) {
       { key: "peptide", label: "Peptide therapy" },
       { key: "custom", label: "Custom program" },
     ];
+    if (d.category === "glp1") ensureDiet();
     view().innerHTML = `
     <div class="page-head">
       <div>
@@ -4447,6 +4856,7 @@ async function viewEditPlan(planId) {
           <div class="field"><label for="ep-warn">Warnings — when to contact you</label><textarea class="input" id="ep-warn" rows="4">${esc(state.warnings)}</textarea></div>
           ${state.changedMedication ? `<div class="g-callout g-amber">${icon("alert", 17)}<div>The medication changed. Check these still match — <button type="button" class="btn btn-ghost btn-sm" id="ep-regen" style="margin-left:4px">regenerate from the new protocol</button></div></div>` : ""}
         </div>
+        ${d.category === "glp1" ? dietEditorHTML(state.diet, patient) : ""}
       </div>
 
       <div style="display:flex;flex-direction:column;gap:18px">
@@ -4490,6 +4900,7 @@ async function viewEditPlan(planId) {
     paintMedication();
     paintLabs();
     paintSupps();
+    if (d.category === "glp1") wireDietEditor(view(), state.diet);
 
     view().querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
       if (d.category === b.dataset.cat) return;
@@ -4674,6 +5085,7 @@ async function viewEditPlan(planId) {
         route: d.route, frequency: d.frequency, halfLifeHours: d.halfLifeHours || null,
         phases: d.phases.filter((p) => p.label || p.dose),
         instructions: state.instructions, warnings: state.warnings,
+        ...(d.category === "glp1" ? { diet: state.diet } : {}),
         labTests: labs.map((l) => ({ name: l.name, detail: l.detail || "", fasting: !!l.fasting, required: !!l.required, link: l.link || "" })),
         suppList: supps.map((s) => ({ name: s.name, dose: s.dose || "", benefit: s.benefit || "" })),
         supplements: supps.map((s) => s.name + (s.dose ? ` (${s.dose})` : "")).join(", "),

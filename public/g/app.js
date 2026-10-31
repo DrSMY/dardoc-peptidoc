@@ -24,12 +24,39 @@ let activePlan = null; // tracked across picker-chip clicks, for the refill butt
     return showState("alert", "This guide isn't available", e.message || "Please ask your clinic to send you a new link.");
   }
 
-  const { patient, clinic, plans } = data;
-  document.title = `Your treatment guide${clinic.name ? " — " + clinic.name : ""}`;
+  const { patient, clinic, plans, visit } = data;
+  document.title = `Your ${visit ? "health plan" : "treatment guide"}${clinic.name ? " — " + clinic.name : ""}`;
   if (clinic.logoUrl) {
     const fav = document.createElement("link");
     fav.rel = "icon"; fav.href = clinic.logoUrl;
     document.head.appendChild(fav);
+  }
+
+  const wireToolbar = () => {
+    const toggle = document.getElementById("gp-toggle");
+    toggle.addEventListener("click", () => {
+      const all = [...root.querySelectorAll("details.g-acc")];
+      const open = all.some((d) => !d.open);
+      all.forEach((d) => { d.open = open; });
+      toggle.textContent = open ? "Collapse all" : "Expand all";
+    });
+    document.getElementById("gp-print").addEventListener("click", () => window.print());
+  };
+
+  // Nothing prescribed: the guide is the patient's health plan, with no
+  // medication to choose between and nothing to refill.
+  if (visit) {
+    root.innerHTML = `
+      <div class="gp-bar">
+        <div class="gp-bar-l">Tap any section to read more</div>
+        <div class="gp-bar-r">
+          <button class="btn btn-secondary btn-sm" id="gp-toggle" type="button">Expand all</button>
+          <button class="btn btn-secondary btn-sm" id="gp-print" type="button">${icon("printer", 15)} Save as PDF</button>
+        </div>
+      </div>
+      ${buildVisitGuide(visit, patient, visit.signedBy && visit.signedBy.name, { shared: true })}`;
+    wireToolbar();
+    return;
   }
 
   S.medColors = medColorMap(plans);
@@ -79,12 +106,5 @@ let activePlan = null; // tracked across picker-chip clicks, for the refill butt
     });
   });
 
-  const toggle = document.getElementById("gp-toggle");
-  toggle.addEventListener("click", () => {
-    const all = [...root.querySelectorAll("details.g-acc")];
-    const open = all.some((d) => !d.open);
-    all.forEach((d) => { d.open = open; });
-    toggle.textContent = open ? "Collapse all" : "Expand all";
-  });
-  document.getElementById("gp-print").addEventListener("click", () => window.print());
+  wireToolbar();
 })();

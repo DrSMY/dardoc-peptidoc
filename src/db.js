@@ -321,6 +321,31 @@ CREATE TABLE IF NOT EXISTS refill_links (
   last_viewed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_refill_links_patient ON refill_links(patient_id);`);
+// What a refill changed when the doctor switched the medication itself.
+addColumn("refill_requests", "prior_medication", "TEXT DEFAULT ''");
+addColumn("refill_requests", "decided_medication", "TEXT DEFAULT ''");
+
+// ── visits without a medication ─────────────────────────────────────
+// A consultation that ends with nothing prescribed still produces a record
+// and a patient guide (diet plan, why medication could help). There is no
+// program row to hang those on, so they live here.
+db.exec(`
+CREATE TABLE IF NOT EXISTS visit_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL REFERENCES patients(id),
+  doctor_id INTEGER NOT NULL REFERENCES users(id),
+  clinical_note TEXT DEFAULT '',
+  clinical_suggestion TEXT DEFAULT '',
+  diet_json TEXT NOT NULL DEFAULT '{}',
+  goals_json TEXT NOT NULL DEFAULT '[]',
+  medication_why TEXT DEFAULT '',
+  advice TEXT DEFAULT '',
+  lab_tests_json TEXT NOT NULL DEFAULT '[]',
+  supplements_json TEXT NOT NULL DEFAULT '[]',
+  next_followup TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_visit_records_patient ON visit_records(patient_id);`);
 
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
@@ -519,6 +544,37 @@ function seedKnowledgeBase() {
     put(name, cat, body || "See peptide clinical info in the consultation wizard.");
   }
 }
+
+// ── one-time data changes ──────────────────────────────────────────
+// Each runs once per database, so a later edit (say, renaming someone again
+// from the Team page) is never overwritten on the next boot.
+db.exec("CREATE TABLE IF NOT EXISTS data_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));");
+function once(name, fn) {
+  if (db.prepare("SELECT 1 AS x FROM data_migrations WHERE name = ?").get(name)) return;
+  fn();
+  db.prepare("INSERT INTO data_migrations (name) VALUES (?)").run(name);
+}
+
+// "25mg" was part of the Wegovy Pill's description, so it showed beside every
+// dose, including 1.5mg. Knowledge-base articles are keyed by title, so the
+// existing one is renamed here or seeding would add a second copy.
+once("wegovy-pill-remove-25mg-label", () => {
+  const before = "oral semaglutide 25mg (SNAC absorption enhancer)";
+  const after = "oral semaglutide (SNAC absorption enhancer)";
+  db.prepare("UPDATE kb_articles SET title = replace(title, ?, ?), body = replace(body, ?, ?) WHERE title LIKE 'Wegovy Pill (%'").run(before, after, before, after);
+  db.prepare("UPDATE templates SET config_json = replace(config_json, ?, ?)").run(before, after);
+  db.prepare("UPDATE plans SET clinical_suggestion = replace(clinical_suggestion, ?, ?) WHERE medication = 'Wegovy Pill'").run(before, after);
+});
+
+// Only when exactly one account matches, so nobody else can be renamed by
+// mistake; otherwise the log says so and it can be done from the Team page.
+once("rename-dr-marwa-abuaita", () => {
+  const rows = db.prepare("SELECT id, name FROM users").all().filter((u) => /\bmarwa\b/i.test(u.name));
+  if (rows.length !== 1) return console.log(`Dr Marwa rename skipped: ${rows.length} matching staff account(s).`);
+  const name = rows[0].name.replace(/\b(marwa)\b.*$/i, "$1 Abuaita");
+  db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, rows[0].id);
+  console.log(`Staff account renamed: "${rows[0].name}" is now "${name}".`);
+});
 
 seed();
 const DEFAULT_ORG = seedOrganizations();

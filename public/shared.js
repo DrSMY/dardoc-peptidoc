@@ -58,6 +58,7 @@ function icon(name, size = 20) {
     home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
     book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
     droplet: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+    mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
     phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
     settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
     whatsapp: '<path d="M3 21l1.65-4.8A8.5 8.5 0 1 1 8 19.35L3 21z"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/>',
@@ -587,6 +588,27 @@ function frequencyToHours(freq) {
   if (f.includes("every other")) return 48;
   if (f.includes("daily") || f.includes("5 days")) return 24;
   return 168;
+}
+
+// Opens the doctor's own email app with everything filled in, ready to send —
+// the same idea as a WhatsApp link. WhatsApp's *bold* markers are removed
+// because email shows them as literal asterisks.
+function emailHref(to, subject, body) {
+  const text = String(body || "").replace(/\*([^*\n]+)\*/g, "$1").replace(/\r?\n/g, "\r\n");
+  return `mailto:${encodeURI(String(to || "").trim())}?subject=${encodeURIComponent(subject || "")}&body=${encodeURIComponent(text)}`;
+}
+function openEmail(to, subject, body) {
+  const a = document.createElement("a");
+  a.href = emailHref(to, subject, body);
+  a.click();
+  if (!String(to || "").trim()) toast("No email on file — add the address in your email app");
+}
+
+// A call link that works on phones and on computers with a calling app. Local
+// numbers (05…) dial as they are; anything else is an international number.
+function telHref(mobile) {
+  const m = String(mobile || "").replace(/[^\d]/g, "");
+  return m.startsWith("0") ? `tel:${m}` : `tel:+${m}`;
 }
 
 function waLink(mobile, text) {

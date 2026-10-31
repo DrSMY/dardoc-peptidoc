@@ -34,7 +34,10 @@ function standardGuideSections(plan) {
   if (typeof guideContentFor !== "function") return "";
   const content = guideContentFor(plan.medication, plan.route);
   if (!content) return "";
-  const windows = content.sections.map((s, i) => accordion(s.emoji || "•", s.head, `<div class="g-prose">${guideProse(s.body)}</div>`, i === 0)).join("");
+  // GLP-1 guides carry the patient's own nutrition plan (dietPlanHTML), which
+  // replaces the generic nutrition window from the master document.
+  const sections = plan.category === "glp1" ? content.sections.filter((s) => !/^NUTRITION/i.test(s.head)) : content.sections;
+  const windows = sections.map((s, i) => accordion(s.emoji || "•", s.head, `<div class="g-prose">${guideProse(s.body)}</div>`, i === 0)).join("");
   const general = plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length
     ? accordion("ℹ️", PEPTIDE_GENERAL_GUIDE[0].head, `<div class="g-prose">${guideProse(PEPTIDE_GENERAL_GUIDE[0].body)}</div>`, false) : "";
   return `
@@ -116,6 +119,294 @@ function otherMedCardHTML(plan) {
   </div>`;
 }
 
+// ── personal nutrition plan ──────────────────────────────────────────
+// Built from the patient's own protein target, then reviewed and edited by the
+// doctor before it is published. Plate figures are portions of the plate, not
+// shares of calories.
+const DIET_PLATE_DEFAULT = { protein: "40–50%", fibre: "40–50%", carbs: "Less than 20%" };
+const DIET_MEALS = [
+  { key: "breakfast", name: "Breakfast", share: 0.25 },
+  { key: "snack1", name: "Morning snack", share: 0.1 },
+  { key: "lunch", name: "Lunch", share: 0.3 },
+  { key: "snack2", name: "Afternoon snack", share: 0.1 },
+  { key: "dinner", name: "Dinner", share: 0.25 },
+];
+
+// The single daily figure the patient aims for: the doctor's own, or the middle
+// of the range worked out from their weight, to the nearest 5 g.
+function dietProteinTarget(diet) {
+  const d = diet || {};
+  if (Number(d.proteinTarget)) return Number(d.proteinTarget);
+  if (!Number(d.proteinMin)) return null;
+  const max = Number(d.proteinMax) || Number(d.proteinMin);
+  return Math.round((Number(d.proteinMin) + max) / 2 / 5) * 5;
+}
+
+// Splits the target across the day in 5 g steps. Whatever rounding leaves over
+// goes to the main meals, so the five figures always add up to the target.
+function dietProteinSplit(target) {
+  const grams = {};
+  DIET_MEALS.forEach((m) => { grams[m.key] = Math.max(5, Math.floor((target * m.share) / 5) * 5); });
+  let left = target - DIET_MEALS.reduce((sum, m) => sum + grams[m.key], 0);
+  for (const key of ["lunch", "dinner", "breakfast", "lunch", "dinner"]) {
+    if (left < 5) break;
+    grams[key] += 5; left -= 5;
+  }
+  grams.lunch += Math.max(0, left);
+  return grams;
+}
+
+// An example day whose protein portions are sized to reach this patient's
+// target, using typical cooked values per 100 g: chicken breast 31 g, white fish
+// 24 g, Greek yoghurt 10 g, cottage cheese 11 g; one egg 6 g, one white 3.5 g.
+function defaultDietMeals(target) {
+  const to = (x, step) => Math.max(step, Math.round(x / step) * step);
+  const g = target ? dietProteinSplit(target) : null;
+  let breakfast = "2 eggs, as an omelette with spinach, tomato and mushrooms, plus a small pot of plain Greek yoghurt. Optional: 1 small slice of wholegrain bread.";
+  if (g) {
+    const rest = g.breakfast - 12;
+    const yoghurt = rest >= 5 ? Math.min(200, to(rest / 0.1, 25)) : 0;
+    const whites = Math.ceil(Math.max(0, rest - yoghurt * 0.1 - 1) / 3.5);
+    breakfast = `2 eggs${whites ? ` plus ${whites} egg white${whites === 1 ? "" : "s"}` : ""}, as an omelette with spinach, tomato and mushrooms${yoghurt ? `, plus ${yoghurt} g plain Greek yoghurt` : ""}. Optional: 1 small slice of wholegrain bread.`;
+  }
+  const items = {
+    breakfast,
+    snack1: `${g ? to(g.snack1 / 0.1, 25) + " g" : "A small pot of"} plain Greek yoghurt with a small handful of berries.`,
+    lunch: `${g ? to(g.lunch / 0.31, 10) + " g" : "A palm-sized portion of"} grilled chicken breast (cooked weight). Fill half the plate with salad or cooked vegetables, with 1 teaspoon of olive oil. Add 2–3 tablespoons of brown rice, quinoa or freekeh.`,
+    snack2: `${g ? to(g.snack2 / 0.11, 25) + " g" : "A small pot of"} cottage cheese with cucumber and carrot sticks.`,
+    dinner: `${g ? to(g.dinner / 0.24, 10) + " g" : "A palm-sized portion of"} grilled fish such as hamour, sheri or salmon (cooked weight). Fill half the plate with roasted or steamed vegetables. Optional: 2 tablespoons of lentils.`,
+  };
+  return DIET_MEALS.map((m) => ({ key: m.key, name: m.name, proteinG: g ? g[m.key] : null, items: items[m.key] }));
+}
+
+// Any plan, however old, read with sensible defaults filled in.
+function dietPlanFor(diet) {
+  const d = diet || {};
+  const proteinTarget = dietProteinTarget(d);
+  return {
+    ...d, proteinTarget,
+    plate: { ...DIET_PLATE_DEFAULT, ...(d.plate || {}) },
+    meals: Array.isArray(d.meals) && d.meals.length ? d.meals : defaultDietMeals(proteinTarget),
+    water: d.water || "2–3 L daily",
+  };
+}
+
+const DIET_PROTEIN_SWAPS = "80 g cooked chicken breast · 105 g cooked fish · 100 g cooked lean beef or camel · 4 eggs · 250 g Greek yoghurt · 280 g cooked lentils";
+const DIET_FOOD_GROUPS = [
+  { name: "Protein", foods: "Chicken or turkey breast, lean beef, camel, fish and seafood (hamour, sheri, salmon, tuna, shrimp), eggs, Greek yoghurt, cottage cheese, low-fat labneh, lentils, chickpeas, foul." },
+  { name: "Fibre", foods: "Leafy greens, broccoli, cucumber, tomatoes, peppers, courgette, aubergine, berries, apples, chia seeds, flaxseed, lentils and beans." },
+  { name: "Smart carbs, in small portions", foods: "Oats, quinoa, freekeh, brown or basmati rice, sweet potato, wholegrain bread." },
+  { name: "Healthy fats, in small amounts", foods: "Olive oil, avocado, nuts and seeds." },
+  { name: "Keep these to a minimum", foods: "Sugary drinks, sweetened karak, juice, pastries, white bread, fried food, fast food, and large portions of rice or pasta." },
+];
+const DIET_WHY_TEXT = "Eating less doesn't mean your body needs less. Protein protects your muscle while you lose fat. Fibre keeps digestion moving and keeps you full for longer. Vitamins, minerals and water keep your energy, hair, skin and bones healthy. Falling short can lead to muscle loss, tiredness, hair thinning and constipation.";
+
+// The nutrition section of a guide. `medication` is named only when one is
+// prescribed; a visit with no medication reads the same without it.
+function dietPlanHTML(diet, medication) {
+  const d = dietPlanFor(diet);
+  const facts = [
+    d.proteinTarget ? ["Protein target", `${d.proteinTarget} g a day`] : null,
+    d.calories ? ["Calorie target", `${d.calories} kcal a day`] : null,
+    ["Water", d.water],
+    ["Fibre", "25–35 g a day"],
+  ].filter(Boolean);
+  const pct = (v, fallback) => { const nums = String(v).match(/\d+/g); return nums ? nums.map(Number).reduce((a, b) => a + b, 0) / nums.length : fallback; };
+  const row = (cls, value, name, detail) => `
+    <div class="g-plate-row"><span class="g-plate-dot ${cls}" aria-hidden="true"></span>
+      <div><b>${esc(value)} ${esc(name)}</b><div class="g-lab-detail">${esc(detail)}</div></div></div>`;
+  const targets = `
+    <div class="g-facts" style="margin-bottom:0">${facts.map(([k, v]) => `<div class="g-fact"><div class="g-fact-lbl">${esc(k)}</div><div class="g-fact-val">${esc(v)}</div></div>`).join("")}</div>
+    ${d.proteinTarget ? `<p class="g-diet-text">Your protein target is worked out from your weight${d.proteinMin ? ` (healthy range for you: ${esc(d.proteinMin)}–${esc(d.proteinMax || d.proteinMin)} g a day)` : ""}. The example day below shows how to reach it.</p>` : `<p class="g-diet-text">Your doctor will confirm your daily protein target with you.</p>`}
+    ${d.note ? `<div class="g-callout g-teal" style="margin:12px 0 0">${icon("info", 18)}<div>${guideProse(d.note)}</div></div>` : ""}`;
+  const plate = `
+    <p class="g-diet-text" style="margin-top:0">Use this as your guide for every main meal. These are portions of your plate, not calorie percentages.</p>
+    <div class="g-plate-bar" aria-hidden="true">
+      <span class="g-plate-p" style="flex:${pct(d.plate.protein, 45)}"></span>
+      <span class="g-plate-f" style="flex:${pct(d.plate.fibre, 45)}"></span>
+      <span class="g-plate-c" style="flex:${Math.max(5, pct(d.plate.carbs, 15) * 0.75)}"></span>
+    </div>
+    ${row("g-plate-p", d.plate.protein, "protein", "Lean meat, fish, eggs, Greek yoghurt or lentils. Eat this first.")}
+    ${row("g-plate-f", d.plate.fibre, "fibre", "Vegetables and salad, filling about half the plate.")}
+    ${row("g-plate-c", d.plate.carbs, "carbs", "A small portion of whole grains or starchy food. Skip it if you're already full.")}`;
+  const day = `
+    <p class="g-diet-text" style="margin-top:0">This is one way your day could look. Swap in foods you enjoy, keeping the portions similar.</p>
+    <div class="g-meals">${d.meals.map((m) => `
+      <div class="g-meal">
+        <div class="g-meal-head"><span class="g-meal-name">${esc(m.name)}</span>${m.proteinG ? `<span class="g-meal-prot">${esc(m.proteinG)} g protein</span>` : ""}</div>
+        <div class="g-meal-items">${guideProse(m.items)}</div>
+      </div>`).join("")}</div>
+    <p class="g-diet-text"><b>Protein swaps.</b> Each of these gives about 25 g of protein: ${esc(DIET_PROTEIN_SWAPS)}.</p>`;
+  const foods = `
+    <p class="g-diet-text" style="margin-top:0">High-value foods give your body the most nutrition for the fewest calories.${medication ? ` Because ${esc(medication)} lowers your appetite, you'll eat less, so every meal needs to count.` : " When you are eating less, every meal needs to count."}</p>
+    <p class="g-diet-text">${esc(DIET_WHY_TEXT)}</p>
+    ${DIET_FOOD_GROUPS.map((g) => `<div class="g-supp"><b>${esc(g.name)}</b><div class="g-lab-detail">${esc(g.foods)}</div></div>`).join("")}`;
+  const tips = `
+    <ul class="g-diet-tips">
+      <li><b>Protein first.</b> Start each meal with your protein, in case you fill up quickly.</li>
+      <li><b>Small portions, eaten slowly.</b> Stop when you're comfortably full.</li>
+      <li><b>Don't skip meals.</b> If your appetite is low, have a smaller portion and keep the protein.</li>
+      <li><b>Go easy on greasy and fried food.</b> ${medication ? "It can make nausea worse." : "It adds calories without much nutrition."}</li>
+      <li><b>Sip water through the day.</b> Avoid sugary drinks.</li>
+      <li><b>Stay active.</b> Walk regularly and do strength exercises 2–3 times a week to protect your muscle.</li>
+    </ul>`;
+  return `
+    <section class="g-sec">
+      <h3>${icon("utensils", 18)} Your nutrition plan</h3>
+      <div class="g-acc-group">
+        ${accordion("flame", "Your daily targets", targets, true)}
+        ${accordion("layers", "How to build your plate", plate, true)}
+        ${accordion("calendar", "An example day", day, true)}
+        ${accordion("leaf", "High-value foods and why they matter", foods, false)}
+        ${accordion("checkCircle", "Making it work", tips, false)}
+      </div>
+    </section>`;
+}
+
+// The same plan as plain text, for the copied or WhatsApp version of a guide.
+function pushDietPlanText(push, section, diet, medication) {
+  const d = dietPlanFor(diet);
+  section("🥗", "YOUR DAILY NUTRITION TARGETS");
+  if (d.proteinTarget) push(`Protein: ${d.proteinTarget} g a day${d.proteinMin ? ` (healthy range for you: ${d.proteinMin}–${d.proteinMax || d.proteinMin} g)` : ""}`);
+  if (d.calories) push(`Calories: approximately ${d.calories} kcal a day`);
+  push(`Water: ${d.water}`);
+  push("Fibre: 25–35 g a day");
+  if (d.note) { push(); push(guideProseText(d.note)); }
+  section("🍽️", "HOW TO BUILD YOUR PLATE");
+  push("Portions of your plate at every main meal:");
+  push(`• ${d.plate.protein} protein: lean meat, fish, eggs, Greek yoghurt or lentils. Eat this first.`);
+  push(`• ${d.plate.fibre} fibre: vegetables and salad, filling about half the plate.`);
+  push(`• ${d.plate.carbs} carbs: a small portion of whole grains or starchy food.`);
+  section("📅", "AN EXAMPLE DAY");
+  d.meals.forEach((m) => { push(`*${m.name}*${m.proteinG ? ` (${m.proteinG} g protein)` : ""}`); push(guideProseText(m.items)); push(); });
+  push(`Protein swaps, each about 25 g of protein: ${DIET_PROTEIN_SWAPS.replace(/ · /g, ", ")}.`);
+  section("🥦", "HIGH-VALUE FOODS");
+  push(`High-value foods give your body the most nutrition for the fewest calories.${medication ? ` Because ${medication} lowers your appetite, you'll eat less, so every meal needs to count.` : " When you are eating less, every meal needs to count."}`);
+  push();
+  push(DIET_WHY_TEXT);
+  push();
+  DIET_FOOD_GROUPS.forEach((g) => push(`• ${g.name}: ${g.foods}`));
+  section("💡", "MAKING IT WORK");
+  push("Start each meal with your protein, eat small portions slowly, and stop when comfortably full. Don't skip meals: if your appetite is low, have a smaller portion and keep the protein. Sip water through the day, walk regularly, and do strength exercises 2–3 times a week to protect your muscle.");
+}
+
+function guideLabsHTML(labList) {
+  if (!labList || !labList.length) return "";
+  return `
+    <section class="g-sec">
+      <h3>${icon("droplet", 18)} Lab tests to complete</h3>
+      <div class="g-lab-list">
+        ${labList.map((l) => `
+          <div class="g-lab">
+            <div class="g-lab-top"><b>${esc(l.name)}</b>
+              ${l.required ? `<span class="badge badge-red">required</span>` : `<span class="badge badge-amber">recommended</span>`}
+              ${l.fasting ? `<span class="badge badge-gray">fasting</span>` : ""}
+            </div>
+            ${l.detail ? `<div class="g-lab-detail">${esc(l.detail)}</div>` : ""}
+            ${l.link ? `<a class="g-lab-link" href="${esc(l.link)}" target="_blank" rel="noopener">Book this test ${icon("chevR", 13)}</a>` : ""}
+          </div>`).join("")}
+      </div>
+    </section>`;
+}
+
+// The guide for a visit that ended with nothing prescribed: the patient's goals,
+// their nutrition plan, and why medication could help if they need it later.
+function buildVisitGuide(visit, patient, doctorName, opts) {
+  const portal = opts && opts.portal;
+  const shared = opts && opts.shared;
+  const signer = visit.signedBy || {};
+  const signerName = signer.name || doctorName || "your doctor";
+  const goals = Array.isArray(visit.goals) ? visit.goals : [];
+  const supps = Array.isArray(visit.suppList) ? visit.suppList : [];
+  return `
+  <div class="guide${portal ? " guide-portal" : ""}">
+    ${portal ? "" : `
+    <header class="g-head">
+      <div class="g-brand">
+        ${signer.logoUrl ? `<span class="g-logo-chip"><img src="${esc(signer.logoUrl)}" alt="${esc(signer.clinic || "Clinic logo")}" onerror="this.parentNode.style.display='none'"></span>` : ""}
+        <div>
+          ${!signer.logoUrl && signer.clinic ? `<div class="g-brand-name">${esc(signer.clinic)}</div>` : ""}
+          <div class="g-brand-sub">Personal Health Plan</div>
+        </div>
+      </div>
+      <div class="g-issued">Issued ${esc(fmtDate(visit.created_at))}</div>
+    </header>
+    <section class="g-patient card-pad">
+      <div>
+        <div class="g-hello">Prepared for</div>
+        <h2>${esc(patient.title ? patient.title + " " : "")}${esc(patient.name)}</h2>
+        <div class="g-doc">by ${esc(signerName)}${signer.credentials ? " · " + esc(signer.credentials) : ""}</div>
+      </div>
+    </section>`}
+    ${goals.length ? `
+    <section class="g-sec">
+      <h3>${icon("trend", 18)} Your goals</h3>
+      <div class="g-goal-chips">${goals.map((g) => `<span class="badge badge-cyan">${esc(g)}</span>`).join("")}</div>
+    </section>` : ""}
+    ${visit.advice ? `
+    <section class="g-sec">
+      <h3>${icon("info", 18)} Advice from your doctor</h3>
+      <div class="g-prose">${guideProse(visit.advice)}</div>
+    </section>` : ""}
+    ${dietPlanHTML(visit.diet, "")}
+    ${guideLabsHTML(visit.labTests)}
+    ${supps.length ? `
+    <section class="g-sec">
+      <h3>${icon("pill", 18)} Recommended supplements</h3>
+      <div class="g-supp-list">${supps.map((s) => `<div class="g-supp"><b>${esc(s.name)}</b>${s.dose ? ` · <span style="color:var(--muted);font-weight:600">${esc(s.dose)}</span>` : ""}${s.benefit ? `<div class="g-lab-detail">${esc(s.benefit)}</div>` : ""}</div>`).join("")}</div>
+    </section>` : ""}
+    ${visit.medicationWhy ? `
+    <section class="g-sec">
+      <h3>${icon("pill", 18)} How medication could help</h3>
+      <div class="g-prose">${guideProse(visit.medicationWhy)}</div>
+    </section>` : ""}
+    ${visit.next_followup ? `
+    <section class="g-sec">
+      <h3>${icon("calendar", 18)} Follow-up</h3>
+      <div class="g-callout g-teal">${icon("calendar", 18)}
+        <div>Your next follow-up is due around <strong>${esc(fmtDate(visit.next_followup))}</strong>. We'll review your progress together, and you're welcome to reach out sooner.</div>
+      </div>
+    </section>` : ""}
+    ${portal ? "" : `
+    <footer class="g-foot">
+      <div class="g-sign">Prepared and signed by<br>
+        <b>${esc(signerName)}</b>${signer.credentials ? `, ${esc(signer.credentials)}` : ""}
+        ${signer.signature ? `<br>${esc(signer.signature).replace(/\n/g, "<br>")}` : ""}
+        <br>${esc(signer.clinic || "")}
+      </div>
+      ${shared
+        ? `If you have any questions, please contact ${esc(signer.clinic || signerName)} directly. If you need urgent medical help, contact your nearest emergency service.`
+        : `You can message ${esc(signerName)} anytime through your patient portal.`}
+    </footer>`}
+  </div>`;
+}
+
+function buildVisitGuideText(visit, patient, doctorName) {
+  const signer = visit.signedBy || {};
+  const signerName = signer.name || doctorName || "your doctor";
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
+  const lines = [];
+  const push = (s) => lines.push(s === undefined ? "" : s);
+  const section = (emoji, title) => { push(); push(`${emoji} *${title}*`); };
+  push("🩺 *PERSONAL HEALTH PLAN*");
+  push();
+  push(`Dear ${patient.title ? patient.title + " " : ""}${firstName},`);
+  push();
+  push("Here is the plan we talked about. It's built around your goals and your own nutrition needs.");
+  if ((visit.goals || []).length) { section("🎯", "YOUR GOALS"); (visit.goals || []).forEach((g) => push(`• ${g}`)); }
+  if (visit.advice) { section("📝", "ADVICE FROM YOUR DOCTOR"); push(guideProseText(visit.advice)); }
+  pushDietPlanText(push, section, visit.diet, "");
+  pushLabTestLines(push, section, visit.labTests);
+  if (visit.medicationWhy) { section("💊", "HOW MEDICATION COULD HELP"); push(guideProseText(visit.medicationWhy)); }
+  if (visit.next_followup) { section("📅", "NEXT FOLLOW-UP"); push(`Your next follow-up is expected ${followUpWindowText(visit.next_followup)}.`); }
+  push();
+  push(signerName);
+  if (signer.credentials) push(signer.credentials);
+  if (signer.signature) push(signer.signature);
+  if (signer.clinic) push(signer.clinic);
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function buildGuide(plan, patient, doctorName, opts) {
   // opts.portal — render as an in-app page (no print letterhead / footer),
   // so the portal Guide tab can lead with a home-style hero header instead.
@@ -165,10 +456,7 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div>${doseNoteLines.join("<br>")}</div>
     </div>` : "";
 
-  const dietItems = [];
-  if (diet.calories) dietItems.push({ ico: "flame", label: "Daily calorie target", val: `${diet.calories} kcal` });
-  if (diet.proteinMin) dietItems.push({ ico: "utensils", label: "Daily protein", val: `${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g` });
-  if (diet.water) dietItems.push({ ico: "droplet", label: "Water", val: diet.water });
+  const showDietPlan = plan.category === "glp1" || diet.proteinMin || diet.calories;
 
   // Structured lab tests + supplements chosen in the consultation's
   // AI-analysis step. Fall back to the legacy blood-test callout /
@@ -176,21 +464,7 @@ function buildGuide(plan, patient, doctorName, opts) {
   const labList = Array.isArray(plan.labTests) ? plan.labTests : [];
   const suppItems = Array.isArray(plan.suppList) ? plan.suppList : [];
 
-  const labTestsHtml = labList.length ? `
-    <section class="g-sec">
-      <h3>${icon("droplet", 18)} Lab tests to complete</h3>
-      <div class="g-lab-list">
-        ${labList.map((l) => `
-          <div class="g-lab">
-            <div class="g-lab-top"><b>${esc(l.name)}</b>
-              ${l.required ? `<span class="badge badge-red">required</span>` : `<span class="badge badge-amber">recommended</span>`}
-              ${l.fasting ? `<span class="badge badge-gray">fasting</span>` : ""}
-            </div>
-            ${l.detail ? `<div class="g-lab-detail">${esc(l.detail)}</div>` : ""}
-            ${l.link ? `<a class="g-lab-link" href="${esc(l.link)}" target="_blank" rel="noopener">Book this test ${icon("chevR", 13)}</a>` : ""}
-          </div>`).join("")}
-      </div>
-    </section>` : "";
+  const labTestsHtml = guideLabsHTML(labList);
 
   const bloodTest = labList.length ? "" : (plan.blood_test && plan.blood_test !== "none"
     ? `<div class="g-callout ${plan.blood_test === "required" ? "g-red" : "g-amber"}">
@@ -253,13 +527,13 @@ function buildGuide(plan, patient, doctorName, opts) {
       <div class="g-acc-group">
         ${plan.instructions ? accordion("info", "Instructions from your doctor", `<div class="g-prose">${esc(plan.instructions).replace(/\n/g, "<br>")}</div>`, true) : ""}
 
-        ${dietItems.length ? accordion("utensils", "Nutrition targets", `<div class="g-facts" style="margin-bottom:0">${dietItems.map((d) => `<div class="g-fact"><div class="g-fact-lbl">${esc(d.label)}</div><div class="g-fact-val">${esc(d.val)}</div></div>`).join("")}</div>`, false) : ""}
-
         ${supplementsAcc}
 
         ${plan.warnings ? accordion("alert", "When to contact your doctor", `<div class="g-callout g-red" style="margin:0">${icon("alert", 18)}<div>${esc(plan.warnings).replace(/\n/g, "<br>")}</div></div>`, true) : ""}
       </div>
     </section>
+
+    ${showDietPlan ? dietPlanHTML(diet, plan.medication) : ""}
 
     ${labTestsHtml}
 
@@ -427,39 +701,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push(guideProseText(technique));
   }
 
-  if (isGlp1 && (diet.calories || diet.proteinMin || diet.water)) {
-    section("🥗", "YOUR DAILY NUTRITION TARGETS");
-    if (diet.calories) push(`Calories: approximately ${diet.calories} kcal`);
-    if (diet.proteinMin) push(`Protein: ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g`);
-    push(`Water: ${diet.water || "2–3 litres daily"}`);
-    push();
-    push(`${plan.medication} reduces appetite, but the goal is not to stop eating. Your body still needs adequate protein, vitamins, minerals, fibre, and fluids.`);
-
-    section("🍗", "PRIORITISE PROTEIN");
-    push("Protein helps preserve muscle and keeps you fuller for longer. Include protein with every meal.");
-    push("Good choices include chicken, turkey, lean beef, fish, seafood, eggs, Greek yoghurt, cottage cheese, low-fat labneh, lentils, chickpeas, and beans.");
-
-    section("🍽️", "BUILD YOUR MEALS SIMPLY");
-    push("Aim for:");
-    push("• ½ plate: vegetables or salad");
-    push("• ¼ plate: lean protein");
-    push("• ¼ plate: complex carbohydrates");
-    push();
-    push("Choose oats, brown or basmati rice, quinoa, freekeh, whole-grain bread, sweet potato, lentils, and beans.");
-    push();
-    push("Limit sugary drinks, sweets, fried foods, fast food, processed snacks, large portions of rice, bread or pasta, and very fatty meals, which may worsen nausea.");
-
-    section("🍏", "IF YOUR APPETITE IS LOW");
-    push("Do not force large meals. Choose smaller, nutritious options such as eggs with vegetables, Greek yoghurt with berries, grilled chicken with salad, tuna with vegetables, lentil soup, or cottage cheese.");
-    push();
-    push("Avoid going through the day with almost no food simply because you are not hungry.");
-
-    section("💧", "HYDRATION, FIBRE & EATING HABITS");
-    push("Aim for 2–3 litres of water daily unless advised otherwise.");
-    push("Include vegetables, fruit, oats, legumes, and whole grains for fibre.");
-    push("Eat slowly, take smaller portions, stop when comfortably full, avoid overeating, limit late heavy meals, and avoid lying down immediately after eating.");
-    push("Where appropriate, add regular walking and strength/resistance exercise 2–3 times weekly.");
-  }
+  if (isGlp1) pushDietPlanText(push, section, diet, plan.medication);
 
   if (info.howItWorks) {
     section("⚙️", `HOW ${String(plan.medication || "").toUpperCase()} HELPS`);
@@ -509,7 +751,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push();
     push("Until then:");
     push(`• Continue ${plan.medication}${plan.dose ? " " + plan.dose : ""}${plan.frequency ? " " + plan.frequency : ""}`);
-    if (isGlp1 && diet.proteinMin) push(`• Aim for ${diet.proteinMin}–${diet.proteinMax || diet.proteinMin} g protein daily`);
+    if (isGlp1 && dietProteinTarget(diet)) push(`• Aim for ${dietProteinTarget(diet)} g of protein a day`);
     if (isGlp1 && diet.calories) push(`• Aim for approximately ${diet.calories} kcal/day`);
     if (isGlp1) push(`• Maintain hydration: ${diet.water || "2–3 L daily"}`);
     push("• Track your progress");
@@ -705,6 +947,24 @@ const GUIDE_CSS = `
 .g-supp b { font-family: var(--font-head); font-size: 14.5px; }
 .g-toolbar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
 .g-toolbar .btn { flex-shrink: 0; }
+/* personal nutrition plan */
+.g-diet-text { margin: 12px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); }
+.g-plate-bar { display: flex; gap: 3px; height: 14px; margin: 12px 0 14px; }
+.g-plate-bar span { border-radius: 4px; }
+.g-plate-p { background: var(--brand); }
+.g-plate-f { background: var(--sage); }
+.g-plate-c { background: var(--refined-gold); }
+.g-plate-row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; font-size: 14px; }
+.g-plate-dot { width: 12px; height: 12px; flex-shrink: 0; margin-top: 4px; border-radius: 4px; }
+.g-meals { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.g-meal { padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-md); }
+.g-meal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.g-meal-name { font: 700 14.5px/1.3 var(--font-head); color: var(--text); }
+.g-meal-prot { padding: 2px 9px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.g-meal-items { margin-top: 5px; font-size: 14px; line-height: 1.55; color: var(--text); }
+.g-diet-tips { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.55; color: var(--text); }
+.g-diet-tips li { margin-bottom: 7px; }
+.g-goal-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 /* ── refill request form (portal sheet, guide-link sheet, dedicated /r/ page) ── */
 .rr-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .rr-form .input { font-size: 16px; }            /* 16px stops iOS zooming into the field */

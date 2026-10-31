@@ -125,7 +125,7 @@ const PATIENT_GUIDES = {
  "Wegovy Pill": [
   {
    "route": "oral",
-   "title": "Wegovy Pill (Oral Semaglutide 25 mg) — Daily Tablet",
+   "title": "Wegovy Pill (Oral Semaglutide) — Daily Tablet",
    "sections": [
     {
      "emoji": "💊",

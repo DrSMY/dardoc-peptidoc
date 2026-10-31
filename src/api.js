@@ -761,6 +761,45 @@ function rangeSinceSql(range) {
   return days ? `datetime('now','-${days} days')` : "datetime('0001-01-01')";
 }
 
+// Everyone in the practice sees who is due within the next week or overdue,
+// one row per patient, so whoever is free can contact them. A patient who has
+// already asked for this refill is in the Refill requests list instead.
+const REFILL_DUE_WINDOW = "+7 days";
+function refillDueRows(orgId) {
+  const rows = new Map();
+  const planRows = db.prepare(`
+    SELECT pl.medication, pl.dose, pl.next_followup, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
+    FROM plans pl JOIN patients p ON p.id = pl.patient_id LEFT JOIN users u ON u.id = pl.doctor_id
+    WHERE pl.status = 'active' AND COALESCE(pl.needs_refill, 0) = 0 AND pl.next_followup IS NOT NULL
+      AND date(pl.next_followup) <= date('now', ?) AND p.archived = 0 AND p.org_id = ?
+    ORDER BY pl.next_followup ASC`).all(REFILL_DUE_WINDOW, orgId);
+  for (const r of planRows) {
+    const med = `${r.medication}${r.dose ? " " + r.dose : ""}`;
+    const row = rows.get(r.patient_id);
+    if (row) { if (!row.medications.includes(med)) row.medications.push(med); }
+    else rows.set(r.patient_id, { kind: "refill", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, medications: [med] });
+  }
+  // Patients whose latest visit ended with nothing prescribed have no refill,
+  // but their follow-up still needs a reminder.
+  const visitRows = db.prepare(`
+    SELECT v.next_followup, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
+    FROM visit_records v JOIN patients p ON p.id = v.patient_id LEFT JOIN users u ON u.id = v.doctor_id
+    WHERE v.id = (SELECT MAX(id) FROM visit_records WHERE patient_id = p.id)
+      AND v.next_followup IS NOT NULL AND date(v.next_followup) <= date('now', ?) AND p.archived = 0 AND p.org_id = ?
+      AND NOT EXISTS (SELECT 1 FROM plans pl WHERE pl.patient_id = p.id AND pl.status = 'active')`).all(REFILL_DUE_WINDOW, orgId);
+  for (const r of visitRows) {
+    rows.set(r.patient_id, { kind: "followup", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, medications: [] });
+  }
+  return [...rows.values()].sort((a, b) => String(a.due).localeCompare(String(b.due)));
+}
+
+// Just the list, for the reminder count on the navigation bar.
+route("GET", "/api/refills/due", (req, res) => {
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  json(res, 200, refillDueRows(me.org_id));
+});
+
 route("GET", "/api/dashboard", (req, res) => {
   const me = getDoctor(req);
   if (!me) return json(res, 401, { error: "Not signed in." });
@@ -788,11 +827,7 @@ route("GET", "/api/dashboard", (req, res) => {
       SELECT id FROM refill_requests WHERE plan_id = pl.id AND status = 'pending' ORDER BY id DESC LIMIT 1)
     WHERE pl.needs_refill = 1 AND p.org_id = ?
     ORDER BY pl.refill_requested_at DESC LIMIT 30`).all(org);
-  const dueFollowups = db.prepare(`
-    SELECT pl.id, pl.title, pl.medication, pl.next_followup, p.id AS patient_id, p.name AS patient_name, p.mobile
-    FROM plans pl JOIN patients p ON p.id = pl.patient_id
-    WHERE pl.status = 'active' AND pl.next_followup IS NOT NULL AND date(pl.next_followup) <= date('now','+3 days') AND p.org_id = ?
-    ORDER BY pl.next_followup ASC LIMIT 30`).all(org);
+  const refillDue = refillDueRows(org);
   const recent = db.prepare(`
     SELECT * FROM (
       SELECT 'checkin' AS type, c.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
@@ -832,7 +867,7 @@ route("GET", "/api/dashboard", (req, res) => {
     WHERE status = 'approved' AND decided_at >= ${since} AND patient_id IN (SELECT id FROM patients WHERE org_id = ?)`).get(org).n;
 
   json(res, 200, {
-    activePatients, totalPatients, checkins7, doses7, unread, alerts, dueFollowups, recent, refillRequests,
+    activePatients, totalPatients, checkins7, doses7, unread, alerts, refillDue, recent, refillRequests,
     prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans, doctorBreakdown, refillsTotal,
   });
 });
@@ -940,9 +975,10 @@ route("GET", "/api/patients/:id", (req, res, p) => {
     SELECT rr.*, u.name AS decided_by_name FROM refill_requests rr
     LEFT JOIN users u ON u.id = rr.decided_by
     WHERE rr.patient_id = ? ORDER BY rr.created_at DESC`).all(p.id);
+  const visits = db.prepare("SELECT * FROM visit_records WHERE patient_id = ? ORDER BY id DESC").all(p.id).map(parseVisit);
   const intake = JSON.parse(patient.intake_json || "{}");
   json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake },
-    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests });
+    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests, visits });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
@@ -1038,6 +1074,38 @@ route("DELETE", "/api/drafts/:id", (req, res, p) => {
   json(res, 200, { ok: true });
 });
 
+// ── visits with no medication prescribed ─────────────────────────
+// What the guide needs — the private note and EMR text are added only for
+// clinicians (see parseVisit).
+function publicVisit(row) {
+  const safe = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
+  return {
+    id: row.id, kind: "visit", signedBy: signerFor(row.doctor_id), diet: safe(row.diet_json, {}), goals: safe(row.goals_json, []),
+    medicationWhy: row.medication_why || "", advice: row.advice || "", labTests: safe(row.lab_tests_json, []),
+    suppList: safe(row.supplements_json, []), next_followup: row.next_followup, created_at: row.created_at,
+  };
+}
+function parseVisit(row) {
+  return { ...publicVisit(row), clinical_note: row.clinical_note || "", clinical_suggestion: row.clinical_suggestion || "" };
+}
+function latestVisitRow(patientId) {
+  return db.prepare("SELECT * FROM visit_records WHERE patient_id = ? ORDER BY id DESC LIMIT 1").get(patientId);
+}
+
+route("POST", "/api/patients/:id/visits", async (req, res, p, body) => {
+  const doc = requireClinician(req);
+  if (!doc) return json(res, 403, NOT_CLINICIAN);
+  if (!patientInOrg(p.id, doc)) return json(res, 404, NOT_IN_ORG);
+  const followupDays = Number(body.followupDays) || 28;
+  const r = db.prepare(`INSERT INTO visit_records
+    (patient_id, doctor_id, clinical_note, clinical_suggestion, diet_json, goals_json, medication_why, advice, lab_tests_json, supplements_json, next_followup)
+    VALUES (?,?,?,?,?,?,?,?,?,?,date('now', ?))`)
+    .run(p.id, doc.id, String(body.clinicalNote || ""), String(body.clinicalSuggestion || ""), JSON.stringify(body.diet || {}),
+      JSON.stringify(Array.isArray(body.goals) ? body.goals : []), String(body.medicationWhy || ""), String(body.advice || ""),
+      JSON.stringify(body.labTests || []), JSON.stringify(body.suppList || []), `+${followupDays} days`);
+  json(res, 200, { id: Number(r.lastInsertRowid) });
+});
+
 // ── shareable guide links ────────────────────────────────────────
 // A doctor sends a patient a private link; it opens their current active
 // guide as a web page with no sign-in, and can be reopened until it expires
@@ -1059,8 +1127,8 @@ route("POST", "/api/patients/:id/guide-link", async (req, res, p, body) => {
   if (!me) return json(res, 403, NOT_CLINICIAN);
   const patient = patientInOrg(p.id, me);
   if (!patient) return json(res, 404, NOT_IN_ORG);
-  if (!db.prepare("SELECT 1 AS x FROM plans WHERE patient_id = ? AND status = 'active'").get(p.id)) {
-    return json(res, 400, { error: "This patient has no active program to share a guide for yet." });
+  if (!db.prepare("SELECT 1 AS x FROM plans WHERE patient_id = ? AND status = 'active'").get(p.id) && !latestVisitRow(p.id)) {
+    return json(res, 400, { error: "This patient has no guide to share yet." });
   }
   // Regenerating retires every earlier link — the way to cut off a link that
   // went to the wrong person.
@@ -1108,7 +1176,8 @@ route("GET", "/api/guide/:token", (req, res, p) => {
   const patient = db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
   if (!patient) return unavailable();
   const rows = db.prepare("SELECT * FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC").all(patient.id);
-  if (!rows.length) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
+  const visitRow = rows.length ? null : latestVisitRow(patient.id);
+  if (!rows.length && !visitRow) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
   rows.sort((a, b) => (b.category === "glp1") - (a.category === "glp1"));
   db.prepare("UPDATE guide_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(link.id);
   const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
@@ -1116,6 +1185,7 @@ route("GET", "/api/guide/:token", (req, res, p) => {
     patient: { title: patient.title || "", name: patient.name },
     clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
     plans: rows.map(sharedPlan),
+    visit: visitRow ? publicVisit(visitRow) : null,
   }, NOINDEX);
 });
 
@@ -1546,9 +1616,27 @@ route("PATCH", "/api/plans/:id", async (req, res, p, body) => {
 // patient's current weight. Every refill — doctor-entered or patient-
 // requested — is logged in refill_requests so it shows as a dated update on
 // the patient's chart, never as a second consultation.
-function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup }) {
+function cleanMedicationChange(plan, mc) {
+  const medication = String((mc && mc.medication) || "").trim();
+  if (!medication || medication === plan.medication) return null;
+  return {
+    medication, category: ["glp1", "peptide", "custom"].includes(mc.category) ? mc.category : "custom",
+    title: String(mc.title || medication), route: String(mc.route || plan.route), frequency: String(mc.frequency || plan.frequency),
+    halfLifeHours: mc.halfLifeHours || null, phases: Array.isArray(mc.phases) ? mc.phases : [],
+    instructions: String(mc.instructions || ""), warnings: String(mc.warnings || ""), diet: mc.diet && typeof mc.diet === "object" ? mc.diet : null,
+  };
+}
+
+function applyRefillDecision(plan, editor, { dose, quantity, nextFollowup, change }) {
   const sets = ["needs_refill = 0", "updated_at = datetime('now')", "last_edited_by = ?", "last_edited_at = datetime('now')"];
   const vals = [editor.id];
+  if (change) {
+    // A new medication starts its own dosing cycle, so the first-dose date
+    // that drives the portal's cycle tracker starts over too.
+    sets.push("category = ?", "medication = ?", "title = ?", "route = ?", "frequency = ?", "half_life_hours = ?", "phases_json = ?", "instructions = ?", "warnings = ?", "first_dose_at = NULL");
+    vals.push(change.category, change.medication, change.title, change.route, change.frequency, change.halfLifeHours, JSON.stringify(change.phases), change.instructions, change.warnings);
+    if (change.diet) { sets.push("diet_json = ?"); vals.push(JSON.stringify(change.diet)); }
+  }
   if (dose !== undefined && dose !== "") { sets.push("dose = ?"); vals.push(dose); }
   if (quantity !== undefined && quantity !== "" && quantity != null) { sets.push("quantity = ?"); vals.push(Number(quantity)); }
   if (nextFollowup !== undefined && nextFollowup !== "") { sets.push("next_followup = ?"); vals.push(nextFollowup); }
@@ -1623,10 +1711,10 @@ function submitPatientRefillRequest(plan, body) {
     has_side_effects: hasSideEffects, side_effect_severity: severity,
   };
   db.prepare(`INSERT INTO refill_requests
-    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, has_side_effects, side_effect_severity)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, prior_medication, has_side_effects, side_effect_severity)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(plan.id, plan.patient_id, "patient", "pending", r.side_effects, r.weight_kg, r.results_felt, r.dose_action,
-      r.requested_dose, r.notes, plan.dose || "", r.has_side_effects, r.side_effect_severity);
+      r.requested_dose, r.notes, plan.dose || "", plan.medication, r.has_side_effects, r.side_effect_severity);
   db.prepare("UPDATE plans SET needs_refill = 1, refill_requested_at = datetime('now') WHERE id = ?").run(plan.id);
   logRefillWeight(plan, r.weight_kg, `Reported with refill request (${plan.medication})`);
   const patient = db.prepare("SELECT id, name, mobile FROM patients WHERE id = ?").get(plan.patient_id);
@@ -1643,15 +1731,16 @@ route("POST", "/api/plans/:id/refill", async (req, res, p, body) => {
   if (!plan) return json(res, 404, { error: "Program not found." });
   if (!patientInOrg(plan.patient_id, me)) return json(res, 404, NOT_IN_ORG);
   const dose = body.dose !== undefined ? String(body.dose).trim() : plan.dose;
+  const change = cleanMedicationChange(plan, body.medicationChange);
   const r = db.prepare(`INSERT INTO refill_requests
-    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, decided_dose, quantity, decided_by, decided_at)
-    VALUES (?,?,'doctor','approved',?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
+    (plan_id, patient_id, source, status, side_effects, weight_kg, results_felt, dose_action, requested_dose, notes, prior_dose, prior_medication, decided_medication, decided_dose, quantity, decided_by, decided_at)
+    VALUES (?,?,'doctor','approved',?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`)
     .run(plan.id, plan.patient_id,
       String(body.sideEffects || "").slice(0, 2000), body.weightKg ? Number(body.weightKg) : null,
       String(body.resultsFelt || "").slice(0, 2000), String(body.doseAction || "").slice(0, 20),
       String(body.requestedDose || "").slice(0, 40), String(body.notes || "").slice(0, 2000),
-      plan.dose || "", dose, body.quantity ? Number(body.quantity) : null, me.id);
-  applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup });
+      plan.dose || "", plan.medication, change ? change.medication : plan.medication, dose, body.quantity ? Number(body.quantity) : null, me.id);
+  applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, change });
   logRefillWeight(plan, body.weightKg, `Recorded at refill (${plan.medication})`);
   if (body.message && String(body.message).trim()) {
     db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
@@ -1674,9 +1763,10 @@ route("POST", "/api/refill-requests/:id/decide", async (req, res, p, body) => {
   if (reqRow.status !== "pending") return json(res, 400, { error: "This request was already reviewed." });
   const approve = body.decision === "approved";
   const dose = approve ? (body.dose !== undefined ? String(body.dose).trim() : plan.dose) : "";
-  db.prepare(`UPDATE refill_requests SET status = ?, decided_dose = ?, quantity = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?`)
-    .run(approve ? "approved" : "declined", dose, body.quantity ? Number(body.quantity) : null, me.id, p.id);
-  if (approve) applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup });
+  const change = approve ? cleanMedicationChange(plan, body.medicationChange) : null;
+  db.prepare(`UPDATE refill_requests SET status = ?, decided_dose = ?, prior_medication = ?, decided_medication = ?, quantity = ?, decided_by = ?, decided_at = datetime('now') WHERE id = ?`)
+    .run(approve ? "approved" : "declined", dose, plan.medication, change ? change.medication : plan.medication, body.quantity ? Number(body.quantity) : null, me.id, p.id);
+  if (approve) applyRefillDecision(plan, me, { dose, quantity: body.quantity, nextFollowup: body.nextFollowup, change });
   else db.prepare("UPDATE plans SET needs_refill = 0 WHERE id = ?").run(plan.id);
   if (body.message && String(body.message).trim()) {
     db.prepare("INSERT INTO messages (patient_id, sender, body, sender_user_id) VALUES (?,?,?,?)")
@@ -1723,9 +1813,11 @@ route("GET", "/api/portal/me", (req, res) => {
   if (!patient) return json(res, 401, { error: "Not signed in." });
   const plans = db.prepare("SELECT * FROM plans WHERE patient_id = ? ORDER BY created_at DESC").all(patient.id).map(parsePlanPublic);
   const doctor = signerFor(patient.doctor_id);
+  const visitRow = latestVisitRow(patient.id);
   json(res, 200, {
     patient: { ...patient, pin_hash: undefined },
     plans,
+    visit: visitRow ? publicVisit(visitRow) : null,
     doctor,
     doctorName: doctor.name,
     presets: {
