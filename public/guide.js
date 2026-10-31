@@ -191,6 +191,21 @@ function dietPlanFor(diet) {
   };
 }
 
+// "120 to 150 grams" — the figure the patient is told to aim for.
+function dietProteinRangeText(d, unit) {
+  if (!Number(d.proteinMin)) return d.proteinTarget ? `${d.proteinTarget} ${unit}` : "";
+  const max = Number(d.proteinMax) || Number(d.proteinMin);
+  return max === Number(d.proteinMin) ? `${d.proteinMin} ${unit}` : `${d.proteinMin} to ${max} ${unit}`;
+}
+function dietProteinBasisText(d) {
+  if (!d.proteinBasisKg) return "";
+  return `That's 1.2 to 1.5 g for each kg of ${d.proteinBasis === "goal" ? "your goal weight" : "your weight"} (${d.proteinBasisKg} kg).`;
+}
+// What the example day adds up to, including any changes the doctor made.
+function dietExampleDayTotal(d) {
+  return d.meals.reduce((sum, m) => sum + (Number(m.proteinG) || 0), 0);
+}
+
 const DIET_PROTEIN_SWAPS = "80 g cooked chicken breast · 105 g cooked fish · 100 g cooked lean beef or camel · 4 eggs · 250 g Greek yoghurt · 280 g cooked lentils";
 const DIET_FOOD_GROUPS = [
   { name: "Protein", foods: "Chicken or turkey breast, lean beef, camel, fish and seafood (hamour, sheri, salmon, tuna, shrimp), eggs, Greek yoghurt, cottage cheese, low-fat labneh, lentils, chickpeas, foul." },
@@ -206,7 +221,7 @@ const DIET_WHY_TEXT = "Eating less doesn't mean your body needs less. Protein pr
 function dietPlanHTML(diet, medication) {
   const d = dietPlanFor(diet);
   const facts = [
-    d.proteinTarget ? ["Protein target", `${d.proteinTarget} g a day`] : null,
+    dietProteinRangeText(d, "g") ? ["Daily protein", `${dietProteinRangeText(d, "g").replace(" to ", "–")} a day`] : null,
     d.calories ? ["Calorie target", `${d.calories} kcal a day`] : null,
     ["Water", d.water],
     ["Fibre", "25–35 g a day"],
@@ -217,7 +232,7 @@ function dietPlanHTML(diet, medication) {
       <div><b>${esc(value)} ${esc(name)}</b><div class="g-lab-detail">${esc(detail)}</div></div></div>`;
   const targets = `
     <div class="g-facts" style="margin-bottom:0">${facts.map(([k, v]) => `<div class="g-fact"><div class="g-fact-lbl">${esc(k)}</div><div class="g-fact-val">${esc(v)}</div></div>`).join("")}</div>
-    ${d.proteinTarget ? `<p class="g-diet-text">Your protein target is worked out from your weight${d.proteinMin ? ` (healthy range for you: ${esc(d.proteinMin)}–${esc(d.proteinMax || d.proteinMin)} g a day)` : ""}. The example day below shows how to reach it.</p>` : `<p class="g-diet-text">Your doctor will confirm your daily protein target with you.</p>`}
+    ${dietProteinRangeText(d, "g") ? `<p class="g-diet-text"><b>Aim for ${esc(dietProteinRangeText(d, "grams"))} of protein a day.</b> ${esc(dietProteinBasisText(d))}${dietExampleDayTotal(d) ? ` The example day below gives about ${dietExampleDayTotal(d)} g.` : ""}</p>` : `<p class="g-diet-text">Your doctor will confirm your daily protein with you.</p>`}
     ${d.note ? `<div class="g-callout g-teal" style="margin:12px 0 0">${icon("info", 18)}<div>${guideProse(d.note)}</div></div>` : ""}`;
   const plate = `
     <p class="g-diet-text" style="margin-top:0">Use this as your guide for every main meal. These are portions of your plate, not calorie percentages.</p>
@@ -267,7 +282,7 @@ function dietPlanHTML(diet, medication) {
 function pushDietPlanText(push, section, diet, medication) {
   const d = dietPlanFor(diet);
   section("🥗", "YOUR DAILY NUTRITION TARGETS");
-  if (d.proteinTarget) push(`Protein: ${d.proteinTarget} g a day${d.proteinMin ? ` (healthy range for you: ${d.proteinMin}–${d.proteinMax || d.proteinMin} g)` : ""}`);
+  if (dietProteinRangeText(d, "g")) push(`Protein: ${dietProteinRangeText(d, "grams")} a day. ${dietProteinBasisText(d)}`.trim());
   if (d.calories) push(`Calories: approximately ${d.calories} kcal a day`);
   push(`Water: ${d.water}`);
   push("Fibre: 25–35 g a day");
@@ -751,7 +766,7 @@ function buildGuideText(plan, patient, doctorName, opts) {
     push();
     push("Until then:");
     push(`• Continue ${plan.medication}${plan.dose ? " " + plan.dose : ""}${plan.frequency ? " " + plan.frequency : ""}`);
-    if (isGlp1 && dietProteinTarget(diet)) push(`• Aim for ${dietProteinTarget(diet)} g of protein a day`);
+    if (isGlp1 && dietProteinRangeText(diet, "g")) push(`• Aim for ${dietProteinRangeText(diet, "g")} of protein a day`);
     if (isGlp1 && diet.calories) push(`• Aim for approximately ${diet.calories} kcal/day`);
     if (isGlp1) push(`• Maintain hydration: ${diet.water || "2–3 L daily"}`);
     push("• Track your progress");

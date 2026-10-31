@@ -636,9 +636,15 @@ function computeMetrics(p, activityLevels) {
   const mult = (activityLevels && activityLevels[p.activityLevel]) ? activityLevels[p.activityLevel].multiplier : 1.2;
   const tdee = bmr ? Math.round(bmr * mult) : null;
   const target = tdee ? Math.max(1200, tdee - 500) : null;   // 500 kcal deficit, floored at 1200
-  const proteinMin = w ? Math.round(w * 1.2) : null;
-  const proteinMax = w ? Math.round(w * 1.5) : null;
-  return { bmi, bmiCat, bmr, tdee, target, proteinMin, proteinMax };
+  // Protein: 1.2–1.5 g per kg of the patient's goal weight when they have a
+  // weight-loss goal (one below their current weight), else of their weight.
+  const goal = +p.goalWeightKg;
+  const useGoal = goal > 0 && (!w || goal < w);
+  const proteinBasisKg = useGoal ? goal : (w || null);
+  const proteinBasis = proteinBasisKg ? (useGoal ? "goal" : "current") : null;
+  const proteinMin = proteinBasisKg ? Math.round(proteinBasisKg * 1.2) : null;
+  const proteinMax = proteinBasisKg ? Math.round(proteinBasisKg * 1.5) : null;
+  return { bmi, bmiCat, bmr, tdee, target, proteinMin, proteinMax, proteinBasisKg, proteinBasis };
 }
 
 // Full structured EMR builder lives in public/doctor/app.js

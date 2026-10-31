@@ -576,6 +576,31 @@ once("rename-dr-marwa-abuaita", () => {
   console.log(`Staff account renamed: "${rows[0].name}" is now "${name}".`);
 });
 
+// Protein now follows the goal weight. Active programs that were worked out from
+// the patient's weight under the old rule are updated; a range that doesn't match
+// that rule was set by a doctor, so it stays as it is.
+once("protein-from-goal-weight", () => {
+  const rows = db.prepare(`SELECT pl.id, pl.diet_json, p.goal_weight_kg AS goal, p.current_weight_kg AS current, p.start_weight_kg AS start
+    FROM plans pl JOIN patients p ON p.id = pl.patient_id WHERE pl.status = 'active' AND p.goal_weight_kg > 0`).all();
+  let updated = 0;
+  for (const r of rows) {
+    let diet;
+    try { diet = JSON.parse(r.diet_json || "{}"); } catch { continue; }
+    const weight = r.current || r.start;
+    if (!diet.proteinMin || diet.rangeEdited || !weight || r.goal >= weight) continue;
+    if (![r.current, r.start].some((w) => w && Math.round(w * 1.2) === diet.proteinMin)) continue;
+    diet.proteinMin = Math.round(r.goal * 1.2);
+    diet.proteinMax = Math.round(r.goal * 1.5);
+    diet.proteinBasisKg = r.goal;
+    diet.proteinBasis = "goal";
+    if (!diet.targetEdited) delete diet.proteinTarget;
+    if (!diet.mealsEdited) delete diet.meals;
+    db.prepare("UPDATE plans SET diet_json = ? WHERE id = ?").run(JSON.stringify(diet), r.id);
+    updated++;
+  }
+  console.log(`Protein from goal weight: updated ${updated} of ${rows.length} active program(s) with a goal weight.`);
+});
+
 seed();
 const DEFAULT_ORG = seedOrganizations();
 

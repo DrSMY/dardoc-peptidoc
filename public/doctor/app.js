@@ -2549,7 +2549,6 @@ function wizIntakeIdentity() {
   };
   const liveMetrics = () => {
     commitDemo();
-    document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
     // A fresh height suggests a goal weight (BMI 25) — but only until the
     // doctor has typed into that field themselves.
     if (!w.patient.goalWeightCustomized) {
@@ -2557,6 +2556,7 @@ function wizIntakeIdentity() {
       w.patient.goalWeightKg = suggested ?? "";
       document.getElementById("wp-goalweight").value = w.patient.goalWeightKg;
     }
+    document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
     refreshPatientInfoSide();
   };
   // Age can be typed or worked out from a date of birth — whichever the
@@ -2569,6 +2569,7 @@ function wizIntakeIdentity() {
   document.getElementById("wp-goalweight").addEventListener("input", (e) => {
     w.patient.goalWeightKg = e.target.value;
     w.patient.goalWeightCustomized = true;
+    document.getElementById("wz-metrics").innerHTML = patientSummaryHTML(false);
     refreshPatientInfoSide();
   });
 
@@ -3657,7 +3658,7 @@ function defaultWarningsFor(item) {
 // at the level that maintains the patient's weight.
 function dietFromMetrics(m, weightLoss) {
   const diet = { water: "2–3 L daily", plate: { ...DIET_PLATE_DEFAULT } };
-  if (m.proteinMin) { diet.proteinMin = m.proteinMin; diet.proteinMax = m.proteinMax; }
+  if (m.proteinMin) { diet.proteinMin = m.proteinMin; diet.proteinMax = m.proteinMax; diet.proteinBasisKg = m.proteinBasisKg; diet.proteinBasis = m.proteinBasis; }
   const calories = weightLoss || Number(m.bmi) >= 25 ? m.target : m.tdee;
   if (calories) diet.calories = calories;
   diet.proteinTarget = dietProteinTarget(diet) || undefined;
@@ -3674,7 +3675,8 @@ function defaultDiet() {
 
 function defaultDietForPatient(p) {
   const m = computeMetrics({
-    heightCm: p.height_cm, weightKg: p.current_weight_kg || p.start_weight_kg, age: p.age, gender: p.gender, activityLevel: p.activity_level,
+    heightCm: p.height_cm, weightKg: p.current_weight_kg || p.start_weight_kg, goalWeightKg: p.goal_weight_kg,
+    age: p.age, gender: p.gender, activityLevel: p.activity_level,
   }, S.presets.activityLevels);
   return dietFromMetrics(m, true);
 }
@@ -3685,7 +3687,7 @@ function syncWizardDiet() {
   const w = S.wizard;
   const fresh = defaultDiet();
   const d = w.diet;
-  if (!d.rangeEdited) { d.proteinMin = fresh.proteinMin; d.proteinMax = fresh.proteinMax; }
+  if (!d.rangeEdited) { d.proteinMin = fresh.proteinMin; d.proteinMax = fresh.proteinMax; d.proteinBasisKg = fresh.proteinBasisKg; d.proteinBasis = fresh.proteinBasis; }
   if (!d.caloriesEdited) d.calories = fresh.calories;
   if (!d.water) d.water = fresh.water;
   if (!d.plate) d.plate = fresh.plate;
@@ -3706,18 +3708,19 @@ function dietEditorHTML(diet, patient) {
       <span style="display:flex;align-items:center;gap:10px">${icon("utensils", 18)} Nutrition plan for the patient's guide</span>
       <button class="btn btn-ghost btn-sm" id="de-rebuild" type="button">${icon("activity", 15)} Rebuild example day</button>
     </div>
-    <p class="hint" style="margin:8px 16px 0">Worked out from this patient's weight. Review it and change anything you like; the patient sees what you publish.</p>
+    <p class="hint" style="margin:8px 16px 0">Worked out from this patient's goal weight, or their current weight if there is no goal. Review it and change anything you like; the patient sees what you publish.</p>
     ${/kidney|renal|ckd|nephro/i.test(conditions) ? `<div class="g-callout g-amber" style="margin:10px 16px 0">${icon("alert", 17)}<div>Kidney disease is on file. Please check this protein target is safe for this patient.</div></div>` : ""}
     ${allergies && !/^(none|no known)/i.test(allergies) ? `<div class="g-callout g-amber" style="margin:10px 16px 0">${icon("alert", 17)}<div>Allergies on file: ${esc(allergies)}. Please check the example day avoids them.</div></div>` : ""}
     <div class="form-grid" style="padding:12px 16px 0">
-      ${inp("de-target", "Daily protein target (g)", d.proteinTarget, 'type="number" min="0"')}
-      ${inp("de-cal", "Calorie target (kcal/day)", d.calories, 'type="number" min="0"')}
-      <div class="field"><label>Protein range (g/day)</label>
+      <div class="field"><label>Daily protein (g)</label>
         <div style="display:flex;gap:8px;align-items:center">
           <input class="input" style="flex:1;min-width:70px" id="de-pmin" type="number" value="${esc(d.proteinMin ?? "")}" aria-label="Protein minimum"> –
           <input class="input" style="flex:1;min-width:70px" id="de-pmax" type="number" value="${esc(d.proteinMax ?? "")}" aria-label="Protein maximum">
         </div>
+        <span class="hint" id="de-basis">${d.proteinBasisKg ? `1.2–1.5 × ${d.proteinBasis === "goal" ? "goal weight" : "current weight"} (${esc(d.proteinBasisKg)} kg)` : ""}</span>
       </div>
+      ${inp("de-target", "Example day adds up to (g)", d.proteinTarget, 'type="number" min="0"')}
+      ${inp("de-cal", "Calorie target (kcal/day)", d.calories, 'type="number" min="0"')}
       ${inp("de-water", "Water", d.water)}
     </div>
     <div style="padding:0 16px"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">Plate portions</div></div>
@@ -3749,6 +3752,9 @@ function wireDietEditor(root, diet) {
   const rebuild = () => { diet.meals = defaultDietMeals(dietProteinTarget(diet)); diet.mealsEdited = false; paintMeals(); };
   const onRange = () => {
     diet.proteinMin = num("de-pmin"); diet.proteinMax = num("de-pmax"); diet.rangeEdited = true;
+    // The doctor's own figures, so the guide no longer explains them as a formula.
+    delete diet.proteinBasisKg; delete diet.proteinBasis;
+    el("de-basis").textContent = "";
     if (diet.targetEdited) return;
     diet.proteinTarget = dietProteinTarget({ proteinMin: diet.proteinMin, proteinMax: diet.proteinMax }) || undefined;
     el("de-target").value = diet.proteinTarget ?? "";
@@ -3819,13 +3825,16 @@ function wizEmrArgs(labs, supps) {
   const w = S.wizard;
   const m = { ...wizMetrics() };
   if (w.diet.calories) m.target = w.diet.calories;
-  if (w.diet.proteinMin) { m.proteinMin = w.diet.proteinMin; m.proteinMax = w.diet.proteinMax; }
-  if (w.diet.proteinTarget) m.proteinTarget = w.diet.proteinTarget;
+  if (w.diet.proteinMin) {
+    m.proteinMin = w.diet.proteinMin; m.proteinMax = w.diet.proteinMax;
+    m.proteinBasisKg = w.diet.proteinBasisKg; m.proteinBasis = w.diet.proteinBasis;
+  }
+  m.plate = w.diet.plate;
   return [
     { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
       age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
       chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
-      intake: w.patient.intake, noMedication: !w.cart.length && w.noMedication },
+      intake: w.patient.intake, noMedication: !w.cart.length, medicationWhy: w.medicationWhy },
     w.cart, m, w.clinicalNote, w.followupDays, labs, supps,
   ];
 }
@@ -4000,10 +4009,11 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
 
   const paras = [p1];
 
+  const proteinBasisNote = m.proteinBasisKg ? ` (1.2–1.5 g/kg of ${m.proteinBasis === "goal" ? "goal weight" : "current weight"}, ${m.proteinBasisKg} kg)` : "";
   if ((hasGlp1 || noMed) && (m.target || m.proteinMin)) {
     const bits = [];
     if (m.target) bits.push(`a daily caloric intake target of ≤${m.target} kcal/day was recommended`);
-    if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day${m.proteinTarget ? ` (target ${m.proteinTarget} g/day)` : ""} was set`);
+    if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day${proteinBasisNote} was set`);
     paras.push(`Based on the current assessment, ${bits.join(", and ")}. A personalised nutrition plan was provided, with plate portions and an example day of eating. ${noMed ? "Lifestyle modification, physical activity, treatment goals, and how medication could help if needed were discussed." : "Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed."}`);
   }
 
@@ -4025,7 +4035,7 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
       ? [emrMedLine(items[0]) + emrMedExtra(items[0], goals)]
       : items.map((it, i) => `${i + 1}. ${emrMedLine(it)}${emrMedExtra(it, goals)}`);
   const counsel = noMed
-    ? "The patient was counseled on nutrition, hydration, and physical activity, and on how medication could support their goals if needed in future."
+    ? `The patient was counseled on nutrition, hydration, and physical activity${patient.medicationWhy ? ", and on how medication could support their goals if needed in future" : ""}.`
     : others.length
     ? "The patient was counseled regarding expected benefits, common side effects, injection technique, storage, adherence, and the importance of reporting any adverse effects promptly."
     : "The patient was counseled regarding expected benefits, common side effects, injection technique, adherence, and the importance of reporting any adverse effects promptly.";
@@ -4084,11 +4094,23 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
   ];
   if (others.length) planBullets.push("Reinforce lifestyle modifications, nutrition, hydration, sleep, and physical activity.");
 
+  // With nothing prescribed, the plan given to the patient is the main outcome
+  // of the visit, so the record spells it out.
+  const plate = m.plate || {};
+  const nutritionBlock = noMed ? [
+    "NUTRITION PLAN", "",
+    m.proteinMin ? `Daily protein: ${m.proteinMin}–${m.proteinMax} g${proteinBasisNote}` : null,
+    m.target ? `Daily calories: ≤${m.target} kcal` : null,
+    plate.protein ? `Plate portions: ${plate.protein} protein, ${plate.fibre} fibre, ${String(plate.carbs).toLowerCase()} carbs` : null,
+    "Example day of eating provided: breakfast, morning snack, lunch, afternoon snack, dinner.",
+  ].filter((l) => l !== null).join("\n") : "";
+
   const sections = [
     `Date of Encounter: ${fmtDMY(encounterDate)}`,
     patientBlock,
     notesBlock,
     `CLINICAL SUMMARY\n\n${paras.join("\n\n")}`,
+    nutritionBlock,
     `${medHeader}\n\n${medLines.join("\n\n")}\n\n${counsel}`,
     `INVESTIGATIONS\n\n${investigations}`,
     supplementsBlock,
@@ -4415,7 +4437,7 @@ function wizStepClinical() {
   if (showDiet) wireDietEditor(view(), w.diet);
   const computeAutoEmr = () => buildMultiClinicalSuggestion(
     ...wizEmrArgs((w.labTests || []).filter((l) => l.on), (w.suppList || []).filter((s) => s.on))
-  ) || "Add a medication and patient details to generate the clinical record.";
+  ) || "Add the patient's details to generate the clinical record.";
   const refreshEmr = () => {
     collect();
     if (w.emrCustomized) return;
@@ -4812,7 +4834,9 @@ async function viewEditPlan(planId) {
   // A program published before nutrition plans existed gets one to start from.
   const ensureDiet = () => {
     if (Array.isArray(state.diet.meals) && state.diet.meals.length) return;
-    const start = { ...defaultDietForPatient(patient), ...state.diet };
+    const fresh = defaultDietForPatient(patient);
+    const start = { ...fresh, ...state.diet };
+    if (state.diet.proteinMin && state.diet.proteinMin !== fresh.proteinMin) { delete start.proteinBasisKg; delete start.proteinBasis; }
     start.proteinTarget = dietProteinTarget(state.diet.proteinMin ? state.diet : start) || undefined;
     start.meals = defaultDietMeals(start.proteinTarget);
     state.diet = start;
