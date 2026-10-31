@@ -138,6 +138,25 @@
   .msg.doctor { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
   .msg.patient { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
   .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* patient forms */
+  .fm-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .fm-row:has(> :nth-child(2):last-child) { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 560px) { .fm-row, .fm-row:has(> :nth-child(2):last-child) { grid-template-columns: 1fr; } .fm-row .icon-btn { justify-self: end; } }
+  .fm-banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5;
+    background: var(--primary-soft); border: 1px solid #EADBB8; border-radius: var(--r-md); }
+  .fm-banner > svg { flex-shrink: 0; margin-top: 1px; color: var(--gold-bronze); }
+  .fm-banner.fm-urgent { background: var(--danger-soft); border-color: #EBC9C2; }
+  .fm-banner.fm-urgent > svg { color: var(--danger); }
+  .fm-group { margin-top: 8px; }
+  .fm-group ul { margin: 2px 0 0; padding-left: 18px; }
+  .fm-sub { padding: 14px 18px 6px; border-top: 1px solid var(--border); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .fm-sub + .due-row { border-top: 0; }
+  .fm-flags { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 12.5px; color: var(--amber); }
+  .fm-flag-u { color: var(--danger); font-weight: 600; }
+  .fm-file summary { cursor: pointer; font-size: 13.5px; font-weight: 600; min-height: 32px; }
+  .fm-spoke { display: flex; gap: 10px; align-items: flex-start; padding: 12px; margin-bottom: 12px; cursor: pointer; font-size: 13px; line-height: 1.45;
+    background: var(--danger-soft); border: 1px solid #EBC9C2; border-radius: var(--r-md); }
+  .fm-spoke input { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; accent-color: var(--brand); }
   .due-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-top: 1px solid var(--border); }
   .due-row[hidden] { display: none; }
   .due-info { flex: 1; min-width: 0; }
@@ -307,9 +326,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare71"></script>
+<script src="/shared.js?v=docare74"></script>
 <script src="/patient-guides.js?v=docare25"></script>
-<script src="/guide.js?v=docare71"></script>
-<script src="/doctor/app.js?v=docare71"></script>
+<script src="/guide.js?v=docare74"></script>
+<script src="/doctor/app.js?v=docare74"></script>
 </body>
 </html>

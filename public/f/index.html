@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#F8F7F2">
+<title>Complete your details</title>
+<!--OG-->
+<link rel="stylesheet" href="/theme.css?v=docare25">
+<link rel="stylesheet" href="/patient-page.css?v=docare74">
+<style>
+  /* progress through the required questions */
+  .fp-progress { position: sticky; top: 0; z-index: 5; margin: -24px -16px 20px; padding: 8px 16px; background: var(--bg); }
+  .fp-progress-track { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
+  .fp-progress-fill { height: 100%; background: var(--brand); transform-origin: left; transform: scaleX(0); transition: transform .25s ease; }
+  /* top of the form */
+  .fp-medlabel { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold-bronze); }
+  .fp-meds { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .fp-meds .rp-med { margin: 0; }
+  .fp-intro { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  /* fields */
+  .rr-sec-head + .rr-sublabel, .rr-sec-head + .rr-field > .rr-sublabel { margin-top: 0; }
+  .rr-field + .rr-field, .fp-reveal > .rr-group + .rr-field, .fp-reveal > .rr-err + .rr-field { margin-top: 14px; }
+  .rr-field > .rr-sublabel { margin: 0 0 6px; }
+  .fp-small { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .fp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .fp-seg3 { grid-template-columns: 1fr 1fr 1fr; }
+  .fp-seg3 .rr-opt-head { padding-left: 8px; padding-right: 8px; gap: 8px; }
+  .fp-reveal { margin-top: 12px; }
+  .fp-reveal > .rr-note { margin-bottom: 12px; }
+  .fp-reveal > .rr-group + .rr-note, .rr-seg + .fp-note { margin-top: 12px; }
+  .fp-note { margin-top: 12px; }
+  /* tick-all-that-apply chips */
+  .fp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .fp-chip { position: relative; display: inline-flex; align-items: center; min-height: 44px; padding: 9px 14px; cursor: pointer;
+    background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 12px; font-size: 14.5px; font-weight: 500; line-height: 1.3;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+  .fp-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+  .fp-chip:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-soft); font-weight: 600; }
+  .fp-chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+  @media (hover: hover) { .fp-chip:not(:has(input:checked)):hover { border-color: var(--sage); } }
+  /* final confirmation */
+  .fp-confirm { display: flex; gap: 12px; align-items: flex-start; padding: 16px; margin-bottom: 8px; cursor: pointer;
+    background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 16px; font-size: 14.5px; line-height: 1.5; }
+  .fp-confirm input { width: 22px; height: 22px; flex-shrink: 0; margin: 1px 0 0; accent-color: var(--brand); }
+  .fp-confirm:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+  .fp-send { padding: 8px 0 calc(24px + env(safe-area-inset-bottom)); }
+  .fp-send .btn { min-height: 52px; font-size: 16px; }
+  .fp-send p { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+  .fp-done-note { margin: 16px auto 14px; max-width: 380px; text-align: left; }
+</style>
+</head>
+<body>
+<main class="rp" id="rp">
+  <div class="skel rp-skel" style="height:56px;margin-top:16px"></div>
+  <div class="skel rp-skel" style="height:110px"></div>
+  <div class="skel rp-skel" style="height:300px"></div>
+</main>
+<script src="/shared.js?v=docare74"></script>
+<script src="/guide.js?v=docare74"></script>
+<script src="/f/app.js?v=docare74"></script>
+</body>
+</html>

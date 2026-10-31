@@ -1042,6 +1042,12 @@ const INTAKE_QUESTIONS = [
   { id: "cancer_history", section: "Clinical", question: "Have you or a close family member ever been diagnosed with cancer or any tumor/growth?", type: "select", options: ["No", "Yes - myself", "Yes - a family member", "Yes - both myself and a family member"], hasNotes: true },
   { id: "previous_glp1", section: "Clinical", question: "Previous history of GLP-1/peptide medication use?", type: "select", options: ["No", "Yes"], hasNotes: true },
 
+  // Asked on the patient information form. The consultation only shows these
+  // when a form has answered them (see wizIntakeClinical).
+  { id: "planning_pregnancy", section: "Clinical", question: "Planning a pregnancy?", type: "select", options: ["No", "Yes"] },
+  { id: "thyroid_history", section: "Clinical", question: "Medullary thyroid cancer or MEN 2 (self or family)?", type: "select", options: ["No", "Yes", "Not sure"] },
+  { id: "pancreas_history", section: "Clinical", question: "Pancreatitis or gallbladder problems?", type: "select", options: ["No", "Pancreatitis", "Gallbladder problems", "Both"] },
+
   // Primary Health Objectives — "Weight loss" is added ahead of the 5
   // officially-documented goals to route into the GLP-1 workflow; the last
   // 5 (Cognitive/Sexual/Immune/Gut/Skin) extend coverage to match the

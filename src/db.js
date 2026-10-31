@@ -347,6 +347,44 @@ CREATE TABLE IF NOT EXISTS visit_records (
 );
 CREATE INDEX IF NOT EXISTS idx_visit_records_patient ON visit_records(patient_id);`);
 
+// ── patient information forms ─────────────────────────────────────
+// For someone who bought their medication before any consultation, or who
+// couldn't join one: the team sends a private link and the patient fills in
+// their own details. Nothing here is a prescription — the answers wait for a
+// doctor, who reviews them in a pre-filled consultation and publishes from
+// there. `patient_id` is set straight away for a known patient, otherwise on
+// submission; `new_patient` marks a record the form itself created.
+db.exec(`
+CREATE TABLE IF NOT EXISTS patient_forms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  org_id INTEGER NOT NULL,
+  created_by INTEGER REFERENCES users(id),
+  patient_id INTEGER REFERENCES patients(id),
+  new_patient INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT 'purchased',     -- purchased | missed
+  status TEXT NOT NULL DEFAULT 'sent',          -- sent | submitted | completed | cancelled
+  mobile TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  label TEXT DEFAULT '',                        -- the patient's name, for lists
+  prefill_json TEXT NOT NULL DEFAULT '{}',      -- what the practice already knows, for the patient to confirm
+  meds_json TEXT NOT NULL DEFAULT '[]',         -- [{templateId, medication, category, route, frequency, dose, protocolKey}]
+  answers_json TEXT,
+  flags_json TEXT NOT NULL DEFAULT '[]',        -- [{level: urgent|review, text}], worked out on the server
+  urgent INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0,
+  last_viewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  submitted_at TEXT,
+  completed_at TEXT,
+  completed_by INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_patient_forms_org ON patient_forms(org_id, status);
+CREATE INDEX IF NOT EXISTS idx_patient_forms_patient ON patient_forms(patient_id);`);
+// So reopening a form's review resumes the same draft instead of starting another.
+addColumn("wizard_drafts", "form_id", "INTEGER");
+
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
 // never guessed or auto-filled — shown in the guide only once set.

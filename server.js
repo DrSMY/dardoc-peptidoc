@@ -3,7 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const { handleApi, guidePageMeta, refillPageMeta } = require("./src/api");
+const { handleApi, guidePageMeta, refillPageMeta, formPageMeta } = require("./src/api");
 
 const PORT = process.env.PORT || 4700;
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -49,48 +49,19 @@ function serveFile(res, filePath) {
 
 const escAttr = (v) => String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// The shareable patient guide (/g/<token>). The page itself is a static shell
-// that fetches the guide with the token, but link-preview crawlers (WhatsApp)
-// only read the HTML, so the clinic's name and logo are written into the
-// <head> here — nothing about the patient is.
-function serveGuidePage(req, res, token) {
-  fs.readFile(path.join(PUBLIC_DIR, "g", "index.html"), "utf8", (err, html) => {
+// The private-link pages (/g/, /r/ and /f/<token>). Each is a static shell that
+// fetches its data with the token, but link-preview crawlers (WhatsApp) only
+// read the HTML, so the clinic's name and logo are written into the <head>
+// here. Nothing about the patient is.
+function serveLinkPage(req, res, dir, meta, title, description) {
+  fs.readFile(path.join(PUBLIC_DIR, dir, "index.html"), "utf8", (err, html) => {
     if (err) { res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Not found"); }
-    const meta = guidePageMeta(token);
     const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
     const origin = `${proto}://${req.headers.host || "localhost"}`;
-    const title = meta && meta.clinic ? `Your personal treatment guide — ${meta.clinic}` : "Your personal treatment guide";
     const tags = [
       `<meta property="og:type" content="website">`,
-      `<meta property="og:title" content="${escAttr(title)}">`,
-      `<meta property="og:description" content="Tap to open your guide: how to take your medication, what to expect, side effects and when to contact us.">`,
-      meta && meta.clinic ? `<meta property="og:site_name" content="${escAttr(meta.clinic)}">` : "",
-      meta && meta.logoUrl ? `<meta property="og:image" content="${escAttr(origin + meta.logoUrl)}">` : "",
-    ].filter(Boolean).join("\n");
-    res.writeHead(200, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Robots-Tag": "noindex, nofollow",
-      "Referrer-Policy": "no-referrer",
-    });
-    res.end(html.replace("<!--OG-->", tags));
-  });
-}
-
-// The dedicated refill-request page (/r/<token>) — a separate shareable link
-// from the guide link, so a patient can land straight on "request a refill"
-// without the whole treatment guide. Same static-shell + og-tag pattern.
-function serveRefillPage(req, res, token) {
-  fs.readFile(path.join(PUBLIC_DIR, "r", "index.html"), "utf8", (err, html) => {
-    if (err) { res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Not found"); }
-    const meta = refillPageMeta(token);
-    const proto = String(req.headers["x-forwarded-proto"] || "http").split(",")[0].trim();
-    const origin = `${proto}://${req.headers.host || "localhost"}`;
-    const title = meta && meta.clinic ? `Request a refill — ${meta.clinic}` : "Request a refill";
-    const tags = [
-      `<meta property="og:type" content="website">`,
-      `<meta property="og:title" content="${escAttr(title)}">`,
-      `<meta property="og:description" content="Tap to request your next refill — your doctor will review and confirm.">`,
+      `<meta property="og:title" content="${escAttr(meta && meta.clinic ? `${title} — ${meta.clinic}` : title)}">`,
+      `<meta property="og:description" content="${escAttr(description)}">`,
       meta && meta.clinic ? `<meta property="og:site_name" content="${escAttr(meta.clinic)}">` : "",
       meta && meta.logoUrl ? `<meta property="og:image" content="${escAttr(origin + meta.logoUrl)}">` : "",
     ].filter(Boolean).join("\n");
@@ -123,11 +94,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const guideMatch = pathname.match(/^\/g\/([A-Za-z0-9_-]{20,64})\/?$/);
-  if (guideMatch) return serveGuidePage(req, res, guideMatch[1]);
-
-  const refillMatch = pathname.match(/^\/r\/([A-Za-z0-9_-]{20,64})\/?$/);
-  if (refillMatch) return serveRefillPage(req, res, refillMatch[1]);
+  const linkMatch = pathname.match(/^\/([grf])\/([A-Za-z0-9_-]{20,64})\/?$/);
+  if (linkMatch) {
+    const [, kind, token] = linkMatch;
+    if (kind === "g") return serveLinkPage(req, res, "g", guidePageMeta(token), "Your personal treatment guide", "Tap to open your guide: how to take your medication, what to expect, side effects and when to contact us.");
+    if (kind === "r") return serveLinkPage(req, res, "r", refillPageMeta(token), "Request a refill", "Tap to request your next refill — your doctor will review and confirm.");
+    return serveLinkPage(req, res, "f", formPageMeta(token), "Complete your details", "A few questions so your doctor can review your treatment safely.");
+  }
 
   if (PAGE_ROUTES[pathname]) {
     return serveFile(res, path.join(PUBLIC_DIR, PAGE_ROUTES[pathname]));

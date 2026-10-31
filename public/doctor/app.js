@@ -217,6 +217,8 @@ async function viewDashboard() {
     ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
 
+  <div id="patient-forms">${patientFormsCardHTML(d.patientForms)}</div>
+
   <div id="refill-due">${refillDueCardHTML(d.refillDue)}</div>
 
   <div id="practice-stats"></div>
@@ -310,6 +312,7 @@ async function viewDashboard() {
     if (pl) refillFormModal(detail.patient, pl, reqRow);
   }));
 
+  wirePatientForms(d.patientForms);
   wireRefillDue(d.refillDue);
   paintRefillBadge(d.refillDue.length);
   renderPracticeStats(d);
@@ -663,7 +666,7 @@ async function viewPatient(id) {
   let d;
   try { d = await api("GET", `/api/patients/${id}`); }
   catch (e) { view().innerHTML = `<div class="empty">${icon("alert", 34)}<div class="empty-title">${esc(e.message)}</div></div>`; return; }
-  const { patient: p, plans, doses, checkins, messages, refillRequests, visits } = d;
+  const { patient: p, plans, doses, checkins, messages, refillRequests, visits, patientForms } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
   // The patient's actual current weight — the latest logged weight (check-ins
@@ -765,6 +768,8 @@ async function viewPatient(id) {
               ${refillRequests.length ? `<div class="full"><span class="emr-lbl">Latest refill</span><span class="emr-val">${latestRefillSummaryHTML(refillRequests[0], plans)}</span></div>` : ""}
             </div>
           </div>
+
+          ${patientFormFileCardHTML(patientForms)}
 
           ${clinicalRecord ? `
           <div class="card card-pad">
@@ -1008,6 +1013,9 @@ function intakeSummaryCard(p) {
   if (intake.previous_glp1 === "Yes") rows.push(`<div><b>Previous GLP-1 use:</b> Yes${intake.previous_glp1__notes ? " — " + esc(intake.previous_glp1__notes) : ""}</div>`);
   if (intake.is_pregnant === "Yes") rows.push(`<div><b>Pregnant:</b> Yes</div>`);
   if (intake.is_breastfeeding === "Yes") rows.push(`<div><b>Breastfeeding:</b> Yes</div>`);
+  if (intake.planning_pregnancy === "Yes") rows.push(`<div><b>Planning a pregnancy:</b> Yes</div>`);
+  if (intake.thyroid_history && intake.thyroid_history !== "No") rows.push(`<div><b>Medullary thyroid cancer or MEN 2:</b> ${esc(intake.thyroid_history)}</div>`);
+  if (intake.pancreas_history && intake.pancreas_history !== "No") rows.push(`<div><b>Pancreatitis or gallbladder problems:</b> ${esc(intake.pancreas_history)}</div>`);
   if (activityDetailSummary(intake.activity_detail)) rows.push(`<div><b>Exercise:</b> ${esc(activityDetailSummary(intake.activity_detail))}</div>`);
   if (intake.additional_notes) rows.push(`<div><b>Patient notes:</b> ${esc(intake.additional_notes)}</div>`);
   if (!rows.length) return "";
@@ -1695,6 +1703,346 @@ function refillRecordText(p, plans, refillRequests) {
   }).join("\n\n");
 }
 
+// ── patient information forms ────────────────────────────────────────
+// For someone who bought their medication before any consultation, or who
+// couldn't join one: they get a private link and fill in their own details.
+// Their answers wait for a doctor, who reviews them in a pre-filled
+// consultation and publishes from there.
+const medNames = (meds) => meds.map((m) => `${m.medication}${m.dose ? " " + m.dose : ""}`).join(", ");
+
+function patientFormMessage(patient, reason, meds, url) {
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
+  const u = S.user;
+  const signature = [
+    [u.name, u.credentials].filter(Boolean).join(" "),
+    u.signature,
+    u.clinic || u.orgName || "DarDoc Healthcare",
+  ].filter(Boolean);
+  const opening = reason === "purchased"
+    ? `You recently purchased *${medNames(meds)}*. Since you haven't had a consultation yet, we need some information from you to complete your file and make sure your delivery and medication follow-up are done properly.`
+    : `We're sorry you weren't able to join your consultation.${meds.length ? ` You chose *${medNames(meds)}*.` : ""} So that your doctor can still review your health and look after you properly, we need some information from you.`;
+  return [
+    "🩺 *COMPLETE YOUR DETAILS*",
+    "",
+    `Dear ${patient.title ? patient.title + " " : ""}${firstName},`,
+    "",
+    opening,
+    "",
+    "It takes about 3 minutes, and each question explains why we ask it. Some answers, such as pregnancy or certain medical conditions, affect whether a medication is safe for you, so please complete this before starting any medication.",
+    "",
+    "Tap the link to confirm what we already have and add the rest:",
+    "",
+    url,
+    "",
+    "Your doctor will review your answers and contact you if anything needs discussing.",
+    "",
+    "",
+    ...signature,
+  ].join("\n");
+}
+const patientFormSubject = () => `Please complete your details — ${S.user.clinic || S.user.orgName || "your clinic"}`;
+const patientFormUrl = (token) => `${location.origin}/f/${token}`;
+
+// The dose choices on offer for one library medication.
+function formDoseChoices(tpl) {
+  if (tpl.category === "glp1") return (tpl.config.doses || []).map((dose) => ({ value: dose, label: dose }));
+  return peptideProtocolOptions(tpl.config.medication || tpl.name, tpl).map((o) => {
+    const pr = o.protocol;
+    return { value: o.key, label: [pr.doseVolume || pr.doseAmount, pr.protocolType].filter(Boolean).join(" · ") };
+  });
+}
+
+function patientFormModal(channel) {
+  const w = S.wizard, p = w.patient;
+  const libs = [["glp1", "GLP-1 / weight loss"], ["peptide", "Peptides"]];
+  const rows = [{ templateId: "", choice: "" }];
+  const medOptions = (sel) => libs.map(([cat, label]) => `
+    <optgroup label="${label}">
+      ${S.templates.filter((t) => t.category === cat).map((t) => `<option value="${t.id}" ${String(t.id) === String(sel) ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+    </optgroup>`).join("");
+  const rowHTML = (r, i) => {
+    const tpl = S.templates.find((t) => String(t.id) === String(r.templateId));
+    const doses = tpl ? formDoseChoices(tpl) : [];
+    return `
+    <div class="fm-row">
+      <select class="input" data-fm-med="${i}" aria-label="Medication">
+        <option value="">Choose a medication…</option>
+        ${medOptions(r.templateId)}
+      </select>
+      <select class="input" data-fm-dose="${i}" aria-label="Dose" ${tpl ? "" : "disabled"}>
+        ${tpl ? doses.map((o) => `<option value="${esc(o.value)}" ${o.value === r.choice ? "selected" : ""}>${esc(o.label)}</option>`).join("") : `<option>Dose</option>`}
+      </select>
+      ${rows.length > 1 ? `<button type="button" class="icon-btn" data-fm-del="${i}" aria-label="Remove this medication">${icon("x", 16)}</button>` : ""}
+    </div>`;
+  };
+
+  const scrim = modal(`
+    <div class="modal-head"><h3>Send patient form</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <div id="fm-body">
+      <p class="hint" style="margin:-6px 0 14px">A private link where the patient confirms what we have and fills in the rest. You review their answers before anything goes ahead.</p>
+      <div class="field">
+        <label>Why are you sending this?</label>
+        <div class="chip-row">
+          <button type="button" class="chip on" data-fm-reason="purchased">Purchased medication</button>
+          <button type="button" class="chip" data-fm-reason="missed">Couldn't join consultation</button>
+        </div>
+      </div>
+      <div class="field">
+        <label id="fm-med-label">Medication and dose they purchased</label>
+        <div id="fm-rows"></div>
+        <button type="button" class="linklike" id="fm-add" style="display:inline-flex;align-items:center;gap:4px;align-self:flex-start;margin-top:4px">${icon("plus", 14)} Add another medication</button>
+      </div>
+      <div class="form-grid">
+        <div class="field full"><label for="fm-name">Patient's name</label><input class="input" id="fm-name" value="${esc(p.name)}" autocomplete="off"></div>
+        <div class="field"><label for="fm-mobile">Mobile${channel === "wa" ? ' <span class="req">*</span>' : ""}</label><input class="input" id="fm-mobile" type="tel" value="${esc(p.mobile)}" placeholder="9715xxxxxxxx"></div>
+        <div class="field"><label for="fm-email">Email${channel === "email" ? ' <span class="req">*</span>' : ""}</label><input class="input" id="fm-email" type="email" value="${esc(p.email)}"></div>
+      </div>
+      <p class="err-text" id="fm-err" role="alert" hidden></p>
+      <button class="btn btn-primary btn-block" id="fm-next" type="button"><span class="spin"></span><span class="btn-label">Create the link</span></button>
+    </div>`, true);
+  const $ = (id) => scrim.querySelector("#" + id);
+  let reason = "purchased";
+
+  function paintRows() {
+    $("fm-rows").innerHTML = rows.map(rowHTML).join("");
+    scrim.querySelectorAll("[data-fm-med]").forEach((el) => el.addEventListener("change", () => {
+      const r = rows[Number(el.dataset.fmMed)];
+      r.templateId = el.value;
+      const tpl = S.templates.find((t) => String(t.id) === String(r.templateId));
+      r.choice = tpl ? (formDoseChoices(tpl)[0] || {}).value || "" : "";
+      paintRows();
+    }));
+    scrim.querySelectorAll("[data-fm-dose]").forEach((el) => el.addEventListener("change", () => { rows[Number(el.dataset.fmDose)].choice = el.value; }));
+    scrim.querySelectorAll("[data-fm-del]").forEach((el) => el.addEventListener("click", () => { rows.splice(Number(el.dataset.fmDel), 1); paintRows(); }));
+  }
+  paintRows();
+  $("fm-add").addEventListener("click", () => { rows.push({ templateId: "", choice: "" }); paintRows(); });
+  scrim.querySelectorAll("[data-fm-reason]").forEach((b) => b.addEventListener("click", () => {
+    reason = b.dataset.fmReason;
+    scrim.querySelectorAll("[data-fm-reason]").forEach((x) => x.classList.toggle("on", x === b));
+    $("fm-med-label").textContent = reason === "purchased" ? "Medication and dose they purchased" : "Medication and dose they chose (optional)";
+  }));
+
+  $("fm-next").addEventListener("click", async () => {
+    const err = $("fm-err");
+    const show = (msg) => { err.textContent = msg; err.hidden = false; };
+    err.hidden = true;
+    const name = $("fm-name").value.trim(), mobile = $("fm-mobile").value.trim(), email = $("fm-email").value.trim();
+    const meds = rows.filter((r) => r.templateId).map((r) => {
+      const tpl = S.templates.find((t) => String(t.id) === String(r.templateId));
+      const d = applyTemplateTo(freshDraft(tpl.category), tpl, r.choice);
+      return { templateId: tpl.id, medication: d.medication, category: d.category, route: d.route, frequency: d.frequency, dose: d.dose, protocolKey: d.protocolKey || "" };
+    });
+    if (reason === "purchased" && !meds.length) return show("Choose the medication the patient purchased.");
+    if (!name) return show("Add the patient's name.");
+    if (channel === "wa" && !mobile) return show("Add a mobile number to send this on WhatsApp.");
+    if (channel === "email" && !email) return show("Add an email address to send this by email.");
+    const btn = $("fm-next");
+    btn.classList.add("loading");
+    try {
+      const form = await api("POST", "/api/patient-forms", {
+        patientId: w.existingId, reason, meds,
+        patient: { name, title: p.title, mobile, email, dob: p.dob, gender: p.gender, heightCm: p.heightCm, weightKg: p.weightKg, medications: p.medications, intake: p.intake },
+      });
+      paintSend(form, { name, title: p.title, mobile, email });
+    } catch (ex) {
+      show(ex.message);
+    } finally {
+      btn.classList.remove("loading");
+    }
+  });
+
+  // Second step: the message, ready to send. The send is its own click so the
+  // browser allows WhatsApp to open in a new tab.
+  function paintSend(form, person) {
+    const url = patientFormUrl(form.token);
+    const primary = (ch) => (ch === channel ? "btn-accent" : "btn-secondary");
+    $("fm-body").innerHTML = `
+      <div class="field"><label for="fm-msg">Message</label><textarea class="input" id="fm-msg" rows="14"></textarea></div>
+      <div class="card" style="background:var(--bg);padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <span style="flex:1;min-width:0;font-size:12.5px;color:var(--muted);word-break:break-all">${esc(url)}</span>
+        <button class="btn btn-ghost btn-sm" id="fm-copylink" type="button">${icon("copy", 15)} Link</button>
+        <a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank" rel="noopener">Preview</a>
+      </div>
+      <p class="hint" style="margin-bottom:14px">The link works for 30 days, or until the patient sends their answers. They'll appear on your dashboard under Patient forms.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ${primary("wa")}" style="flex:1;min-width:150px" id="fm-wa" type="button">${icon("whatsapp", 18)} Send via WhatsApp</button>
+        <button class="btn ${primary("email")}" style="flex:1;min-width:150px" id="fm-mail" type="button">${icon("mail", 18)} Send by email</button>
+        <button class="btn btn-secondary" id="fm-copy" type="button">${icon("copy", 18)} Copy</button>
+      </div>
+      <button class="btn btn-ghost btn-block" id="fm-done" type="button" style="margin-top:10px">Done</button>`;
+    const msg = $("fm-msg");
+    msg.value = patientFormMessage(person, form.reason, form.meds, url);
+    // Once it's sent the patient takes over, and everything typed so far went
+    // with the form, so there's no consultation left to keep as a draft.
+    const handOver = async () => {
+      w.published = true;
+      clearTimeout(autosaveTimer);
+      await w._saving;
+      if (w.draftId) { try { await api("DELETE", `/api/drafts/${w.draftId}`); } catch { /* best effort */ } }
+      w.draftId = null;
+      refreshDraftBadge();
+    };
+    $("fm-wa").addEventListener("click", () => {
+      if (!person.mobile) return toast("This patient has no mobile number on file", "bad");
+      window.open(waLink(person.mobile, msg.value), "_blank");
+      handOver();
+    });
+    $("fm-mail").addEventListener("click", () => { openEmail(person.email, patientFormSubject(), msg.value); handOver(); });
+    $("fm-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); handOver(); });
+    $("fm-copylink").addEventListener("click", async () => { await navigator.clipboard.writeText(url); toast("Link copied"); });
+    $("fm-done").addEventListener("click", async () => {
+      await handOver();
+      scrim.remove();
+      location.hash = "#/dashboard";
+    });
+  }
+}
+
+// Opens a submitted form as a consultation, filled in with the patient's
+// answers and the medication they bought, so the doctor checks and publishes.
+async function openFormReview(id) {
+  view().innerHTML = `<div class="skel" style="height:340px"></div>`;
+  let f;
+  try { f = await api("GET", `/api/patient-forms/${id}`); }
+  catch (ex) { view().innerHTML = `<div class="empty">${icon("alert", 32)}<div class="empty-title">${esc(ex.message)}</div></div>`; return; }
+  if (f.status !== "submitted") {
+    view().innerHTML = `<div class="empty">${icon("checkCircle", 32)}<div class="empty-title">This form has already been dealt with</div><p><a href="#/dashboard">Back to the dashboard</a></p></div>`;
+    return;
+  }
+  if (f.draftId) return void resumeDraft(f.draftId);
+  if (f.patientId && !S.patients.some((x) => x.id === f.patientId)) { try { S.patients = await api("GET", "/api/patients"); } catch {} }
+
+  const w = S.wizard, a = f.answers, known = f.patient || {};
+  const knownGoals = known.intake && Array.isArray(known.intake.health_goals) && known.intake.health_goals.length ? known.intake.health_goals : null;
+  w.existingId = f.patientId || null;
+  w.form = { id: f.id, flags: f.flags, urgent: f.urgent, submittedAt: f.submittedAt, reason: f.reason, newPatient: f.newPatient };
+  Object.assign(w.patient, {
+    name: a.name, mobile: a.mobile, email: a.email, title: f.title || "", age: a.age, dob: a.dob, gender: a.gender,
+    heightCm: a.heightCm, weightKg: a.weightKg,
+    startWeightKg: known.startWeightKg || a.weightKg, maxWeightKg: known.maxWeightKg || "",
+    goalWeightKg: known.goalWeightKg || suggestGoalWeightKg(a.heightCm) || "", goalWeightCustomized: known.goalWeightKg != null,
+    nationalId: known.nationalId || "", activityLevel: known.activityLevel || "Sedentary", medications: a.medications,
+    intake: { ...(known.intake || {}), ...f.intake, ...(knownGoals ? { health_goals: knownGoals } : {}) },
+  });
+  w.cart = f.meds.map((m) => {
+    const tpl = S.templates.find((t) => t.id === m.templateId) || S.templates.find((t) => t.category === m.category && (t.config.medication || t.name) === m.medication);
+    const d = freshDraft(tpl ? tpl.category : "custom");
+    if (tpl) applyTemplateTo(d, tpl, m.category === "glp1" ? m.dose : m.protocolKey);
+    else Object.assign(d, { medication: m.medication, dose: m.dose, route: m.route || "injection", frequency: m.frequency || "weekly" });
+    return cartItemFrom(d);
+  });
+  paintWizard();
+}
+
+// Stays at the top of every step of the review, so a reported risk can't be
+// scrolled past on the way to publishing.
+function formReviewBannerHTML(form) {
+  const flags = form.flags || [];
+  const urgent = flags.filter((f) => f.level === "urgent"), review = flags.filter((f) => f.level === "review");
+  const list = (items) => `<ul>${items.map((f) => `<li>${esc(f.text)}</li>`).join("")}</ul>`;
+  return `
+  <div class="fm-banner ${urgent.length ? "fm-urgent" : ""}">
+    ${icon(urgent.length ? "alert" : "clipboard", 18)}
+    <div>
+      <b>Filled in by the patient on ${esc(fmtDate(form.submittedAt))}. Nobody has spoken with them yet.</b>
+      ${urgent.length ? `<div class="fm-group"><b>Urgent: told not to start until you have spoken</b>${list(urgent)}</div>` : ""}
+      ${review.length ? `<div class="fm-group"><b>Please check</b>${list(review)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+function patientFormsCardHTML(pf) {
+  const { toReview, waiting } = pf;
+  if (!toReview.length && !waiting.length) return "";
+  const urgent = toReview.filter((f) => f.urgent).length;
+  const what = (f) => (f.meds.length ? medNames(f.meds) : "No medication chosen yet");
+  const contact = (f) => [f.mobile ? `+${f.mobile}` : "", f.email].filter(Boolean).join(" · ");
+  return `
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-title" style="padding:18px 18px 4px;flex-wrap:wrap">${icon("clipboard", 19)} Patient forms
+      ${toReview.length ? `<span class="badge badge-amber">${toReview.length} to review</span>` : ""}
+      ${urgent ? `<span class="badge badge-red">${urgent} urgent</span>` : ""}
+    </div>
+    ${toReview.map((f) => `
+    <div class="due-row">
+      <div class="avatar">${esc(initials(f.name))}</div>
+      <div class="due-info">
+        <div class="due-name">${f.patientId ? `<a href="#/patient/${f.patientId}">${esc(f.name)}</a>` : esc(f.name)} ${f.urgent ? `<span class="badge badge-red">urgent</span>` : ""}</div>
+        <div class="pt-meta">${esc(what(f))} · ${esc(contact(f))} · sent in ${timeAgo(f.submittedAt)}</div>
+        ${f.flags.length ? `<div class="fm-flags">${f.flags.map((x) => `<span class="${x.level === "urgent" ? "fm-flag-u" : ""}">${esc(x.text)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="due-actions">
+        <a class="btn btn-primary btn-sm" href="#/consult?form=${f.id}">Review</a>
+        <button class="btn btn-ghost btn-sm" type="button" data-form-dismiss="${f.id}">Dismiss</button>
+      </div>
+    </div>`).join("")}
+    ${waiting.length ? `<div class="fm-sub">Waiting for the patient (${waiting.length})</div>` : ""}
+    ${waiting.map((f, i) => `
+    <div class="due-row">
+      <div class="avatar">${esc(initials(f.name))}</div>
+      <div class="due-info">
+        <div class="due-name">${f.patientId ? `<a href="#/patient/${f.patientId}">${esc(f.name)}</a>` : esc(f.name)}</div>
+        <div class="pt-meta">${esc(what(f))} · sent ${timeAgo(f.createdAt)} · ${f.views ? `opened ${timeAgo(f.lastViewedAt)}` : "not opened yet"}</div>
+      </div>
+      <div class="due-actions">
+        ${f.mobile ? `<button class="btn btn-accent btn-sm" type="button" data-form-wa="${i}">${icon("whatsapp", 15)} Remind</button>` : ""}
+        ${f.email ? `<button class="btn btn-secondary btn-sm" type="button" data-form-mail="${i}">${icon("mail", 15)} Email</button>` : ""}
+        <button class="btn btn-ghost btn-sm" type="button" data-form-cancel="${f.id}">Cancel</button>
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
+
+function wirePatientForms(pf) {
+  const box = document.getElementById("patient-forms");
+  if (!box) return;
+  const textFor = (f) => patientFormMessage({ name: f.name, title: f.title }, f.reason, f.meds, patientFormUrl(f.token));
+  // Reminding keeps the same link working for another full period. The window
+  // opens first, inside the click, or the browser blocks it.
+  const extend = (f) => { api("POST", `/api/patient-forms/${f.id}/resend`, {}).catch(() => {}); };
+  box.querySelectorAll("[data-form-wa]").forEach((b) => b.addEventListener("click", () => {
+    const f = pf.waiting[Number(b.dataset.formWa)];
+    window.open(waLink(f.mobile, textFor(f)), "_blank");
+    extend(f);
+  }));
+  box.querySelectorAll("[data-form-mail]").forEach((b) => b.addEventListener("click", () => {
+    const f = pf.waiting[Number(b.dataset.formMail)];
+    openEmail(f.email, patientFormSubject(), textFor(f));
+    extend(f);
+  }));
+  box.querySelectorAll("[data-form-cancel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Cancel this form? The link will stop working.")) return;
+    await api("DELETE", `/api/patient-forms/${b.dataset.formCancel}`);
+    toast("Form cancelled");
+    viewDashboard();
+  }));
+  box.querySelectorAll("[data-form-dismiss]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Dismiss this form without a review? Their answers stay in their file and in Messages, but no program will be created.")) return;
+    await api("DELETE", `/api/patient-forms/${b.dataset.formDismiss}`);
+    toast("Form dismissed");
+    viewDashboard();
+  }));
+}
+
+// The form as part of the patient's file.
+function patientFormFileCardHTML(forms) {
+  if (!forms || !forms.length) return "";
+  return `
+  <div class="card card-pad">
+    <div class="card-title" style="flex-wrap:wrap">${icon("clipboard", 19)} Patient form
+      ${forms[0].status === "submitted" ? `<span class="badge badge-amber">waiting for review</span>` : `<span class="badge badge-green">reviewed</span>`}
+      ${forms[0].status === "submitted" && forms[0].urgent ? `<span class="badge badge-red">urgent</span>` : ""}
+    </div>
+    ${forms.map((f, i) => `
+      <details ${i === 0 && f.status === "submitted" ? "open" : ""} class="fm-file">
+        <summary>${esc(f.meds.length ? medNames(f.meds) : "No medication chosen")} · filled in ${esc(fmtDate(f.submittedAt))}</summary>
+        <div class="rf-quote" style="white-space:pre-wrap;margin-top:8px">${esc(f.summary)}</div>
+      </details>
+      ${f.status === "submitted" ? `<a class="btn btn-primary btn-sm" style="margin-top:10px" href="#/consult?form=${f.id}">Review and publish</a>` : ""}`).join("")}
+  </div>`;
+}
+
 // ── consultation wizard ──────────────────────────────────────────
 const WIZ_STEPS = ["Intake", "Program", "Labs & Supplements", "Clinical", "Review & publish"];
 
@@ -1735,6 +2083,8 @@ async function viewConsult() {
     const draftId = Number((location.hash.match(/draft=(\d+)/) || [])[1]);
     if (draftId) return void resumeDraft(draftId);
   }
+  const formId = Number((location.hash.match(/form=(\d+)/) || [])[1]);
+  if (formId) return void openFormReview(formId);
   if (preselect) {
     const p = S.patients.find((x) => x.id === Number(preselect));
     if (p) loadPatientIntoWizard(p);
@@ -1799,7 +2149,7 @@ function patientSummaryHTML(showRx) {
 function wizHead() {
   return `
   <div class="page-head">
-    <div><h1>New consultation</h1><div class="sub">Consult → build program → publish guide</div></div>
+    <div><h1>${S.wizard.form ? "Review patient form" : "New consultation"}</h1><div class="sub">${S.wizard.form ? "Filled in by the patient. Check each step, then publish." : "Consult → build program → publish guide"}</div></div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span class="hint" id="wz-autosave">${savedStampText()}</span>
       <button class="btn btn-secondary btn-sm" id="wz-savelater" type="button">${icon("clock", 16)} Save for later</button>
@@ -1807,7 +2157,8 @@ function wizHead() {
   </div>
   <div class="steps">
     ${WIZ_STEPS.map((s, i) => `<div class="step-dot ${i < S.wizard.step ? "done" : ""} ${i === S.wizard.step ? "on" : ""}"><div class="step-bar"></div><div class="step-lbl">${i + 1}. ${s}</div></div>`).join("")}
-  </div>`;
+  </div>
+  ${S.wizard.form ? formReviewBannerHTML(S.wizard.form) : ""}`;
 }
 
 // ── drafts: a consultation is kept until it is published ─────────────
@@ -1851,7 +2202,7 @@ function persistDraft(showErrors) {
     const p = w.patient;
     const body = {
       label: p.name.trim() || p.mobile.trim() || p.email.trim(),
-      progress: wizardProgress(w), mobile: p.mobile.trim(), state: wizardSnapshot(w),
+      progress: wizardProgress(w), mobile: p.mobile.trim(), state: wizardSnapshot(w), formId: w.form ? w.form.id : null,
     };
     if (w.draftId) {
       try { await api("PUT", `/api/drafts/${w.draftId}`, body); }
@@ -2453,7 +2804,7 @@ function wizIntakeIdentity() {
 
   wizIntakeShell(`
     <div class="card-title">${icon("user", 19)} Identity &amp; Demographics</div>
-    <div class="field">
+    <div class="field"${w.form && w.existingId ? ' style="display:none"' : ""}>
       <label for="wz-patsearch">Existing patient</label>
       <div style="position:relative">
         <input class="input" id="wz-patsearch" autocomplete="off" placeholder="Search by name or mobile number…"
@@ -2464,10 +2815,15 @@ function wizIntakeIdentity() {
         ? `Follow-up for this patient — <button type="button" class="linklike" id="wz-clear-existing">clear selection</button> to start a new patient instead.`
         : "Type to search existing patients (name or mobile) for a follow-up, or just fill the form below for a new patient."}</span>
     </div>
+    ${w.form ? "" : `
     <div class="field full" style="margin-top:-8px">
-      <button type="button" class="btn btn-ghost btn-sm" id="wz-missed-appt">${icon("whatsapp", 15)} Send missed-appointment message</button>
-      <span class="hint">If ${esc(w.patient.name || "this patient")} isn't present, send a quick WhatsApp to reschedule — no need to continue this consultation.</span>
-    </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn btn-ghost btn-sm" id="wz-missed-appt">${icon("whatsapp", 15)} Send missed-appointment message</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="wz-form-wa">${icon("whatsapp", 15)} Send patient form</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="wz-form-email">${icon("mail", 15)} Email patient form</button>
+      </div>
+      <span class="hint">If ${esc(w.patient.name || "this patient")} isn't present, send a quick WhatsApp to reschedule. If they bought their medication without a consultation, or can't join one, send the patient form so they can fill in their own details.</span>
+    </div>`}
 
     <div class="qf-box">
       <label>${icon("sparkle", 15)} Quick fill — paste patient details</label>
@@ -2587,6 +2943,10 @@ function wizIntakeIdentity() {
     commitDemo();
     if (!w.patient.mobile.trim()) return toast("Add a mobile number first", "bad");
     window.open(waLink(w.patient.mobile, missedAppointmentText(w.patient, S.user.name)), "_blank");
+  });
+  ["wa", "email"].forEach((channel) => {
+    const btn = document.getElementById(`wz-form-${channel}`);
+    if (btn) btn.addEventListener("click", () => { commitDemo(); patientFormModal(channel); });
   });
 
   // Height/weight can be typed in whichever unit the doctor has in front of
@@ -2722,7 +3082,9 @@ function wizIntakeClinical() {
   const qById = (id) => S.presets.intakeQuestions.find((q) => q.id === id);
   const chronicQ = qById("health_conditions"), allergyQ = qById("allergies"), cancerQ = qById("cancer_history"), glp1Q = qById("previous_glp1");
   const pregQ = qById("is_pregnant"), breastQ = qById("is_breastfeeding");
-  const showPregBox = w.patient.gender === "Female";
+  const showPregBox = w.patient.gender === "Female" || w.patient.intake.is_pregnant !== undefined;
+  // Only the patient form asks these, so they appear only once it has.
+  const formQ = (id) => (w.patient.intake[id] !== undefined ? renderIntakeQuestion(qById(id)) : "");
 
   wizIntakeShell(`
     <div class="card-title">${icon("clipboard", 19)} Vitals &amp; Medical History</div>
@@ -2749,6 +3111,7 @@ function wizIntakeClinical() {
       <h3>Pregnancy screening</h3>
       ${renderIntakeQuestion(pregQ)}
       ${renderIntakeQuestion(breastQ)}
+      ${formQ("planning_pregnancy")}
     </div>` : ""}
 
     <div class="clinical-box chronic">
@@ -2769,6 +3132,8 @@ function wizIntakeClinical() {
     </div>
 
     ${renderIntakeQuestion(cancerQ)}
+    ${formQ("thyroid_history")}
+    ${formQ("pancreas_history")}
     ${renderIntakeQuestion(glp1Q)}
   `, wizSidePanel());
   wireNotesPanel(view());
@@ -3181,24 +3546,7 @@ function wizStepProgram() {
     <div id="wz-tpl-detail" style="margin-top:18px"></div>`;
 
     body.querySelectorAll("[data-tpl]").forEach((b) => b.addEventListener("click", () => {
-      d.template = S.templates.find((t) => t.id === Number(b.dataset.tpl));
-      d.medication = d.template.config.medication || d.template.name;
-      if (d.category === "glp1") {
-        d.route = d.template.config.route;
-        d.frequency = d.template.config.frequency;
-        d.halfLifeHours = d.template.config.halfLifeHours;
-        d.dose = d.template.config.doses[0];
-        d.phases = suggestTitration(d.template.config.doses, d.dose, d.template.config.titration);
-      } else {
-        // Default to the guidebook's first approved variant; fall back to the
-        // clinic's own protocol for anything the guidebook doesn't cover.
-        const first = peptideProtocolOptions(d.medication, d.template)[0];
-        d.protocolKey = first ? first.key : null;
-        d.protocol = first ? first.protocol : d.template.config.protocols[0];
-        d.protocolBase = d.protocol;
-        d.customizing = false;
-        applyProtocolTo(d);
-      }
+      applyTemplateTo(d, S.templates.find((t) => t.id === Number(b.dataset.tpl)));
       wizStepProgram();
     }));
 
@@ -3330,15 +3678,44 @@ function addDraftToCart() {
   const w = S.wizard, d = w.draft;
   if (!d.medication) return false;
   w.noMedication = false; // a medication was added after all
-  w.cart.push({
+  w.cart.push(cartItemFrom(d));
+  w.draft = freshDraft(d.category);
+  return true;
+}
+
+function cartItemFrom(d) {
+  return {
     ...d,
     phases: d.phases.map((p) => ({ ...p })),
     instructions: defaultInstructionsFor(d),
     warnings: defaultWarningsFor(d),
     bloodTest: "none",
-  });
-  w.draft = freshDraft(d.category);
-  return true;
+  };
+}
+
+// Fills a program draft from a library template. `choice` picks the dose (a
+// GLP-1) or dosing protocol (a peptide); without one it takes the first.
+function applyTemplateTo(d, tpl, choice) {
+  d.template = tpl;
+  d.medication = tpl.config.medication || tpl.name;
+  if (d.category === "glp1") {
+    d.route = tpl.config.route;
+    d.frequency = tpl.config.frequency;
+    d.halfLifeHours = tpl.config.halfLifeHours;
+    d.dose = choice || tpl.config.doses[0];
+    d.phases = suggestTitration(tpl.config.doses, d.dose, tpl.config.titration);
+  } else {
+    // Default to the guidebook's first approved variant; fall back to the
+    // clinic's own protocol for anything the guidebook doesn't cover.
+    const opts = peptideProtocolOptions(d.medication, tpl);
+    const sel = opts.find((o) => o.key === choice) || opts[0];
+    d.protocolKey = sel ? sel.key : null;
+    d.protocol = sel ? sel.protocol : tpl.config.protocols[0];
+    d.protocolBase = d.protocol;
+    d.customizing = false;
+    applyProtocolTo(d);
+  }
+  return d;
 }
 
 function applyProtocolTo(d) {
@@ -3834,7 +4211,7 @@ function wizEmrArgs(labs, supps) {
     { name: w.patient.name, title: w.patient.title, gender: w.patient.gender, mobile: w.patient.mobile,
       age: w.patient.age, heightCm: w.patient.heightCm, weightKg: w.patient.weightKg,
       chronicIllnesses: w.patient.chronicIllnesses, medications: w.patient.medications, allergies: w.patient.allergies,
-      intake: w.patient.intake, noMedication: !w.cart.length, medicationWhy: w.medicationWhy },
+      intake: w.patient.intake, noMedication: !w.cart.length, medicationWhy: w.medicationWhy, fromForm: w.form || null },
     w.cart, m, w.clinicalNote, w.followupDays, labs, supps,
   ];
 }
@@ -3971,6 +4348,9 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
 
   const encounterDate = new Date();
   const followup = new Date(encounterDate.getTime() + (followupDays || 28) * 864e5);
+  // Written from the patient's own form: the record says so, and doesn't claim
+  // a conversation, counselling or a contraindication check that hasn't happened.
+  const form = patient.fromForm || null;
 
   // ── PATIENT block ──
   const patientBlock = [
@@ -3985,6 +4365,10 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `Current Medications: ${currentMeds}`,
     `Allergies: ${allergyText}`,
     `Cancer / Tumor History: ${cancerHistory}`,
+    form && intake.thyroid_history ? `Medullary Thyroid Cancer / MEN 2: ${intake.thyroid_history}` : null,
+    form && intake.pancreas_history ? `Pancreatitis / Gallbladder Problems: ${intake.pancreas_history}` : null,
+    form && intake.is_pregnant ? `Pregnant: ${intake.is_pregnant}${intake.planning_pregnancy === "Yes" ? " (planning a pregnancy)" : ""}` : null,
+    form && intake.is_breastfeeding ? `Breastfeeding: ${intake.is_breastfeeding}` : null,
     goals.length ? `Health Goals: ${goals.join(", ")}` : null,
   ].filter((l) => l !== null).join("\n");
 
@@ -4001,7 +4385,13 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
   p1 += noAllergies ? ` ${Pronoun} reports no known drug allergies.` : ` Allergies: ${allergyText}.`;
   if (others.length || noMed) p1 += ` Cancer/tumor history: ${cancerHistory.toLowerCase()}.`;
   if ((others.length || noMed) && goals.length) p1 += ` Stated health goals include ${goals.join(", ").toLowerCase()}.`;
-  p1 += noMed
+  p1 += form
+    ? (noMed
+      ? " Following review of the patient's form, no medication was prescribed."
+      : (form.flags || []).length
+        ? ` Patient-reported items reviewed by the prescribing doctor: ${form.flags.map((f) => f.text).join("; ")}.`
+        : " No contraindications were identified from the information the patient provided.")
+    : noMed
     ? " Following clinical review, no medication was prescribed at this visit."
     : others.length && !hasGlp1
       ? " Following clinical review, a personalised peptide therapy plan was formulated based on presentation, goals, and safety profile. There are no identified contraindications to the prescribed regimen."
@@ -4014,7 +4404,7 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     const bits = [];
     if (m.target) bits.push(`a daily caloric intake target of ≤${m.target} kcal/day was recommended`);
     if (m.proteinMin) bits.push(`a protein intake goal of ${m.proteinMin}–${m.proteinMax} g/day${proteinBasisNote} was set`);
-    paras.push(`Based on the current assessment, ${bits.join(", and ")}. A personalised nutrition plan was provided, with plate portions and an example day of eating. ${noMed ? "Lifestyle modification, physical activity, treatment goals, and how medication could help if needed were discussed." : "Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed."}`);
+    paras.push(`Based on the current assessment, ${bits.join(", and ")}. A personalised nutrition plan was provided, with plate portions and an example day of eating. ${form ? "Guidance on lifestyle, nutrition, physical activity and realistic expectations is provided in the patient's guide." : noMed ? "Lifestyle modification, physical activity, treatment goals, and how medication could help if needed were discussed." : "Lifestyle modification, dietary optimization, physical activity, realistic weight-loss expectations, and treatment goals were discussed."}`);
   }
 
   if (others.length) {
@@ -4034,7 +4424,9 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     : items.length === 1
       ? [emrMedLine(items[0]) + emrMedExtra(items[0], goals)]
       : items.map((it, i) => `${i + 1}. ${emrMedLine(it)}${emrMedExtra(it, goals)}`);
-  const counsel = noMed
+  const counsel = form
+    ? `Written guidance on expected benefits, common side effects, how to take the medication, and when to report problems is provided in the patient's guide.${form.spoken ? "" : " No verbal counseling has taken place."}`
+    : noMed
     ? `The patient was counseled on nutrition, hydration, and physical activity${patient.medicationWhy ? ", and on how medication could support their goals if needed in future" : ""}.`
     : others.length
     ? "The patient was counseled regarding expected benefits, common side effects, injection technique, storage, adherence, and the importance of reporting any adverse effects promptly."
@@ -4105,8 +4497,11 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     "Example day of eating provided: breakfast, morning snack, lunch, afternoon snack, dinner.",
   ].filter((l) => l !== null).join("\n") : "";
 
+  const formSource = form
+    ? `Source: Patient-completed online form, submitted ${fmtDMY(new Date(String(form.submittedAt).replace(" ", "T") + "Z"))}. ${form.spoken ? "The prescribing doctor spoke with the patient about the urgent items before publishing." : "No consultation took place."}${form.reason === "purchased" && items.length ? " The patient purchased the medication before this review." : ""}`
+    : "";
   const sections = [
-    `Date of Encounter: ${fmtDMY(encounterDate)}`,
+    form ? `Date of Review: ${fmtDMY(encounterDate)}\n${formSource}` : `Date of Encounter: ${fmtDMY(encounterDate)}`,
     patientBlock,
     notesBlock,
     `CLINICAL SUMMARY\n\n${paras.join("\n\n")}`,
@@ -4538,6 +4933,7 @@ function wizStepReview() {
   const guideText = fakePlans.length ? buildComboGuideText(fakePlans, guidePerson, S.user.name) : buildVisitGuideText(previewVisit, guidePerson, S.user.name);
   const guideHtml = fakePlans.length ? buildComboGuide(fakePlans, guidePerson, S.user.name) : buildVisitGuide(previewVisit, guidePerson, S.user.name);
   const publishSaves = w.cart.length > 1 ? `${w.cart.length} programs` : w.cart.length === 1 ? "the program" : "this consultation";
+  const urgentFlags = w.form ? (w.form.flags || []).filter((f) => f.level === "urgent") : [];
   view().innerHTML = `${wizHead()}
   <div class="two-col" style="grid-template-columns:1fr 340px">
     <div>
@@ -4556,6 +4952,11 @@ function wizStepReview() {
           Publishing saves ${publishSaves} for <b>${esc(w.patient.name)}</b>${w.existingId ? "" : ", registers them as a new patient"} and generates their portal access PIN to share on WhatsApp.
           ${w.cart.length ? `<br><b>Rx:</b> ${esc(w.cart.map((c) => c.medication + (c.dose ? " " + c.dose : "")).join(", "))}` : ""}
         </p>
+        ${urgentFlags.length ? `
+        <label class="fm-spoke">
+          <input type="checkbox" id="wz-spoke" ${w.form.spoken ? "checked" : ""}>
+          <span>I have spoken with the patient about: ${esc(urgentFlags.map((f) => f.text.toLowerCase()).join("; "))}. They were told not to start until I had.</span>
+        </label>` : ""}
         <p class="err-text" id="wz-err" hidden role="alert"></p>
         <button class="btn btn-accent btn-block" id="wz-publish"><span class="spin"></span><span class="btn-label">${icon("check", 18)} Publish guide</span></button>
         <button class="btn btn-ghost btn-block" id="wz-back" style="margin-top:8px">${icon("chevL", 16)} Back to edit</button>
@@ -4576,10 +4977,18 @@ function wizStepReview() {
   document.getElementById("rv-guide-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(guideText); toast("Guide text copied"); });
 
   document.getElementById("wz-back").addEventListener("click", () => { w.step = 3; paintWizard(); });
+  // Ticking it changes what the record says, so the page redraws from it.
+  const spoke = document.getElementById("wz-spoke");
+  if (spoke) spoke.addEventListener("change", () => { w.form.spoken = spoke.checked; wizStepReview(); });
   document.getElementById("wz-publish").addEventListener("click", async () => {
     const btn = document.getElementById("wz-publish");
     const err = document.getElementById("wz-err");
     err.hidden = true;
+    if (urgentFlags.length && !w.form.spoken) {
+      err.textContent = "This patient was told not to start until you have spoken. Speak with them, then tick the box above to publish.";
+      err.hidden = false;
+      return;
+    }
     if (!w.patient.mobile.trim()) {
       err.textContent = "A mobile number is required to publish — it's how the patient signs in to their portal. Go back to Intake and add one.";
       err.hidden = false;
@@ -4641,6 +5050,17 @@ function wizStepReview() {
           labTests: cleanLabs, suppList: cleanSupps,
         }));
         w.visitSaved = true;
+      }
+      if (w.form) {
+        // The form made this file without ever sharing a PIN, so one is issued now.
+        if (w.form.newPatient && !newPin) {
+          newPin = (await api("POST", `/api/patients/${patientId}/pin`)).pin;
+          w.pendingPin = newPin;
+        }
+        if (!w.formDone) {
+          await api("POST", `/api/patient-forms/${w.form.id}/complete`, { patientId });
+          w.formDone = true;
+        }
       }
       // Only now — patient and every program safely saved — does the draft go.
       w.published = true;

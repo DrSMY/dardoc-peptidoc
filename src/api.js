@@ -756,6 +756,8 @@ route("DELETE", "/api/admin/kb/:id", (req, res, p) => {
 // everything outstanding regardless of range, since those are todo lists, not
 // historical reporting.
 const DASHBOARD_RANGES = { "14": 14, "30": 30, "90": 90, "180": 180 };
+// A file created by a patient form isn't a consultation until a doctor publishes it.
+const NOT_FORM_ONLY = "id NOT IN (SELECT patient_id FROM patient_forms WHERE status = 'submitted' AND new_patient = 1)";
 function rangeSinceSql(range) {
   const days = DASHBOARD_RANGES[range];
   return days ? `datetime('now','-${days} days')` : "datetime('0001-01-01')";
@@ -828,6 +830,7 @@ route("GET", "/api/dashboard", (req, res) => {
     WHERE pl.needs_refill = 1 AND p.org_id = ?
     ORDER BY pl.refill_requested_at DESC LIMIT 30`).all(org);
   const refillDue = refillDueRows(org);
+  const patientForms = patientFormRows(org);
   const recent = db.prepare(`
     SELECT * FROM (
       SELECT 'checkin' AS type, c.created_at AS created_at, p.name AS patient_name, p.id AS patient_id,
@@ -843,7 +846,7 @@ route("GET", "/api/dashboard", (req, res) => {
   // completed = every registered patient, since both are created together at
   // publish time in this app's flow) — scoped to the selected range.
   const prescriptionsTotal = db.prepare(`SELECT COUNT(*) AS n FROM plans WHERE created_at >= ${since} AND ${IN_ORG}`).get(org).n;
-  const consultationsTotal = db.prepare(`SELECT COUNT(*) AS n FROM patients WHERE archived = 0 AND org_id = ? AND created_at >= ${since}`).get(org).n;
+  const consultationsTotal = db.prepare(`SELECT COUNT(*) AS n FROM patients WHERE archived = 0 AND org_id = ? AND created_at >= ${since} AND ${NOT_FORM_ONLY}`).get(org).n;
   const categoryBreakdown = db.prepare(`
     SELECT category, COUNT(*) AS n FROM plans WHERE created_at >= ${since} AND ${IN_ORG} GROUP BY category`).all(org);
   const medBreakdown = db.prepare(`
@@ -857,7 +860,7 @@ route("GET", "/api/dashboard", (req, res) => {
   // away client-side rather than showing a lone, redundant total.
   const doctorBreakdown = db.prepare(`
     SELECT u.id AS doctor_id, u.name AS doctor_name,
-      (SELECT COUNT(*) FROM patients WHERE doctor_id = u.id AND created_at >= ${since}) AS consultations,
+      (SELECT COUNT(*) FROM patients WHERE doctor_id = u.id AND created_at >= ${since} AND ${NOT_FORM_ONLY}) AS consultations,
       (SELECT COUNT(*) FROM plans WHERE doctor_id = u.id AND created_at >= ${since}) AS prescriptions
     FROM users u
     WHERE u.org_id = ? AND u.role IN ('doctor','superadmin') AND u.active = 1
@@ -867,7 +870,7 @@ route("GET", "/api/dashboard", (req, res) => {
     WHERE status = 'approved' AND decided_at >= ${since} AND patient_id IN (SELECT id FROM patients WHERE org_id = ?)`).get(org).n;
 
   json(res, 200, {
-    activePatients, totalPatients, checkins7, doses7, unread, alerts, refillDue, recent, refillRequests,
+    activePatients, totalPatients, checkins7, doses7, unread, alerts, refillDue, patientForms, recent, refillRequests,
     prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans, doctorBreakdown, refillsTotal,
   });
 });
@@ -976,9 +979,13 @@ route("GET", "/api/patients/:id", (req, res, p) => {
     LEFT JOIN users u ON u.id = rr.decided_by
     WHERE rr.patient_id = ? ORDER BY rr.created_at DESC`).all(p.id);
   const visits = db.prepare("SELECT * FROM visit_records WHERE patient_id = ? ORDER BY id DESC").all(p.id).map(parseVisit);
+  const patientForms = db.prepare("SELECT * FROM patient_forms WHERE patient_id = ? AND status IN ('submitted','completed') ORDER BY id DESC").all(p.id).map((f) => {
+    const answers = formJson(f.answers_json, null);
+    return { ...formListRow(f), summary: answers ? formSummaryText(f, answers, formJson(f.flags_json, []), p.id) : "" };
+  });
   const intake = JSON.parse(patient.intake_json || "{}");
   json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake },
-    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests, visits });
+    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests, visits, patientForms });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
@@ -1052,8 +1059,8 @@ route("GET", "/api/drafts/:id", (req, res, p) => {
 route("POST", "/api/drafts", async (req, res, _p, body) => {
   const me = requireClinician(req);
   if (!me) return json(res, 403, NOT_CLINICIAN);
-  const r = db.prepare("INSERT INTO wizard_drafts (doctor_id, org_id, label, progress, mobile, state_json) VALUES (?,?,?,?,?,?)")
-    .run(me.id, me.org_id, String(body.label || "").trim(), String(body.progress || "").trim(), String(body.mobile || "").trim(), JSON.stringify(body.state || {}));
+  const r = db.prepare("INSERT INTO wizard_drafts (doctor_id, org_id, label, progress, mobile, state_json, form_id) VALUES (?,?,?,?,?,?,?)")
+    .run(me.id, me.org_id, String(body.label || "").trim(), String(body.progress || "").trim(), String(body.mobile || "").trim(), JSON.stringify(body.state || {}), Number(body.formId) || null);
   json(res, 200, { id: Number(r.lastInsertRowid) });
 });
 
@@ -1298,6 +1305,450 @@ function refillPageMeta(token) {
     JOIN patients p ON p.id = r.patient_id JOIN organizations o ON o.id = p.org_id
     WHERE r.token = ? AND r.revoked_at IS NULL AND r.expires_at > datetime('now')`).get(token);
   return row ? { clinic: row.name, logoUrl: orgLogoUrl(row.id, row.logo_version) } : null;
+}
+
+// ── patient information forms ────────────────────────────────────────
+// For a patient who bought their medication before any consultation, or who
+// couldn't join one. The team sends a private link, the patient confirms what
+// the practice has and fills in the rest. Answers never prescribe anything:
+// they wait for a doctor, who reviews them in a pre-filled consultation.
+const FORM_LINK_DAYS = 30;
+const formClean = (v, max = 200) => String(v == null ? "" : v).trim().slice(0, max);
+const formJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
+const intakeOptions = (id) => (presets.INTAKE_QUESTIONS.find((q) => q.id === id) || {}).options || [];
+const THYROID_ANSWERS = { no: "No", yes: "Yes", unsure: "Not sure" };
+const PANCREAS_ANSWERS = { no: "No", pancreatitis: "Pancreatitis", gallbladder: "Gallbladder problems", both: "Both" };
+const ALLERGY_SEVERITIES = ["Mild", "Moderate", "Severe / life-threatening"];
+
+// Thyroid and pancreas questions only matter for a GLP-1 — or when no
+// medication has been chosen yet and one may still be.
+const formAsksGlp1Questions = (meds) => !meds.length || meds.some((m) => m.category === "glp1");
+
+function cleanFormMeds(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 6).map((m) => ({
+    templateId: Number(m && m.templateId) || null,
+    medication: formClean(m && m.medication, 120),
+    category: ["glp1", "peptide", "custom"].includes(m && m.category) ? m.category : "custom",
+    route: formClean(m && m.route, 30),
+    frequency: formClean(m && m.frequency, 60),
+    dose: formClean(m && m.dose, 120),
+    protocolKey: formClean(m && m.protocolKey, 80),
+  })).filter((m) => m.medication);
+}
+
+// What the practice already knows, in the same shape the form answers in.
+// Pregnancy and breastfeeding are deliberately never carried over: they change,
+// and an old "No" must not be tapped through.
+function formPrefill(p) {
+  const i = p.intake || {};
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => x !== "Other") : []);
+  const out = {
+    name: p.name, title: p.title, mobile: p.mobile, email: p.email, dob: p.dob, gender: p.gender,
+    heightCm: p.heightCm, weightKg: p.weightKg, medications: p.medications,
+    conditionsGate: i.health_conditions__gate, conditions: list(i.health_conditions),
+    conditionsOther: i.health_conditions__other, conditionsNotes: i.health_conditions__notes,
+    allergiesGate: i.allergies__gate, allergyTypes: list(i.allergies),
+    allergyDetails: i.allergies__notes, allergySeverity: i.allergies__severity,
+    cancer: i.cancer_history, cancerNotes: i.cancer_history__notes,
+    prevUse: i.previous_glp1, prevUseNotes: i.previous_glp1__notes,
+  };
+  for (const k of Object.keys(out)) {
+    const v = out[k];
+    if (v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)) delete out[k];
+  }
+  return out;
+}
+
+// One short row for the dashboard and the patient's chart.
+function formListRow(f) {
+  const prefill = formJson(f.prefill_json, {});
+  return {
+    id: f.id, token: f.token, reason: f.reason, status: f.status, name: f.label, mobile: f.mobile, email: f.email,
+    title: prefill.title || "", patientId: f.patient_id, newPatient: !!f.new_patient,
+    meds: formJson(f.meds_json, []), flags: formJson(f.flags_json, []), urgent: !!f.urgent,
+    views: f.views, lastViewedAt: f.last_viewed_at, createdAt: f.created_at, expiresAt: f.expires_at,
+    submittedAt: f.submitted_at, completedAt: f.completed_at, createdByName: f.created_by_name || "",
+  };
+}
+
+function patientFormRows(orgId) {
+  const q = `SELECT f.*, u.name AS created_by_name FROM patient_forms f LEFT JOIN users u ON u.id = f.created_by WHERE f.org_id = ?`;
+  return {
+    toReview: db.prepare(`${q} AND f.status = 'submitted' ORDER BY f.urgent DESC, f.submitted_at ASC LIMIT 50`).all(orgId).map(formListRow),
+    waiting: db.prepare(`${q} AND f.status = 'sent' AND f.expires_at > datetime('now') ORDER BY f.created_at DESC LIMIT 50`).all(orgId).map(formListRow),
+  };
+}
+
+// Checks a submission and returns it in a clean shape. The page checks the
+// same things first; this is the check that counts, since anyone holding the
+// link can post anything to it.
+function readFormAnswers(form, body) {
+  const meds = formJson(form.meds_json, []);
+  const asksGlp1 = formAsksGlp1Questions(meds);
+  const pick = (v, allowed) => (allowed.includes(v) ? v : "");
+  const pickList = (v, allowed) => (Array.isArray(v) ? v.filter((x) => allowed.includes(x)) : []);
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const a = {
+    name: formClean(body.name, 120),
+    mobile: normMobile(formClean(body.mobile, 30)),
+    email: formClean(body.email, 160).toLowerCase(),
+    dob: parseDob(body.dob) || "",
+    gender: pick(body.gender, ["Male", "Female", "Other"]),
+    heightCm: num(body.heightCm),
+    weightKg: num(body.weightKg),
+    medConfirm: pick(body.medConfirm, ["yes", "no"]),
+    medCorrection: formClean(body.medCorrection, 500),
+    pregnancy: pick(body.pregnancy, ["no", "pregnant", "planning"]),
+    breastfeeding: pick(body.breastfeeding, ["no", "yes"]),
+    conditionsGate: body.conditionsGate === true ? true : body.conditionsGate === false ? false : null,
+    conditions: pickList(body.conditions, intakeOptions("health_conditions")),
+    conditionsOther: formClean(body.conditionsOther, 300),
+    conditionsNotes: formClean(body.conditionsNotes, 1000),
+    medsGate: body.medsGate === true ? true : body.medsGate === false ? false : null,
+    medications: formClean(body.medications, 1000),
+    allergiesGate: body.allergiesGate === true ? true : body.allergiesGate === false ? false : null,
+    allergyTypes: pickList(body.allergyTypes, intakeOptions("allergies")),
+    allergyDetails: formClean(body.allergyDetails, 1000),
+    allergySeverity: pick(body.allergySeverity, ALLERGY_SEVERITIES),
+    cancer: pick(body.cancer, intakeOptions("cancer_history")),
+    cancerNotes: formClean(body.cancerNotes, 500),
+    thyroid: pick(body.thyroid, Object.keys(THYROID_ANSWERS)),
+    pancreas: pick(body.pancreas, Object.keys(PANCREAS_ANSWERS)),
+    prevUse: pick(body.prevUse, ["No", "Yes"]),
+    prevUseNotes: formClean(body.prevUseNotes, 500),
+    notes: formClean(body.notes, 2000),
+    confirmed: body.confirmed === true,
+  };
+  a.age = a.dob ? ageFromDob(a.dob) : null;
+  // Answers to questions that were hidden must not linger behind a changed choice.
+  if (a.gender === "Male") { a.pregnancy = ""; a.breastfeeding = ""; }
+  if (a.conditionsGate !== true) { a.conditions = []; a.conditionsOther = ""; a.conditionsNotes = ""; }
+  if (a.medsGate !== true) a.medications = "";
+  if (a.allergiesGate !== true) { a.allergyTypes = []; a.allergyDetails = ""; a.allergySeverity = ""; }
+  if (a.cancer === "No") { a.cancerNotes = ""; a.thyroid = asksGlp1 ? "no" : ""; }
+  if (!asksGlp1) { a.thyroid = ""; a.pancreas = ""; }
+  if (a.prevUse !== "Yes") a.prevUseNotes = "";
+  if (a.medConfirm !== "no") a.medCorrection = "";
+
+  let problem = "";
+  if (!a.name) problem = "Please enter your full name.";
+  else if (a.mobile.replace(/\D/g, "").length < 7) problem = "Please enter a valid mobile number.";
+  else if (a.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a.email)) problem = "Please check your email address.";
+  else if (form.reason === "purchased" && meds.length && !a.medConfirm) problem = "Please confirm the medication you purchased.";
+  else if (!a.dob) problem = "Please enter your date of birth.";
+  else if (!a.gender) problem = "Please choose your gender.";
+  else if (a.gender !== "Male" && (!a.pregnancy || !a.breastfeeding)) problem = "Please answer the pregnancy and breastfeeding questions.";
+  else if (a.heightCm < 100 || a.heightCm > 250) problem = "Please enter your height in centimetres.";
+  else if (a.weightKg < 25 || a.weightKg > 350) problem = "Please enter your weight in kilograms.";
+  else if (a.conditionsGate === null) problem = "Please answer the question about chronic illnesses.";
+  else if (a.conditionsGate && !a.conditions.length && !a.conditionsOther) problem = "Please tell us which chronic illnesses you have.";
+  else if (a.medsGate === null) problem = "Please answer the question about current medications.";
+  else if (a.medsGate && !a.medications) problem = "Please list the medications you take.";
+  else if (a.allergiesGate === null) problem = "Please answer the question about allergies.";
+  else if (a.allergiesGate && (!a.allergyTypes.length || !a.allergySeverity)) problem = "Please tell us the type of allergy and how severe it was.";
+  else if (!a.cancer) problem = "Please answer the question about cancer history.";
+  else if (asksGlp1 && !a.thyroid) problem = "Please answer the question about thyroid cancer or MEN 2.";
+  else if (asksGlp1 && !a.pancreas) problem = "Please answer the question about pancreatitis and gallbladder problems.";
+  else if (!a.prevUse) problem = "Please tell us whether you have used these medications before.";
+  else if (!a.confirmed) problem = "Please confirm that your answers are correct.";
+  return { a, problem };
+}
+
+// What the doctor must look at. "urgent" means the patient has been told not
+// to start until they have spoken; "review" means check it before publishing.
+function formFlags(form, a) {
+  const meds = formJson(form.meds_json, []);
+  const hasGlp1 = meds.some((m) => m.category === "glp1");
+  const flags = [];
+  const urgent = (text) => flags.push({ level: "urgent", text });
+  const review = (text) => flags.push({ level: "review", text });
+  if (a.age !== null && a.age < 18) urgent(`Under 18 (age ${a.age})`);
+  if (a.pregnancy === "pregnant") urgent("Reports being pregnant");
+  if (a.pregnancy === "planning") urgent("Planning a pregnancy");
+  if (a.breastfeeding === "yes") urgent("Reports breastfeeding");
+  if (a.thyroid === "yes") urgent("Medullary thyroid cancer or MEN 2 (self or family)");
+  else if (a.thyroid === "unsure") review("Not sure about medullary thyroid cancer or MEN 2");
+  if (a.pancreas === "pancreatitis" || a.pancreas === "both") urgent("History of pancreatitis");
+  if (a.pancreas === "gallbladder" || a.pancreas === "both") review("History of gallbladder problems");
+  if (a.cancer && a.cancer !== "No" && a.thyroid !== "yes") review(`Cancer history: ${a.cancer}${a.cancerNotes ? ` (${a.cancerNotes})` : ""}`);
+  if (a.allergySeverity === "Severe / life-threatening") review(`Severe allergic reaction: ${[...a.allergyTypes, a.allergyDetails].filter(Boolean).join(", ")}`);
+  if (a.medConfirm === "no") review(`Says the medication on file is not what they purchased${a.medCorrection ? `: ${a.medCorrection}` : ""}`);
+  if (a.prevUse === "No") {
+    for (const m of meds.filter((x) => x.category === "glp1")) {
+      const ladder = doseOptionsFor(m.category, m.medication);
+      if (ladder.length && m.dose && m.dose !== ladder[0]) review(`First time on this type of medication, but purchased ${m.medication} ${m.dose}. The starting dose is ${ladder[0]}`);
+    }
+  }
+  if (hasGlp1) {
+    const bmi = Math.round((a.weightKg / (a.heightCm / 100) ** 2) * 10) / 10;
+    if (bmi < 27) review(`BMI ${bmi} is below the GLP-1 criteria`);
+    else if (bmi < 30 && !a.conditionsGate) review(`BMI ${bmi} with no chronic illness reported (GLP-1 criteria need a weight-related condition below BMI 30)`);
+  }
+  if (form.patient_id && form.mobile && a.mobile !== form.mobile) review(`Gave a different mobile number: +${a.mobile} (file has +${form.mobile})`);
+  return flags;
+}
+
+// The answers in the consultation's own format, so the pre-filled consultation
+// reads exactly as if the doctor had taken them.
+function formIntake(form, a) {
+  const meds = formJson(form.meds_json, []);
+  const intake = {
+    health_conditions__gate: a.conditionsGate,
+    health_conditions: [...a.conditions, ...(a.conditionsOther ? ["Other"] : [])],
+    health_conditions__other: a.conditionsOther,
+    health_conditions__notes: a.conditionsNotes,
+    allergies__gate: a.allergiesGate,
+    allergies: a.allergyTypes,
+    allergies__notes: a.allergyDetails,
+    allergies__severity: a.allergySeverity,
+    cancer_history: a.cancer,
+    cancer_history__notes: a.cancerNotes,
+    previous_glp1: a.prevUse,
+    previous_glp1__notes: a.prevUseNotes,
+    additional_notes: a.notes,
+  };
+  if (a.gender !== "Male") {
+    intake.is_pregnant = a.pregnancy === "pregnant" ? "Yes" : "No";
+    intake.is_breastfeeding = a.breastfeeding === "yes" ? "Yes" : "No";
+    intake.planning_pregnancy = a.pregnancy === "planning" ? "Yes" : "No";
+  }
+  if (a.thyroid) intake.thyroid_history = THYROID_ANSWERS[a.thyroid];
+  if (a.pancreas) intake.pancreas_history = PANCREAS_ANSWERS[a.pancreas];
+  if (meds.some((m) => m.category === "glp1")) intake.health_goals = ["Weight loss"];
+  return intake;
+}
+
+const formMedsText = (meds) => meds.map((m) => `${m.medication}${m.dose ? " " + m.dose : ""}`).join(", ");
+
+// The whole form as one readable message for the doctor's Messages and the
+// patient's file, identifying the patient by name, patient number and mobile.
+function formSummaryText(form, a, flags, patientId) {
+  const meds = formJson(form.meds_json, []);
+  const bmi = Math.round((a.weightKg / (a.heightCm / 100) ** 2) * 10) / 10;
+  const list = (items, other, notes) => [...items, other, notes].filter(Boolean).join(", ");
+  const urgent = flags.filter((f) => f.level === "urgent");
+  const review = flags.filter((f) => f.level === "review");
+  const lines = [
+    `Patient form — ${meds.length ? formMedsText(meds) : "no medication chosen yet"}`,
+    `${a.name}${patientId ? ` · Patient no. ${patientId}` : ""} · Mobile +${a.mobile}${a.email ? ` · ${a.email}` : ""}`,
+    form.reason === "purchased" ? "Purchased medication without a consultation." : "Could not join a consultation.",
+  ];
+  if (urgent.length) lines.push("", "URGENT, told not to start until you have spoken:", ...urgent.map((f) => `- ${f.text}`));
+  if (review.length) lines.push("", "Please check:", ...review.map((f) => `- ${f.text}`));
+  lines.push("",
+    `Date of birth: ${a.dob.split("-").reverse().join("/")} (age ${a.age})`,
+    `Gender: ${a.gender}`);
+  if (a.gender !== "Male") {
+    lines.push(`Pregnant: ${a.pregnancy === "pregnant" ? "Yes" : a.pregnancy === "planning" ? "No, planning a pregnancy" : "No"}`,
+      `Breastfeeding: ${a.breastfeeding === "yes" ? "Yes" : "No"}`);
+  }
+  lines.push(`Height: ${a.heightCm} cm · Weight: ${a.weightKg} kg (BMI ${bmi})`,
+    `Chronic illnesses: ${a.conditionsGate ? list(a.conditions, a.conditionsOther, a.conditionsNotes) : "None"}`,
+    `Current medications: ${a.medsGate ? a.medications : "None"}`,
+    `Allergies: ${a.allergiesGate ? `${list(a.allergyTypes, a.allergyDetails)} (${a.allergySeverity})` : "None"}`,
+    `Cancer or tumour history: ${a.cancer}${a.cancerNotes ? ` (${a.cancerNotes})` : ""}`);
+  if (a.thyroid) lines.push(`Medullary thyroid cancer or MEN 2: ${THYROID_ANSWERS[a.thyroid]}`);
+  if (a.pancreas) lines.push(`Pancreatitis or gallbladder problems: ${PANCREAS_ANSWERS[a.pancreas]}`);
+  lines.push(`Previous GLP-1 or peptide use: ${a.prevUse}${a.prevUseNotes ? ` (${a.prevUseNotes})` : ""}`);
+  if (a.notes) lines.push(`Note: ${a.notes}`);
+  return lines.join("\n");
+}
+
+route("POST", "/api/patient-forms", async (req, res, _p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const reason = body.reason === "missed" ? "missed" : "purchased";
+  const meds = cleanFormMeds(body.meds);
+  if (reason === "purchased" && !meds.length) return json(res, 400, { error: "Choose the medication the patient purchased." });
+  const typed = body.patient || {};
+  const name = formClean(typed.name, 120);
+  const mobile = normMobile(formClean(typed.mobile, 30));
+  const email = formClean(typed.email, 160).toLowerCase();
+  if (!name) return json(res, 400, { error: "Add the patient's name first." });
+  if (!mobile && !email) return json(res, 400, { error: "Add a mobile number or an email address." });
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Check the email address." });
+
+  // A known patient keeps their file; their record fills in anything not typed.
+  let patient = null;
+  if (body.patientId) {
+    patient = patientInOrg(Number(body.patientId), me);
+    if (!patient) return json(res, 404, NOT_IN_ORG);
+  } else if (mobile) {
+    const dup = db.prepare("SELECT id, org_id FROM patients WHERE mobile = ?").get(mobile);
+    if (dup && dup.org_id !== me.org_id) return json(res, 409, { error: "That mobile number is already registered to another organisation." });
+    if (dup) patient = patientInOrg(dup.id, me);
+  }
+  const known = patient ? formPrefill({
+    name: patient.name, title: patient.title, mobile: patient.mobile, email: patient.email, dob: patient.dob, gender: patient.gender,
+    heightCm: patient.height_cm, weightKg: patient.current_weight_kg || patient.start_weight_kg, medications: patient.medications,
+    intake: formJson(patient.intake_json, {}),
+  }) : {};
+  const prefill = { ...known, ...formPrefill({ ...typed, name, mobile, email }) };
+
+  // Sending again reuses the open link, so the earlier message keeps working.
+  const open = db.prepare(`SELECT id FROM patient_forms WHERE org_id = ? AND status = 'sent' AND expires_at > datetime('now')
+    AND ((patient_id IS NOT NULL AND patient_id = ?) OR (mobile <> '' AND mobile = ?) OR (email <> '' AND email = ?)) ORDER BY id DESC LIMIT 1`)
+    .get(me.org_id, patient ? patient.id : -1, mobile, email);
+  let id;
+  if (open) {
+    id = open.id;
+    db.prepare(`UPDATE patient_forms SET patient_id = ?, reason = ?, mobile = ?, email = ?, label = ?, prefill_json = ?, meds_json = ?,
+      expires_at = datetime('now', ?) WHERE id = ?`)
+      .run(patient ? patient.id : null, reason, mobile, email, name, JSON.stringify(prefill), JSON.stringify(meds), `+${FORM_LINK_DAYS} days`, id);
+  } else {
+    const r = db.prepare(`INSERT INTO patient_forms (token, org_id, created_by, patient_id, reason, mobile, email, label, prefill_json, meds_json, expires_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now', ?))`)
+      .run(crypto.randomBytes(24).toString("base64url"), me.org_id, me.id, patient ? patient.id : null, reason, mobile, email, name,
+        JSON.stringify(prefill), JSON.stringify(meds), `+${FORM_LINK_DAYS} days`);
+    id = Number(r.lastInsertRowid);
+  }
+  json(res, 200, formListRow(db.prepare("SELECT * FROM patient_forms WHERE id = ?").get(id)));
+});
+
+// Everything the doctor needs to open the review: the answers in the
+// consultation's format, and whatever the patient's file already holds.
+route("GET", "/api/patient-forms/:id", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const f = db.prepare("SELECT * FROM patient_forms WHERE id = ? AND org_id = ?").get(p.id, me.org_id);
+  if (!f) return json(res, 404, { error: "Form not found." });
+  const answers = f.answers_json ? formJson(f.answers_json, null) : null;
+  const patient = f.patient_id ? patientInOrg(f.patient_id, me) : null;
+  const draft = db.prepare("SELECT id FROM wizard_drafts WHERE form_id = ? AND org_id = ? ORDER BY updated_at DESC LIMIT 1").get(f.id, me.org_id);
+  json(res, 200, {
+    ...formListRow(f),
+    draftId: draft ? draft.id : null,
+    answers,
+    intake: answers ? formIntake(f, answers) : null,
+    patient: patient ? {
+      id: patient.id, startWeightKg: patient.start_weight_kg, maxWeightKg: patient.max_weight_kg, goalWeightKg: patient.goal_weight_kg,
+      nationalId: patient.national_id, activityLevel: patient.activity_level, intake: formJson(patient.intake_json, {}),
+    } : null,
+  });
+});
+
+route("POST", "/api/patient-forms/:id/resend", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const f = db.prepare("SELECT id FROM patient_forms WHERE id = ? AND org_id = ? AND status = 'sent'").get(p.id, me.org_id);
+  if (!f) return json(res, 404, { error: "This form is no longer waiting for the patient." });
+  db.prepare("UPDATE patient_forms SET expires_at = datetime('now', ?) WHERE id = ?").run(`+${FORM_LINK_DAYS} days`, f.id);
+  json(res, 200, { ok: true });
+});
+
+route("POST", "/api/patient-forms/:id/complete", (req, res, p, body) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const f = db.prepare("SELECT id FROM patient_forms WHERE id = ? AND org_id = ? AND status = 'submitted'").get(p.id, me.org_id);
+  if (!f) return json(res, 404, { error: "This form has already been dealt with." });
+  // A form submitted without a file of its own lands on whichever patient the
+  // doctor published it under.
+  const patientId = body.patientId && patientInOrg(Number(body.patientId), me) ? Number(body.patientId) : null;
+  db.prepare("UPDATE patient_forms SET status = 'completed', completed_at = datetime('now'), completed_by = ?, patient_id = COALESCE(patient_id, ?) WHERE id = ?")
+    .run(me.id, patientId, f.id);
+  json(res, 200, { ok: true });
+});
+
+// Cancels a link still out with the patient, or dismisses one the doctor won't
+// take further. Anything already saved to a patient's file stays there.
+route("DELETE", "/api/patient-forms/:id", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  db.prepare("UPDATE patient_forms SET status = 'cancelled' WHERE id = ? AND org_id = ? AND status IN ('sent','submitted')").run(p.id, me.org_id);
+  json(res, 200, { ok: true });
+});
+
+const formByToken = (token) => db.prepare("SELECT * FROM patient_forms WHERE token = ?").get(token);
+const formLinkOpen = (f) => f && f.status === "sent" && !db.prepare("SELECT 1 AS x FROM patient_forms WHERE id = ? AND expires_at <= datetime('now')").get(f.id);
+
+function formClinic(f) {
+  const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(f.org_id);
+  return org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" };
+}
+
+// Public: the token is the credential, so unknown, expired and cancelled links
+// all answer identically. Once submitted it says so and shows no details.
+route("GET", "/api/form/:token", (req, res, p) => {
+  const f = formByToken(p.token);
+  if (f && (f.status === "submitted" || f.status === "completed")) {
+    return json(res, 200, { status: "submitted", clinic: formClinic(f), wait: !!f.urgent }, NOINDEX);
+  }
+  if (!formLinkOpen(f)) return json(res, 404, { error: "This link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  db.prepare("UPDATE patient_forms SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(f.id);
+  const meds = formJson(f.meds_json, []).map((m) => ({
+    medication: m.medication, dose: m.dose, category: m.category, route: m.route, frequency: m.frequency,
+    startingDose: doseOptionsFor(m.category, m.medication)[0] || "",
+  }));
+  json(res, 200, {
+    status: "open", reason: f.reason, clinic: formClinic(f), meds, prefill: formJson(f.prefill_json, {}),
+    doctorName: signerFor(f.created_by).name || "",
+    options: { conditions: intakeOptions("health_conditions"), allergyTypes: intakeOptions("allergies"), cancer: intakeOptions("cancer_history"), allergySeverities: ALLERGY_SEVERITIES },
+  }, NOINDEX);
+});
+
+route("POST", "/api/form/:token", async (req, res, p, body) => {
+  const f = formByToken(p.token);
+  if (f && (f.status === "submitted" || f.status === "completed")) return json(res, 409, { error: "We already have your answers. Thank you." }, NOINDEX);
+  if (!formLinkOpen(f)) return json(res, 404, { error: "This link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const { a, problem } = readFormAnswers(f, body);
+  if (problem) return json(res, 400, { error: problem }, NOINDEX);
+  const flags = formFlags(f, a);
+  const intake = formIntake(f, a);
+
+  db.exec("BEGIN");
+  try {
+    let patientId = f.patient_id, isNew = 0;
+    if (!patientId) {
+      const dup = db.prepare("SELECT id, org_id FROM patients WHERE mobile = ?").get(a.mobile);
+      if (!dup) {
+        const r = db.prepare(`INSERT INTO patients
+          (doctor_id, org_id, name, mobile, pin_hash, title, age, dob, gender, height_cm, start_weight_kg, current_weight_kg, activity_level, chronic_illnesses, medications, allergies, intake_json, email)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(f.created_by, f.org_id, a.name, a.mobile, hashSecret(generatePin()), formJson(f.prefill_json, {}).title || "", a.age, a.dob, a.gender,
+            a.heightCm, a.weightKg, a.weightKg, "Sedentary",
+            a.conditionsGate ? [...a.conditions, a.conditionsOther, a.conditionsNotes].filter(Boolean).join(", ") : "",
+            a.medications,
+            a.allergiesGate ? `${[...a.allergyTypes, a.allergyDetails].filter(Boolean).join(", ")}, severity: ${a.allergySeverity}` : "",
+            JSON.stringify(intake), a.email);
+        patientId = Number(r.lastInsertRowid);
+        isNew = 1;
+      } else if (dup.org_id === f.org_id && a.mobile === f.mobile) {
+        patientId = dup.id;
+      } else {
+        // A number already on someone else's file may just be a typo, so the
+        // answers are not attached to that file. The doctor sorts it out.
+        flags.push({ level: "review", text: `Mobile +${a.mobile} is already on another record. Check it before publishing` });
+      }
+    }
+    if (patientId && !isNew) {
+      // A known patient's record only changes when the doctor publishes, but a
+      // weight is an observation and goes in now, as it does with a refill.
+      db.prepare("INSERT INTO checkins (patient_id, plan_id, date, weight_kg, symptoms_json, notes, flagged) VALUES (?,NULL,?,?,'{}',?,0)")
+        .run(patientId, new Date().toISOString().slice(0, 10), a.weightKg, "Reported on the patient information form");
+      db.prepare("UPDATE patients SET current_weight_kg = ? WHERE id = ?").run(a.weightKg, patientId);
+    }
+    if (patientId) {
+      db.prepare("INSERT INTO messages (patient_id, sender, body) VALUES (?,?,?)").run(patientId, "patient", formSummaryText(f, a, flags, patientId));
+    }
+    db.prepare(`UPDATE patient_forms SET status = 'submitted', submitted_at = datetime('now'), answers_json = ?, flags_json = ?, urgent = ?,
+      patient_id = ?, new_patient = ?, label = ?, prefill_json = ? WHERE id = ?`)
+      .run(JSON.stringify(a), JSON.stringify(flags), flags.some((x) => x.level === "urgent") ? 1 : 0, patientId, isNew, a.name,
+        JSON.stringify({ title: formJson(f.prefill_json, {}).title || "" }), f.id);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  json(res, 200, { ok: true, wait: flags.some((x) => x.level === "urgent") }, NOINDEX);
+});
+
+// What a link-preview crawler should show for /f/<token>: the clinic only.
+function formPageMeta(token) {
+  const f = formByToken(token);
+  if (!formLinkOpen(f)) return null;
+  const c = formClinic(f);
+  return { clinic: c.name, logoUrl: c.logoUrl };
 }
 
 // ── bulk history import (superadmin) ─────────────────────────────
@@ -1914,4 +2365,4 @@ async function handleApi(req, res, pathname) {
   return false;
 }
 
-module.exports = { handleApi, guidePageMeta, refillPageMeta };
+module.exports = { handleApi, guidePageMeta, refillPageMeta, formPageMeta };
