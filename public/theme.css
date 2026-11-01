@@ -236,6 +236,8 @@ textarea.input { resize: vertical; min-height: 84px; }
 }
 .toast.ok svg { color: #6EE7A0; }
 .toast.bad svg { color: #FCA5A5; }
+.toast-action { margin: -8px -10px -8px auto; padding: 8px 10px; min-height: 40px; flex-shrink: 0; border: 0; border-radius: var(--r-sm); background: none; color: #fff; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.toast-action:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
 
 /* modal — restrained glass: translucent ivory, thin champagne border */
@@ -281,7 +283,7 @@ textarea.input { resize: vertical; min-height: 84px; }
 .stat .stat-lbl { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
 
 /* practice statistics (animated, interactive) */
-.pstat-tabs { display: flex; gap: 4px; background: var(--bg); padding: 3px; border-radius: 10px; box-shadow: var(--inset-tactile); }
+.pstat-tabs { display: flex; flex-wrap: wrap; gap: 4px; background: var(--bg); padding: 3px; border-radius: 10px; box-shadow: var(--inset-tactile); }
 .pstat-tab { border: none; background: transparent; padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
 .pstat-tab.on { background: var(--brand); color: #fff; box-shadow: var(--inset-top-highlight), 0 2px 5px rgba(23,32,15,.2); }
 .pstat-kpi { position: relative; overflow: hidden; }

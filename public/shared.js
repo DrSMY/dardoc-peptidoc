@@ -353,7 +353,8 @@ function modal(html, wide) {
 }
 
 // ── toast ────────────────────────────────────────────────────────
-function toast(msg, type = "ok") {
+// `action` ({label, onClick}) adds a button, and stays up long enough to reach it.
+function toast(msg, type = "ok", action) {
   let wrap = document.querySelector(".toast-wrap");
   if (!wrap) {
     wrap = document.createElement("div");
@@ -366,7 +367,15 @@ function toast(msg, type = "ok") {
   el.innerHTML = `${icon(type === "ok" ? "checkCircle" : "alert", 18)}<span></span>`;
   el.querySelector("span").textContent = msg;
   wrap.appendChild(el);
-  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s"; setTimeout(() => el.remove(), 320); }, 3800);
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => { el.remove(); action.onClick(); });
+    el.appendChild(btn);
+  }
+  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s"; setTimeout(() => el.remove(), 320); }, action ? 8000 : 3800);
 }
 
 // ── formatting ───────────────────────────────────────────────────

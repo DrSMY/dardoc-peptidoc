@@ -9,6 +9,10 @@
 // guide.js and shared.js read a global `S` for per-medication colours.
 const S = { medColors: {} };
 
+// Suggestions only: patients can type any test, as their lab report words it.
+const LAB_NAMES = ["HbA1c", "Fasting glucose", "Total cholesterol", "LDL cholesterol", "HDL cholesterol", "Triglycerides", "ALT", "AST", "Creatinine", "eGFR", "TSH", "Vitamin D", "Vitamin B12", "Ferritin", "Haemoglobin", "Uric acid"];
+const MAX_LABS = 12;
+
 (async function boot() {
   const root = document.getElementById("rp");
   const token = location.pathname.split("/").filter(Boolean)[1] || "";
@@ -234,6 +238,30 @@ const S = { medColors: {} };
     </fieldset>
     ${err("f-prevuse")}`));
 
+  // Optional. A date opens the abnormal results, and clearing it closes them.
+  let labSeq = 0;
+  const labRow = (lab) => {
+    const n = ++labSeq;
+    return `
+    <div class="fp-lab">
+      <div class="fp-lab-head">
+        <span class="fp-lab-no"></span>
+        <button class="fp-lab-remove" type="button">Remove</button>
+      </div>
+      ${field(`f-labname-${n}`, "Test", input(`f-labname-${n}`, lab.name, 'data-lab-name list="f-labnames" maxlength="80" autocomplete="off" placeholder="e.g. HbA1c"'))}
+      ${field(`f-labvalue-${n}`, "Result", input(`f-labvalue-${n}`, lab.value, 'data-lab-value maxlength="80" autocomplete="off" placeholder="e.g. 7.2%, or just high or low"'))}
+    </div>`;
+  };
+  sections.push(rrSection(++step, "When was your last lab test done?", "Optional. Recent results help your doctor decide whether you need new tests, and whether your treatment suits you. Skip this if you haven't had one.", `
+    ${field("f-labdate", "Date of the test", input("f-labdate", prefill.lastLabDate, `type="date" min="1900-01-01" max="${dobMax}"`))}
+    <div class="fp-reveal" id="f-labs" ${prefill.lastLabDate ? "" : "hidden"}>
+      ${rrNote("Was anything abnormal, or marked high or low? Add it here so your doctor can look at it. If it was all normal, there's nothing to add.")}
+      <div class="fp-labs" id="f-labrows">${(prefill.abnormalLabs || []).map(labRow).join("")}</div>
+      ${err("f-labrows")}
+      <datalist id="f-labnames">${LAB_NAMES.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+      <button class="btn btn-secondary btn-block fp-addlab" id="f-addlab" type="button"></button>
+    </div>`));
+
   sections.push(rrSection(++step, "Anything else you'd like your doctor to know?", "Optional. Questions, worries, or anything you think matters.", `
     <label class="rr-sr" for="f-notes">Anything else for your doctor</label>
     ${area("f-notes", "", "Write anything you like")}`));
@@ -322,6 +350,38 @@ const S = { medColors: {} };
   refreshDob();
   refreshBmi();
 
+  const labDateEl = document.getElementById("f-labdate");
+  const labRowsEl = document.getElementById("f-labrows");
+  const addLabBtn = document.getElementById("f-addlab");
+  const labDateOk = () => /^\d{4}-\d{2}-\d{2}$/.test(labDateEl.value) && labDateEl.value >= "1900-01-01" && labDateEl.value <= dobMax;
+  const labRows = () => [...labRowsEl.querySelectorAll(".fp-lab")]
+    .map((row) => ({ name: row.querySelector("[data-lab-name]").value.trim(), value: row.querySelector("[data-lab-value]").value.trim() }))
+    .filter((l) => l.name || l.value);
+  function refreshLabRows() {
+    const rows = labRowsEl.querySelectorAll(".fp-lab");
+    rows.forEach((row, i) => { row.querySelector(".fp-lab-no").textContent = `Result ${i + 1}`; });
+    addLabBtn.innerHTML = `${icon("plus", 18)} ${rows.length ? "Add another result" : "Add an abnormal result"}`;
+    addLabBtn.hidden = rows.length >= MAX_LABS;
+  }
+  const refreshLabDate = () => reveal("f-labs", labDateOk());
+  labDateEl.addEventListener("input", refreshLabDate);
+  labDateEl.addEventListener("change", refreshLabDate);
+  addLabBtn.addEventListener("click", () => {
+    labRowsEl.insertAdjacentHTML("beforeend", labRow({}));
+    refreshLabRows();
+    labRowsEl.lastElementChild.querySelector("[data-lab-name]").focus();
+    refresh();
+  });
+  labRowsEl.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".fp-lab-remove");
+    if (!btn) return;
+    btn.closest(".fp-lab").remove();
+    refreshLabRows();
+    addLabBtn.focus();
+    refresh();
+  });
+  refreshLabRows();
+
   // Every required answer, in page order: what's missing, where to say so.
   const checks = () => [
     reason === "purchased" && meds.length ? { id: "f-medconfirm", bad: !val("f-medconfirm"), msg: "Please confirm whether this is what you purchased." } : null,
@@ -345,6 +405,8 @@ const S = { medColors: {} };
     asksGlp1 && val("f-cancer") && val("f-cancer") !== "No" ? { id: "f-thyroid", bad: !val("f-thyroid"), msg: "Please choose one." } : null,
     asksGlp1 ? { id: "f-pancreas", bad: !val("f-pancreas"), msg: "Please choose one." } : null,
     { id: "f-prevuse", bad: !val("f-prevuse"), msg: "Please choose one." },
+    { id: "f-labdate", bad: labDateEl.validity.badInput || (!!labDateEl.value && !labDateOk()), msg: "Please check this date. It can't be in the future." },
+    labDateOk() ? { id: "f-labrows", bad: labRows().some((l) => !l.name), msg: "Please add the name of each test." } : null,
     { id: "f-confirmed", bad: !document.getElementById("f-confirmed").checked, msg: "Please tick this to confirm your answers." },
   ].filter(Boolean);
 
@@ -389,6 +451,7 @@ const S = { medColors: {} };
       allergyDetails: text("f-allergydetails"), allergySeverity: val("f-allergysev"),
       cancer: val("f-cancer"), cancerNotes: text("f-cancernotes"), thyroid: val("f-thyroid"), pancreas: val("f-pancreas"),
       prevUse: val("f-prevuse"), prevUseNotes: text("f-prevusenotes"),
+      lastLabDate: labDateOk() ? labDateEl.value : "", abnormalLabs: labDateOk() ? labRows() : [],
       notes: text("f-notes"), confirmed: true,
     };
     btn.disabled = true; btn.textContent = "Sending…";

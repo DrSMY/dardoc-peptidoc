@@ -385,6 +385,18 @@ CREATE INDEX IF NOT EXISTS idx_patient_forms_patient ON patient_forms(patient_id
 // So reopening a form's review resumes the same draft instead of starting another.
 addColumn("wizard_drafts", "form_id", "INTEGER");
 
+// ── up-for-refill reminders the team ignored ───────────────────────
+// Ignoring covers a due date, not the patient: when the next refill or visit
+// sets a new date, the reminder comes back by itself.
+db.exec(`
+CREATE TABLE IF NOT EXISTS refill_due_ignored (
+  patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  due TEXT NOT NULL,                            -- YYYY-MM-DD
+  ignored_by INTEGER REFERENCES users(id),
+  ignored_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (patient_id, due)
+);`);
+
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
 // never guessed or auto-filled — shown in the guide only once set.

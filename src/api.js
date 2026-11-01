@@ -770,27 +770,31 @@ const REFILL_DUE_WINDOW = "+7 days";
 function refillDueRows(orgId) {
   const rows = new Map();
   const planRows = db.prepare(`
-    SELECT pl.medication, pl.dose, pl.next_followup, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
+    SELECT pl.medication, pl.dose, pl.next_followup, date(pl.next_followup) AS due_day, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
     FROM plans pl JOIN patients p ON p.id = pl.patient_id LEFT JOIN users u ON u.id = pl.doctor_id
     WHERE pl.status = 'active' AND COALESCE(pl.needs_refill, 0) = 0 AND pl.next_followup IS NOT NULL
       AND date(pl.next_followup) <= date('now', ?) AND p.archived = 0 AND p.org_id = ?
+      AND NOT EXISTS (SELECT 1 FROM refill_due_ignored i WHERE i.patient_id = p.id AND i.due = date(pl.next_followup))
     ORDER BY pl.next_followup ASC`).all(REFILL_DUE_WINDOW, orgId);
   for (const r of planRows) {
     const med = `${r.medication}${r.dose ? " " + r.dose : ""}`;
     const row = rows.get(r.patient_id);
-    if (row) { if (!row.medications.includes(med)) row.medications.push(med); }
-    else rows.set(r.patient_id, { kind: "refill", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, medications: [med] });
+    if (row) {
+      if (!row.medications.includes(med)) row.medications.push(med);
+      if (!row.dues.includes(r.due_day)) row.dues.push(r.due_day);
+    } else rows.set(r.patient_id, { kind: "refill", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, dues: [r.due_day], medications: [med] });
   }
   // Patients whose latest visit ended with nothing prescribed have no refill,
   // but their follow-up still needs a reminder.
   const visitRows = db.prepare(`
-    SELECT v.next_followup, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
+    SELECT v.next_followup, date(v.next_followup) AS due_day, p.id AS patient_id, p.name AS patient_name, p.title, p.mobile, p.email, u.name AS doctor_name
     FROM visit_records v JOIN patients p ON p.id = v.patient_id LEFT JOIN users u ON u.id = v.doctor_id
     WHERE v.id = (SELECT MAX(id) FROM visit_records WHERE patient_id = p.id)
       AND v.next_followup IS NOT NULL AND date(v.next_followup) <= date('now', ?) AND p.archived = 0 AND p.org_id = ?
+      AND NOT EXISTS (SELECT 1 FROM refill_due_ignored i WHERE i.patient_id = p.id AND i.due = date(v.next_followup))
       AND NOT EXISTS (SELECT 1 FROM plans pl WHERE pl.patient_id = p.id AND pl.status = 'active')`).all(REFILL_DUE_WINDOW, orgId);
   for (const r of visitRows) {
-    rows.set(r.patient_id, { kind: "followup", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, medications: [] });
+    rows.set(r.patient_id, { kind: "followup", patient_id: r.patient_id, patient_name: r.patient_name, title: r.title || "", mobile: r.mobile, email: r.email || "", doctor_name: r.doctor_name || "", due: r.next_followup, dues: [r.due_day], medications: [] });
   }
   return [...rows.values()].sort((a, b) => String(a.due).localeCompare(String(b.due)));
 }
@@ -800,6 +804,31 @@ route("GET", "/api/refills/due", (req, res) => {
   const me = getDoctor(req);
   if (!me) return json(res, 401, { error: "Not signed in." });
   json(res, 200, refillDueRows(me.org_id));
+});
+
+// Takes a patient off the list for the dates on their row. A new date, set by
+// their next refill or visit, brings them back.
+route("POST", "/api/refills/due/:id/ignore", (req, res, p) => {
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
+  const row = refillDueRows(me.org_id).find((r) => r.patient_id === patient.id);
+  const dues = row ? row.dues : [];
+  const add = db.prepare("INSERT OR IGNORE INTO refill_due_ignored (patient_id, due, ignored_by) VALUES (?, ?, ?)");
+  for (const due of dues) add.run(patient.id, due, me.id);
+  json(res, 200, { dues, rows: refillDueRows(me.org_id) });
+});
+
+// Undo, for the dates that press of Ignore covered.
+route("POST", "/api/refills/due/:id/restore", (req, res, p, body) => {
+  const me = getDoctor(req);
+  if (!me) return json(res, 401, { error: "Not signed in." });
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
+  const drop = db.prepare("DELETE FROM refill_due_ignored WHERE patient_id = ? AND due = ?");
+  for (const due of Array.isArray(body.dues) ? body.dues : []) drop.run(patient.id, String(due));
+  json(res, 200, { rows: refillDueRows(me.org_id) });
 });
 
 route("GET", "/api/dashboard", (req, res) => {
@@ -1313,6 +1342,7 @@ function refillPageMeta(token) {
 // the practice has and fills in the rest. Answers never prescribe anything:
 // they wait for a doctor, who reviews them in a pre-filled consultation.
 const FORM_LINK_DAYS = 30;
+const FORM_MAX_LABS = 12;
 const formClean = (v, max = 200) => String(v == null ? "" : v).trim().slice(0, max);
 const formJson = (s, fb) => { try { return JSON.parse(s); } catch { return fb; } };
 const intakeOptions = (id) => (presets.INTAKE_QUESTIONS.find((q) => q.id === id) || {}).options || [];
@@ -1352,6 +1382,7 @@ function formPrefill(p) {
     allergyDetails: i.allergies__notes, allergySeverity: i.allergies__severity,
     cancer: i.cancer_history, cancerNotes: i.cancer_history__notes,
     prevUse: i.previous_glp1, prevUseNotes: i.previous_glp1__notes,
+    lastLabDate: i.last_lab_date, abnormalLabs: i.abnormal_labs,
   };
   for (const k of Object.keys(out)) {
     const v = out[k];
@@ -1417,6 +1448,10 @@ function readFormAnswers(form, body) {
     pancreas: pick(body.pancreas, Object.keys(PANCREAS_ANSWERS)),
     prevUse: pick(body.prevUse, ["No", "Yes"]),
     prevUseNotes: formClean(body.prevUseNotes, 500),
+    lastLabDate: parseDob(body.lastLabDate) || "",
+    abnormalLabs: (Array.isArray(body.abnormalLabs) ? body.abnormalLabs : []).slice(0, FORM_MAX_LABS)
+      .map((l) => ({ name: formClean(l && l.name, 80), value: formClean(l && l.value, 80) }))
+      .filter((l) => l.name || l.value),
     notes: formClean(body.notes, 2000),
     confirmed: body.confirmed === true,
   };
@@ -1430,6 +1465,7 @@ function readFormAnswers(form, body) {
   if (!asksGlp1) { a.thyroid = ""; a.pancreas = ""; }
   if (a.prevUse !== "Yes") a.prevUseNotes = "";
   if (a.medConfirm !== "no") a.medCorrection = "";
+  if (!a.lastLabDate) a.abnormalLabs = [];
 
   let problem = "";
   if (!a.name) problem = "Please enter your full name.";
@@ -1451,9 +1487,14 @@ function readFormAnswers(form, body) {
   else if (asksGlp1 && !a.thyroid) problem = "Please answer the question about thyroid cancer or MEN 2.";
   else if (asksGlp1 && !a.pancreas) problem = "Please answer the question about pancreatitis and gallbladder problems.";
   else if (!a.prevUse) problem = "Please tell us whether you have used these medications before.";
+  else if (body.lastLabDate && !a.lastLabDate) problem = "Please check the date of your last lab test.";
+  else if (a.abnormalLabs.some((l) => !l.name)) problem = "Please add the name of each lab test.";
   else if (!a.confirmed) problem = "Please confirm that your answers are correct.";
   return { a, problem };
 }
+
+const formDMY = (iso) => iso.split("-").reverse().join("/");
+const formLabsText = (labs) => labs.map((l) => [l.name, l.value].filter(Boolean).join(" ")).join("; ");
 
 // What the doctor must look at. "urgent" means the patient has been told not
 // to start until they have spoken; "review" means check it before publishing.
@@ -1474,6 +1515,7 @@ function formFlags(form, a) {
   if (a.cancer && a.cancer !== "No" && a.thyroid !== "yes") review(`Cancer history: ${a.cancer}${a.cancerNotes ? ` (${a.cancerNotes})` : ""}`);
   if (a.allergySeverity === "Severe / life-threatening") review(`Severe allergic reaction: ${[...a.allergyTypes, a.allergyDetails].filter(Boolean).join(", ")}`);
   if (a.medConfirm === "no") review(`Says the medication on file is not what they purchased${a.medCorrection ? `: ${a.medCorrection}` : ""}`);
+  if (a.abnormalLabs.length) review(`Reports abnormal lab results from ${formDMY(a.lastLabDate)}: ${formLabsText(a.abnormalLabs)}`);
   if (a.prevUse === "No") {
     for (const m of meds.filter((x) => x.category === "glp1")) {
       const ladder = doseOptionsFor(m.category, m.medication);
@@ -1515,6 +1557,10 @@ function formIntake(form, a) {
   }
   if (a.thyroid) intake.thyroid_history = THYROID_ANSWERS[a.thyroid];
   if (a.pancreas) intake.pancreas_history = PANCREAS_ANSWERS[a.pancreas];
+  if (a.lastLabDate) {
+    intake.last_lab_date = a.lastLabDate;
+    intake.abnormal_labs = a.abnormalLabs;
+  }
   if (meds.some((m) => m.category === "glp1")) intake.health_goals = ["Weight loss"];
   return intake;
 }
@@ -1551,6 +1597,8 @@ function formSummaryText(form, a, flags, patientId) {
   if (a.thyroid) lines.push(`Medullary thyroid cancer or MEN 2: ${THYROID_ANSWERS[a.thyroid]}`);
   if (a.pancreas) lines.push(`Pancreatitis or gallbladder problems: ${PANCREAS_ANSWERS[a.pancreas]}`);
   lines.push(`Previous GLP-1 or peptide use: ${a.prevUse}${a.prevUseNotes ? ` (${a.prevUseNotes})` : ""}`);
+  lines.push(`Last lab test: ${a.lastLabDate ? formDMY(a.lastLabDate) : "Not given"}`);
+  if (a.lastLabDate) lines.push(`Abnormal results, as reported by the patient: ${a.abnormalLabs.length ? formLabsText(a.abnormalLabs) : "None listed"}`);
   if (a.notes) lines.push(`Note: ${a.notes}`);
   return lines.join("\n");
 }

@@ -217,10 +217,6 @@ async function viewDashboard() {
     ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
 
-  <div id="patient-forms">${patientFormsCardHTML(d.patientForms)}</div>
-
-  <div id="refill-due">${refillDueCardHTML(d.refillDue)}</div>
-
   <div id="practice-stats"></div>
 
   <div class="stat-grid" style="margin-bottom:20px">
@@ -231,7 +227,7 @@ async function viewDashboard() {
     ${stat("message", "var(--violet-soft)", "var(--violet)", d.unread, "Unread messages")}
   </div>
 
-  <div class="two-col">
+  <div class="two-col" style="margin-bottom:20px">
     <div style="display:flex;flex-direction:column;gap:18px">
       <div class="card">
         <div class="card-title" style="padding:18px 18px 0">${icon("alert", 19)} Side-effect alerts
@@ -295,7 +291,11 @@ async function viewDashboard() {
           </a>`).join("") : `<div class="empty">${icon("activity", 34)}<div class="empty-title">No activity yet</div><p>Patient dose logs and check-ins will show up here.</p></div>`}
       </div>
     </div>
-  </div>`;
+  </div>
+
+  <div id="patient-forms">${patientFormsCardHTML(d.patientForms)}</div>
+
+  <div id="refill-due">${refillDueCardHTML(d.refillDue)}</div>`;
 
   view().querySelectorAll("[data-review]").forEach((b) => b.addEventListener("click", async () => {
     await api("POST", `/api/checkins/${b.dataset.review}/review`);
@@ -345,6 +345,7 @@ function refillDueRowHTML(r, i) {
       <button class="btn btn-accent btn-sm" type="button" data-due-wa="${i}">${icon("whatsapp", 15)} WhatsApp</button>
       <a class="btn btn-secondary btn-sm" href="${esc(telHref(r.mobile))}">${icon("phone", 15)} Call</a>
       <button class="btn btn-secondary btn-sm" type="button" data-due-email="${i}">${icon("mail", 15)} Email</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-due-ignore="${i}" aria-label="Ignore the reminder for ${esc(r.patient_name)}">Ignore</button>
     </div>
   </div>`;
 }
@@ -359,8 +360,20 @@ function refillDueCardHTML(rows) {
       <p class="hint" style="padding:0 18px 8px;margin:0">Patients due in the next 7 days or overdue. Contact them here; the WhatsApp and email messages include their refill link.</p>
       ${rows.map(refillDueRowHTML).join("")}
       ${rows.length > REFILL_DUE_SHOWN ? `<div style="padding:12px 18px"><button class="linklike" type="button" id="due-more">Show all ${rows.length}</button></div>` : ""}`
-    : `<p class="hint" style="padding:0 18px 18px;margin:0">No one is due in the next 7 days.</p>`}
+    : `<p class="hint" style="padding:0 18px 18px;margin:0">No one needs contacting in the next 7 days.</p>`}
   </div>`;
+}
+
+// Redraws the card after Ignore or Undo, leaving "Show all" as it was.
+function paintRefillDue(rows) {
+  const box = document.getElementById("refill-due");
+  if (box) {
+    const showingAll = !box.querySelector("#due-more");
+    box.innerHTML = refillDueCardHTML(rows);
+    wireRefillDue(rows);
+    if (showingAll && box.querySelector("#due-more")) box.querySelector("#due-more").click();
+  }
+  paintRefillBadge(rows.length);
 }
 
 // The message for one row: a refill request link when the patient has a
@@ -397,6 +410,25 @@ function wireRefillDue(rows) {
     const r = rows[Number(b.dataset.dueEmail)];
     const { subject, text } = await refillDueMessage(r);
     openEmail(r.email, subject, text);
+  }));
+  view().querySelectorAll("[data-due-ignore]").forEach((b) => b.addEventListener("click", async () => {
+    const r = rows[Number(b.dataset.dueIgnore)];
+    b.disabled = true;
+    try {
+      const out = await api("POST", `/api/refills/due/${r.patient_id}/ignore`, {});
+      paintRefillDue(out.rows);
+      toast(`${r.patient_name} removed from Up for refill`, "ok", {
+        label: "Undo",
+        onClick: async () => {
+          try {
+            paintRefillDue((await api("POST", `/api/refills/due/${r.patient_id}/restore`, { dues: out.dues })).rows);
+          } catch (e) { toast(e.message, "bad"); }
+        },
+      });
+    } catch (e) {
+      b.disabled = false;
+      toast(e.message, "bad");
+    }
   }));
 }
 
@@ -1002,6 +1034,10 @@ function chartActivityHTML(doses, checkins) {
     </div>`).join("");
 }
 
+// The patient's own account of their last lab test, from the patient form.
+const labDateDMY = (intake) => String(intake.last_lab_date || "").split("-").reverse().join("/");
+const abnormalLabsText = (intake) => (intake.abnormal_labs || []).map((l) => [l.name, l.value].filter(Boolean).join(" ")).join("; ");
+
 function intakeSummaryCard(p) {
   const intake = p.intake || {};
   const goals = Array.isArray(intake.health_goals) ? intake.health_goals : [];
@@ -1016,12 +1052,14 @@ function intakeSummaryCard(p) {
   if (intake.planning_pregnancy === "Yes") rows.push(`<div><b>Planning a pregnancy:</b> Yes</div>`);
   if (intake.thyroid_history && intake.thyroid_history !== "No") rows.push(`<div><b>Medullary thyroid cancer or MEN 2:</b> ${esc(intake.thyroid_history)}</div>`);
   if (intake.pancreas_history && intake.pancreas_history !== "No") rows.push(`<div><b>Pancreatitis or gallbladder problems:</b> ${esc(intake.pancreas_history)}</div>`);
+  if (intake.last_lab_date) rows.push(`<div><b>Last lab test:</b> ${esc(labDateDMY(intake))}</div>`);
+  if (abnormalLabsText(intake)) rows.push(`<div><b>Abnormal lab results, as reported by the patient:</b> ${esc(abnormalLabsText(intake))}</div>`);
   if (activityDetailSummary(intake.activity_detail)) rows.push(`<div><b>Exercise:</b> ${esc(activityDetailSummary(intake.activity_detail))}</div>`);
   if (intake.additional_notes) rows.push(`<div><b>Patient notes:</b> ${esc(intake.additional_notes)}</div>`);
   if (!rows.length) return "";
   return `<div class="card card-pad">
     <div class="card-title">${icon("clipboard", 19)} Intake &amp; assessment</div>
-    <div style="font-size:13.5px;display:flex;flex-direction:column;gap:10px">${rows.join("")}</div>
+    <div style="font-size:13.5px;display:flex;flex-direction:column;gap:10px;overflow-wrap:anywhere">${rows.join("")}</div>
   </div>`;
 }
 
@@ -3135,6 +3173,14 @@ function wizIntakeClinical() {
     ${formQ("thyroid_history")}
     ${formQ("pancreas_history")}
     ${renderIntakeQuestion(glp1Q)}
+    ${w.patient.intake.last_lab_date ? `
+    <div class="clinical-box chronic">
+      <h3>${icon("clipboard", 13)} Last lab test, from the patient's form</h3>
+      <div style="font-size:14px;line-height:1.6;overflow-wrap:anywhere">
+        <div>${esc(labDateDMY(w.patient.intake))}</div>
+        <div>${abnormalLabsText(w.patient.intake) ? `<b>Abnormal, as reported by the patient:</b> ${esc(abnormalLabsText(w.patient.intake))}` : "No abnormal results listed"}</div>
+      </div>
+    </div>` : ""}
   `, wizSidePanel());
   wireNotesPanel(view());
   wirePeptideInfoButtons(view());
@@ -4367,6 +4413,8 @@ function buildMultiClinicalSuggestion(patient, items, metrics, note, followupDay
     `Cancer / Tumor History: ${cancerHistory}`,
     form && intake.thyroid_history ? `Medullary Thyroid Cancer / MEN 2: ${intake.thyroid_history}` : null,
     form && intake.pancreas_history ? `Pancreatitis / Gallbladder Problems: ${intake.pancreas_history}` : null,
+    form && intake.last_lab_date ? `Last Lab Test: ${labDateDMY(intake)}` : null,
+    form && abnormalLabsText(intake) ? `Abnormal Lab Results (patient-reported): ${abnormalLabsText(intake)}` : null,
     form && intake.is_pregnant ? `Pregnant: ${intake.is_pregnant}${intake.planning_pregnancy === "Yes" ? " (planning a pregnancy)" : ""}` : null,
     form && intake.is_breastfeeding ? `Breastfeeding: ${intake.is_breastfeeding}` : null,
     goals.length ? `Health Goals: ${goals.join(", ")}` : null,

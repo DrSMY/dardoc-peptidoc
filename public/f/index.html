@@ -8,8 +8,8 @@
 <meta name="theme-color" content="#F8F7F2">
 <title>Complete your details</title>
 <!--OG-->
-<link rel="stylesheet" href="/theme.css?v=docare25">
-<link rel="stylesheet" href="/patient-page.css?v=docare74">
+<link rel="stylesheet" href="/theme.css?v=docare75">
+<link rel="stylesheet" href="/patient-page.css?v=docare75">
 <style>
   /* progress through the required questions */
   .fp-progress { position: sticky; top: 0; z-index: 5; margin: -24px -16px 20px; padding: 8px 16px; background: var(--bg); }
@@ -41,6 +41,14 @@
   .fp-chip:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-soft); font-weight: 600; }
   .fp-chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
   @media (hover: hover) { .fp-chip:not(:has(input:checked)):hover { border-color: var(--sage); } }
+  /* abnormal lab results */
+  .fp-labs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+  .fp-labs:empty { display: none; }
+  .fp-lab { padding: 8px 14px 14px; background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 16px; }
+  .fp-lab-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold-bronze); }
+  .fp-lab-remove { min-height: 44px; margin-right: -8px; padding: 0 8px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; font-weight: 500; letter-spacing: 0; text-transform: none; text-decoration: underline; cursor: pointer; touch-action: manipulation; }
+  .fp-lab-remove:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .fp-addlab { min-height: 48px; }
   /* final confirmation */
   .fp-confirm { display: flex; gap: 12px; align-items: flex-start; padding: 16px; margin-bottom: 8px; cursor: pointer;
     background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 16px; font-size: 14.5px; line-height: 1.5; }
@@ -58,8 +66,8 @@
   <div class="skel rp-skel" style="height:110px"></div>
   <div class="skel rp-skel" style="height:300px"></div>
 </main>
-<script src="/shared.js?v=docare74"></script>
-<script src="/guide.js?v=docare74"></script>
-<script src="/f/app.js?v=docare74"></script>
+<script src="/shared.js?v=docare75"></script>
+<script src="/guide.js?v=docare75"></script>
+<script src="/f/app.js?v=docare75"></script>
 </body>
 </html>
