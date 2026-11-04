@@ -1766,7 +1766,7 @@ function patientFormMessage(patient, reason, meds, url) {
     "",
     opening,
     "",
-    "It takes about 3 minutes, and each question explains why we ask it. Some answers, such as pregnancy or certain medical conditions, affect whether a medication is safe for you, so please complete this before starting any medication.",
+    `It takes about 3 minutes, and each question explains why we ask it. Some answers, such as ${isMalePatient(patient) ? "" : "pregnancy or "}certain medical conditions, affect whether a medication is safe for you, so please complete this before starting any medication.`,
     "",
     "Tap the link to confirm what we already have and add the rest:",
     "",
@@ -1882,7 +1882,7 @@ function patientFormModal(channel) {
         patientId: w.existingId, reason, meds,
         patient: { name, title: p.title, mobile, email, dob: p.dob, gender: p.gender, heightCm: p.heightCm, weightKg: p.weightKg, medications: p.medications, intake: p.intake },
       });
-      paintSend(form, { name, title: p.title, mobile, email });
+      paintSend(form, { name, title: p.title, gender: p.gender, mobile, email });
     } catch (ex) {
       show(ex.message);
     } finally {
@@ -3120,7 +3120,7 @@ function wizIntakeClinical() {
   const qById = (id) => S.presets.intakeQuestions.find((q) => q.id === id);
   const chronicQ = qById("health_conditions"), allergyQ = qById("allergies"), cancerQ = qById("cancer_history"), glp1Q = qById("previous_glp1");
   const pregQ = qById("is_pregnant"), breastQ = qById("is_breastfeeding");
-  const showPregBox = w.patient.gender === "Female" || w.patient.intake.is_pregnant !== undefined;
+  const showPregBox = w.patient.gender !== "Male" && (w.patient.gender === "Female" || w.patient.intake.is_pregnant !== undefined);
   // Only the patient form asks these, so they appear only once it has.
   const formQ = (id) => (w.patient.intake[id] !== undefined ? renderIntakeQuestion(qById(id)) : "");
 
@@ -4976,7 +4976,7 @@ function wizStepReview() {
   // late changes (e.g. going back and adjusting labs) are reflected.
   const clinicalSuggestion = w.emrCustomized ? (w.clinicalSuggestion || "") : buildMultiClinicalSuggestion(...wizEmrArgs(previewLabs, previewSupps));
   w.clinicalSuggestion = clinicalSuggestion;
-  const guidePerson = { name: w.patient.name, title: w.patient.title };
+  const guidePerson = { name: w.patient.name, title: w.patient.title, gender: w.patient.gender };
   const previewVisit = wizVisitDraft({ signedBy: previewSigner, labTests: previewLabs, suppList: previewSupps, next_followup: nextFollowup, created_at: createdAt });
   const guideText = fakePlans.length ? buildComboGuideText(fakePlans, guidePerson, S.user.name) : buildVisitGuideText(previewVisit, guidePerson, S.user.name);
   const guideHtml = fakePlans.length ? buildComboGuide(fakePlans, guidePerson, S.user.name) : buildVisitGuide(previewVisit, guidePerson, S.user.name);

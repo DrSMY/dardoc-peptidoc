@@ -431,14 +431,14 @@ details[open] > summary .gp-plus::after { transform: rotate(0deg); }
 .gp-state p { margin: 0; font-size: 16.5px; color: var(--g-muted); }
 
 /* ── responsive ────────────────────────────────────────────────── */
-@media (max-width: 1020px) {
+@media screen and (max-width: 1020px) {
   .gp-hero { grid-template-columns: minmax(0, 1fr); }
   .gp-hero-lede { max-width: 48ch; }
   .gp-stage { min-height: 460px; }
   .gp-pair { grid-template-columns: minmax(0, 1fr); }
   .gp-print span { display: none; }
 }
-@media (max-width: 860px) {
+@media screen and (max-width: 860px) {
   .gp-grid2 { grid-template-columns: minmax(0, 1fr); }
   .gp-ess { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .gp-ess-card { min-height: 0; padding: 22px 24px; }
@@ -449,7 +449,7 @@ details[open] > summary .gp-plus::after { transform: rotate(0deg); }
   .gp-meals > li { grid-template-columns: 14px minmax(0, 1fr) auto; }
   .gp-meal-items { grid-column: 2 / -1; }
 }
-@media (max-width: 760px) {
+@media screen and (max-width: 760px) {
   .gp-panel.gp-enter { animation-name: gpPanelInLite; animation-duration: .45s; }
   @keyframes gpPanelInLite { from { opacity: 0; transform: translateY(10px); } }
   .gp-top-in { padding-top: 18px; padding-bottom: 14px; align-items: flex-start; }
@@ -508,11 +508,11 @@ details[open] > summary .gp-plus::after { transform: rotate(0deg); }
   .gp-foot-in { padding-bottom: 28px; }
 }
 /* tabs that won't all fit across the top move to a bar at the bottom */
-@media (min-width: 901px) and (max-width: 1100px) {
+@media screen and (min-width: 901px) and (max-width: 1100px) {
   .gp-tab { padding: 0 16px; font-size: 15px; }
   .gp-tabs, .gp-tabs-hl { gap: 2px; }
 }
-@media (max-width: 900px) {
+@media screen and (max-width: 900px) {
   html { scroll-padding-top: 16px; }
   body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   .gp-nav { display: none; }
@@ -536,7 +536,7 @@ details[open] > summary .gp-plus::after { transform: rotate(0deg); }
   .gp-bnav a.on .gp-bn-ico::before { opacity: 1; transform: none; }
   .toast-wrap { bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
-@media (max-width: 400px) {
+@media screen and (max-width: 400px) {
   .gp-who { max-width: 46%; }
   .gp-rx-main { flex-direction: column; gap: 12px; }
   .gp-stage-hint { display: none; }
@@ -552,13 +552,27 @@ details[open] > summary .gp-plus::after { transform: rotate(0deg); }
 @media print {
   @page { margin: 14mm; }
   body { background: #fff; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .gp-nav, .gp-bnav, .gp-plans, .gp-stage, .gp-print, [data-print], [data-refill], .gp-cta, .gp-next-actions, .gp-fu-actions, .toast-wrap { display: none !important; }
+  /* guide.js's shared print rule hides everything outside its older layout */
+  .gp-root, .gp-root * { visibility: visible; }
+  /* print the finished figures even if the page never scrolled to them */
+  .gp-count { display: none; }
+  .gp-sr { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
+  .gp-pre .gp-seg { stroke-dashoffset: 0 !important; }
+  .gp-pre .gp-daybar span, .gp-ladder.gp-pre li { transform: none !important; opacity: 1 !important; }
+  .gp-nav, .gp-bnav, .gp-plans, .gp-stage, .gp-print, [data-print], [data-refill], .gp-cta, .gp-next-actions, .gp-fu-actions,
+  .gp-sec-head .gp-link, .gp-donut-center span, .gp-plus, .toast-wrap { display: none !important; }
+  /* the desktop layout, scaled to the page, keeps it to a few pages */
+  html { zoom: .74; }
+  .gp-root *, .gp-root *::before, .gp-root *::after { animation: none !important; transition: none !important; }
   .gp-panel[hidden] { display: block !important; }
   .gp-panel { animation: none !important; break-before: page; }
   .gp-panel:first-child { break-before: auto; }
   .gp-hero { grid-template-columns: 1fr; }
+  .gp-hero-lede { max-width: 60ch; }
   .gp-line > span, .gp-hero-lede { animation: none !important; }
-  .gp-card, .gp-ess-card, .gp-next, .gp-welcome, .gp-dose, .gp-acc { break-inside: avoid; }
+  .gp-panel > .gp-sec { margin-top: 40px; }
+  .gp-ess-card, .gp-next, .gp-welcome, .gp-dose, .gp-rx, .gp-plate, .gp-acc, .gp-meals > li, .gp-list > li, .gp-timeline li { break-inside: avoid; }
+  :is(h1, h2, h3) { break-after: avoid; }
   details > .gp-acc-body { display: block !important; }
   .gp-main { padding-top: 12px; }
   .gp-foot { margin-top: 32px; }

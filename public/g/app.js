@@ -135,8 +135,8 @@ function planModel(plan, patient, clinic) {
   const isGlp1 = plan.category === "glp1";
   const d0 = plan.diet || {};
   const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
-  const std = sortSections(content ? content.sections : [], isGlp1);
-  if (plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined") std.more.push(...PEPTIDE_GENERAL_GUIDE);
+  const std = sortSections(sectionsForPatient(content ? content.sections : [], patient), isGlp1);
+  if (plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined") std.more.push(...sectionsForPatient(PEPTIDE_GENERAL_GUIDE, patient));
   return {
     kind: "plan", plan, patient, clinic, signer, isGlp1, std,
     doctor: signer.name || "your doctor",
@@ -932,12 +932,30 @@ function finishAnimations() {
 let printOpened = [];
 function beforePrint() {
   finishAnimations();
-  printOpened = [...document.querySelectorAll(".gp-root details:not([open])")];
-  printOpened.forEach((d) => { d.open = true; });
+  const closed = [...document.querySelectorAll(".gp-root details:not([open])")];
+  closed.forEach((d) => { d.open = true; });
+  printOpened.push(...closed);
 }
 function afterPrint() {
   printOpened.forEach((d) => { d.open = false; });
   printOpened = [];
+}
+
+// Browsers open their print sheet, where "Save as PDF" lives. Some in-app
+// browsers (inside WhatsApp, Instagram and the like) have no print at all and
+// silently ignore the call, so the patient is told where it will work.
+function savePdf() {
+  let opened = false;
+  const mark = () => { opened = true; };
+  window.addEventListener("beforeprint", mark, { once: true });
+  beforePrint(); // not every browser announces the print, so open everything first
+  try { window.print(); } catch { /* no print in this browser */ }
+  setTimeout(() => {
+    window.removeEventListener("beforeprint", mark);
+    if (opened) return;
+    afterPrint();
+    toast("This app's browser can't save PDFs. Open the link in Safari or Chrome, then tap Save as PDF again.", "err");
+  }, 700);
 }
 
 // Plate: hovering, focusing or tapping a portion lights up its share of the
@@ -1001,7 +1019,7 @@ function paintRefill() {
 
 function wire(root) {
   root.querySelectorAll("[data-tab-link]").forEach((a) => a.addEventListener("click", () => { G.focusNext = true; }));
-  root.querySelectorAll("[data-print]").forEach((b) => b.addEventListener("click", () => window.print()));
+  root.querySelectorAll("[data-print]").forEach((b) => b.addEventListener("click", savePdf));
   root.querySelectorAll("[data-plan]").forEach((b) => b.addEventListener("click", () => {
     const plan = (G.data.plans || []).find((pl) => pl.id === Number(b.dataset.plan));
     if (!plan || plan.id === G.model.plan.id) return;

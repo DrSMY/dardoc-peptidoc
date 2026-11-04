@@ -23,6 +23,36 @@ function accordion(icoName, title, bodyHtml, open) {
   </details>`;
 }
 
+// Men never see pregnancy or breastfeeding advice. The master guide words it
+// two ways: a clause inside the GLP-1 "Do not use if…" sentence, and a
+// sentence of its own for peptides. Anything else that mentions it is dropped
+// a sentence at a time. A patient with no gender on file counts as male only
+// when their title is Mr.
+const PREGNANCY_WORDS = /pregnan|breast-?feed|conceiv|lactat/i;
+function isMalePatient(patient) {
+  const p = patient || {};
+  const g = String(p.gender || "").trim().toLowerCase();
+  return g === "male" || (!g && /^mr\.?$/i.test(String(p.title || "").trim()));
+}
+function withoutPregnancy(text) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    if (!PREGNANCY_WORDS.test(line)) { out.push(line); continue; }
+    const l = line
+      .replace(/, if you have had pancreatitis, or if you are pregnant, planning pregnancy, or breastfeeding\./i, ", or if you have had pancreatitis.")
+      .match(/[^.!?]+[.!?]*\s*/g)
+      .filter((s) => !PREGNANCY_WORDS.test(s))
+      .join("").trim();
+    if (l) out.push(l);
+  }
+  return out.join("\n");
+}
+// The guide windows as this patient should read them.
+function sectionsForPatient(sections, patient) {
+  if (!isMalePatient(patient)) return sections;
+  return sections.map((s) => ({ ...s, body: withoutPregnancy(s.body) })).filter((s) => s.body.trim());
+}
+
 // The standard DarDoc guide windows for this medication+route (from
 // public/patient-guides.js, generated off the master guides document).
 // Skipped silently when the page didn't load the content or the
@@ -30,13 +60,13 @@ function accordion(icoName, title, bodyHtml, open) {
 // window becomes its own collapsible accordion group rather than one long
 // scroll of text — only the first (usually "at a glance"/"how it works")
 // opens by default.
-function standardGuideSections(plan) {
+function standardGuideSections(plan, patient) {
   if (typeof guideContentFor !== "function") return "";
   const content = guideContentFor(plan.medication, plan.route);
   if (!content) return "";
   // GLP-1 guides carry the patient's own nutrition plan (dietPlanHTML), which
   // replaces the generic nutrition window from the master document.
-  const sections = plan.category === "glp1" ? content.sections.filter((s) => !/^NUTRITION/i.test(s.head)) : content.sections;
+  const sections = sectionsForPatient(plan.category === "glp1" ? content.sections.filter((s) => !/^NUTRITION/i.test(s.head)) : content.sections, patient);
   const windows = sections.map((s, i) => accordion(s.emoji || "•", s.head, `<div class="g-prose">${guideProse(s.body)}</div>`, i === 0)).join("");
   const general = plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined" && PEPTIDE_GENERAL_GUIDE.length
     ? accordion("ℹ️", PEPTIDE_GENERAL_GUIDE[0].head, `<div class="g-prose">${guideProse(PEPTIDE_GENERAL_GUIDE[0].body)}</div>`, false) : "";
@@ -554,7 +584,7 @@ function buildGuide(plan, patient, doctorName, opts) {
 
     ${bloodTest}
 
-    ${standardGuideSections(plan)}
+    ${standardGuideSections(plan, patient)}
 
     <section class="g-sec">
       <h3>${icon("calendar", 18)} Follow-up</h3>

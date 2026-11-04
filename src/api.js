@@ -1218,7 +1218,8 @@ route("GET", "/api/guide/:token", (req, res, p) => {
   db.prepare("UPDATE guide_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(link.id);
   const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
   json(res, 200, {
-    patient: { title: patient.title || "", name: patient.name },
+    // Gender only decides whether pregnancy advice is shown.
+    patient: { title: patient.title || "", name: patient.name, gender: patient.gender || "" },
     clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
     plans: rows.map(sharedPlan),
     visit: visitRow ? publicVisit(visitRow) : null,
