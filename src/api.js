@@ -267,7 +267,7 @@ const routes = [];
 // `:token` matches an opaque URL-safe string; every other `:name` is a number.
 function route(method, pattern, handler) {
   const keys = [];
-  const rx = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return k === "token" ? "([A-Za-z0-9_-]{20,64})" : "(\\d+)"; }) + "$");
+  const rx = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return k === "token" ? "([A-Za-z0-9_-]{10,64})" : "(\\d+)"; }) + "$");
   routes.push({ method, rx, keys, handler });
 }
 
@@ -1147,6 +1147,14 @@ route("POST", "/api/patients/:id/visits", async (req, res, p, body) => {
 // guide as a web page with no sign-in, and can be reopened until it expires
 // or is disabled. The token is 192 random bits, so it is the credential —
 // hence noindex/no-store on everything served through it.
+// Short private link codes: 10 characters from an alphabet without look-alikes
+// (no 0/O, 1/l/I), about 58 bits, unguessable but tidy in a WhatsApp message.
+const LINK_ALPHABET = "23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
+function linkCode() {
+  let out = "";
+  for (const b of crypto.randomBytes(10)) out += LINK_ALPHABET[b % LINK_ALPHABET.length];
+  return out;
+}
 const GUIDE_LINK_DAYS = 90;
 const NOINDEX = { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" };
 
@@ -1175,7 +1183,7 @@ route("POST", "/api/patients/:id/guide-link", async (req, res, p, body) => {
     db.prepare("UPDATE guide_links SET expires_at = datetime('now', ?) WHERE id = ?").run(`+${GUIDE_LINK_DAYS} days`, link.id);
   } else {
     db.prepare("INSERT INTO guide_links (token, patient_id, created_by, expires_at) VALUES (?,?,?,datetime('now', ?))")
-      .run(crypto.randomBytes(24).toString("base64url"), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
+      .run(linkCode(), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
   }
   link = activeGuideLink(p.id);
   json(res, 200, guideLinkInfo(link));
@@ -1274,7 +1282,7 @@ route("POST", "/api/patients/:id/refill-link", async (req, res, p, body) => {
     db.prepare("UPDATE refill_links SET expires_at = datetime('now', ?) WHERE id = ?").run(`+${GUIDE_LINK_DAYS} days`, link.id);
   } else {
     db.prepare("INSERT INTO refill_links (token, patient_id, created_by, expires_at) VALUES (?,?,?,datetime('now', ?))")
-      .run(crypto.randomBytes(24).toString("base64url"), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
+      .run(linkCode(), p.id, me.id, `+${GUIDE_LINK_DAYS} days`);
   }
   link = activeRefillLink(p.id);
   json(res, 200, refillLinkInfo(link));
@@ -1648,7 +1656,7 @@ route("POST", "/api/patient-forms", async (req, res, _p, body) => {
   } else {
     const r = db.prepare(`INSERT INTO patient_forms (token, org_id, created_by, patient_id, reason, mobile, email, label, prefill_json, meds_json, expires_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now', ?))`)
-      .run(crypto.randomBytes(24).toString("base64url"), me.org_id, me.id, patient ? patient.id : null, reason, mobile, email, name,
+      .run(linkCode(), me.org_id, me.id, patient ? patient.id : null, reason, mobile, email, name,
         JSON.stringify(prefill), JSON.stringify(meds), `+${FORM_LINK_DAYS} days`);
     id = Number(r.lastInsertRowid);
   }

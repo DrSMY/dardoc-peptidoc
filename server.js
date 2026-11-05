@@ -94,7 +94,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const linkMatch = pathname.match(/^\/([grf])\/([A-Za-z0-9_-]{20,64})\/?$/);
+  const linkMatch = pathname.match(/^\/([grf])\/([A-Za-z0-9_-]{10,64})\/?$/);
   if (linkMatch) {
     const [, kind, token] = linkMatch;
     if (kind === "g") return serveLinkPage(req, res, "g", guidePageMeta(token), "Your personal treatment guide", "Tap to open your guide: how to take your medication, what to expect, side effects and when to contact us.");
