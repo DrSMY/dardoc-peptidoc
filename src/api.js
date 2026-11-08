@@ -4,6 +4,7 @@ const https = require("node:https");
 const { db, hashSecret, verifySecret } = require("./db");
 const presets = require("./presets");
 const protocolMap = require("./protocol-map.js");
+const { guidePdf } = require("./guide-pdf");
 
 const SESSION_HOURS = { doctor: 24 * 14, patient: 24 * 90 };
 
@@ -1213,25 +1214,72 @@ function sharedPlan(row) {
 
 // Public: the token is the credential. Expired, disabled and unknown links
 // all answer identically so a link cannot be probed.
-route("GET", "/api/guide/:token", (req, res, p) => {
-  const unavailable = () => json(res, 404, { error: "This guide link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
-  const link = db.prepare("SELECT * FROM guide_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(p.token);
-  if (!link) return unavailable();
-  const patient = db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
-  if (!patient) return unavailable();
+// What a patient's guide shows: their active programs, or, with none, the
+// latest visit's health plan. Null when there's nothing to show.
+function guidePayload(patient) {
   const rows = db.prepare("SELECT * FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC").all(patient.id);
   const visitRow = rows.length ? null : latestVisitRow(patient.id);
-  if (!rows.length && !visitRow) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
+  if (!rows.length && !visitRow) return null;
   rows.sort((a, b) => (b.category === "glp1") - (a.category === "glp1"));
-  db.prepare("UPDATE guide_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(link.id);
   const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
-  json(res, 200, {
+  return {
     // Gender only decides whether pregnancy advice is shown.
     patient: { title: patient.title || "", name: patient.name, gender: patient.gender || "" },
     clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
     plans: rows.map(sharedPlan),
     visit: visitRow ? publicVisit(visitRow) : null,
-  }, NOINDEX);
+  };
+}
+
+function guideLinkPatient(token) {
+  const link = db.prepare("SELECT * FROM guide_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(token);
+  const patient = link && db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
+  return patient ? { link, patient } : null;
+}
+
+route("GET", "/api/guide/:token", (req, res, p) => {
+  const found = guideLinkPatient(p.token);
+  if (!found) return json(res, 404, { error: "This guide link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const payload = guidePayload(found.patient);
+  if (!payload) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
+  db.prepare("UPDATE guide_links SET views = views + 1, last_viewed_at = datetime('now') WHERE id = ?").run(found.link.id);
+  json(res, 200, payload, NOINDEX);
+});
+
+// The guide as a PDF file: the patient's own copy from their link, or one the
+// doctor attaches to a message. It names the facility and carries no web
+// address, so nothing in it leads back to the link.
+function sendGuidePdf(res, patient, payload) {
+  const logoRow = db.prepare("SELECT mime, data FROM org_logos WHERE org_id = ?").get(patient.org_id);
+  const pdf = guidePdf(payload, { logo: logoRow && /png/i.test(logoRow.mime) ? Buffer.from(logoRow.data) : null });
+  const who = `${patient.title ? patient.title + " " : ""}${patient.name || ""}`.trim();
+  const name = `${payload.visit ? "Health plan" : "Treatment guide"} - ${who}`.replace(/[^\p{L}\p{N} ._-]/gu, "").trim() || "Treatment guide";
+  const ascii = name.replace(/[^\x20-\x7E]/g, "").trim() || "Treatment guide";
+  res.writeHead(200, {
+    ...NOINDEX,
+    "Content-Type": "application/pdf",
+    "Content-Length": pdf.length,
+    "Content-Disposition": `inline; filename="${ascii}.pdf"; filename*=UTF-8''${encodeURIComponent(name)}.pdf`,
+  });
+  res.end(pdf);
+}
+
+route("GET", "/api/guide/:token/pdf", (req, res, p) => {
+  const found = guideLinkPatient(p.token);
+  if (!found) return json(res, 404, { error: "This guide link is no longer available. Please ask your clinic to send you a new one." }, NOINDEX);
+  const payload = guidePayload(found.patient);
+  if (!payload) return json(res, 410, { error: "This guide is no longer active. Please contact your clinic." }, NOINDEX);
+  sendGuidePdf(res, found.patient, payload);
+});
+
+route("GET", "/api/patients/:id/guide-pdf", (req, res, p) => {
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
+  const patient = patientInOrg(p.id, me);
+  if (!patient) return json(res, 404, NOT_IN_ORG);
+  const payload = guidePayload(patient);
+  if (!payload) return json(res, 400, { error: "This patient has no guide to share yet." });
+  sendGuidePdf(res, patient, payload);
 });
 
 // Patient requests a refill through their guide link — no sign-in, the token

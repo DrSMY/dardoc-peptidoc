@@ -919,7 +919,8 @@ async function viewPatient(id) {
         box.innerHTML = `
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
-          <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
+          <a class="btn btn-secondary btn-sm" href="/api/patients/${p.id}/guide-pdf" download>${icon("file", 16)} Download PDF</a>
+          <button class="btn btn-secondary btn-sm" id="btn-pdf">${icon("file", 16)} Send PDF</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send guide link</button>
         </div>
         ${buildVisitGuide(visits[0], p, S.user.name)}`;
@@ -927,7 +928,7 @@ async function viewPatient(id) {
           await navigator.clipboard.writeText(buildVisitGuideText(visits[0], p, S.user.name));
           toast("Guide text copied");
         });
-        document.getElementById("btn-print").addEventListener("click", () => window.print());
+        document.getElementById("btn-pdf").addEventListener("click", () => guidePdfModal({ ...p, noMedication: true }));
         document.getElementById("btn-wa").addEventListener("click", () => guideLinkModal({ ...p, noMedication: true }));
         return;
       }
@@ -938,8 +939,9 @@ async function viewPatient(id) {
       box.innerHTML = guidePlans.length ? `
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="btn btn-secondary btn-sm" id="btn-copytext">${icon("copy", 16)} Copy guide text</button>
-          <button class="btn btn-secondary btn-sm" id="btn-print">${icon("printer", 16)} Print / PDF</button>
+          <a class="btn btn-secondary btn-sm" href="/api/patients/${p.id}/guide-pdf" download>${icon("file", 16)} Download PDF</a>
           <button class="btn btn-secondary btn-sm" id="btn-refilllink">${icon("syringe", 16)} Send refill link</button>
+          <button class="btn btn-secondary btn-sm" id="btn-pdf">${icon("file", 16)} Send PDF</button>
           <button class="btn btn-accent btn-sm" id="btn-wa">${icon("whatsapp", 16)} Send guide link</button>
         </div>
         ${guidePickerHTML(guidePlans, activeId)}
@@ -956,7 +958,7 @@ async function viewPatient(id) {
           await navigator.clipboard.writeText(buildComboGuideText(guidePlans, p, S.user.name));
           toast("Guide text copied");
         });
-        document.getElementById("btn-print").addEventListener("click", () => window.print());
+        document.getElementById("btn-pdf").addEventListener("click", () => guidePdfModal(p));
         document.getElementById("btn-wa").addEventListener("click", () => guideLinkModal(p));
         document.getElementById("btn-refilllink").addEventListener("click", () => refillLinkModal(p));
       }
@@ -1202,6 +1204,110 @@ async function guideLinkModal(patient) {
     try { await api("DELETE", `/api/patients/${patient.id}/guide-link`); scrim.remove(); toast("Link disabled"); }
     catch (ex) { toast(ex.message, "bad"); }
   });
+}
+
+// ── guide as a PDF ───────────────────────────────────────────────
+// For patients who'd rather have a file than a link: the server builds the
+// guide as a PDF (facility name, no web address), and it goes with the
+// message. Where the device can share files the share sheet attaches it in
+// one step; otherwise WhatsApp or email opens with the message ready and the
+// PDF is saved for the doctor to attach.
+function guidePdfMessage(patient) {
+  const firstName = String(patient.name || "").trim().split(/\s+/)[0] || "there";
+  const u = S.user;
+  const signature = [
+    [u.name, u.credentials].filter(Boolean).join(" "),
+    u.signature,
+    u.clinic || u.orgName || "DarDoc Healthcare",
+  ].filter(Boolean);
+  const dear = `Dear ${patient.title ? patient.title + " " : ""}${firstName},`;
+  if (patient.noMedication) {
+    return [
+      "🩺 *PERSONAL HEALTH PLAN*",
+      "",
+      dear,
+      "",
+      "Thank you for your visit. Your personal plan is ready, built around your goals.",
+      "It's attached as a PDF. It includes your daily protein and nutrition targets, how to build your plate, an example day of eating, and how medication could help if you need it later.",
+      "",
+      "",
+      ...signature,
+    ].join("\n");
+  }
+  return [
+    "🩺 *PERSONAL TREATMENT GUIDE*",
+    "",
+    "👋 *WELCOME TO YOUR TREATMENT JOURNEY*",
+    dear,
+    "",
+    "Welcome to your treatment journey.",
+    "Our goal is sustainable results while protecting your health, preserving muscle, improving nutrition, and building habits that can continue long term.",
+    "We're here to support you throughout your treatment — with messages, follow-ups, refills, and personalised guidance whenever you need them.",
+    "",
+    "Your personal treatment guide is attached as a PDF. It covers how to take your medication, what to expect, food and daily habits, side effects and when to contact us, and your follow-up.",
+    "",
+    "",
+    ...signature,
+  ].join("\n");
+}
+
+async function guidePdfModal(patient) {
+  const scrim = modal(`
+    <div class="modal-head"><h3>Send guide as PDF</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    <p class="hint" style="margin:-6px 0 14px">For patients who'd rather have a file than a link. The PDF of <b>${esc(patient.name)}</b>'s ${patient.noMedication ? "health plan" : "guide"} names the facility and has no web address in it.</p>
+    <div id="gpdf-body"><div class="skel" style="height:190px"></div></div>`);
+  const body = scrim.querySelector("#gpdf-body");
+  let file;
+  try {
+    const res = await fetch(`/api/patients/${patient.id}/guide-pdf`);
+    if (!res.ok) throw new Error(((await res.json().catch(() => null)) || {}).error || "Couldn't make the PDF. Please try again.");
+    const disp = res.headers.get("Content-Disposition") || "";
+    const named = disp.match(/filename\*=UTF-8''([^;]+)/i);
+    const name = named ? decodeURIComponent(named[1]) : `${patient.noMedication ? "Health plan" : "Treatment guide"} - ${patient.name}.pdf`;
+    file = new File([await res.blob()], name, { type: "application/pdf" });
+  } catch (ex) { body.innerHTML = `<p class="err-text">${esc(ex.message)}</p>`; return; }
+
+  const fileUrl = URL.createObjectURL(file);
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  body.innerHTML = `
+    <div class="card" style="background:var(--bg);padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <span style="color:var(--brand)">${icon("file", 22)}</span>
+      <span style="flex:1;min-width:0"><b style="display:block;font-size:14px;word-break:break-word">${esc(file.name)}</b><span style="font-size:12.5px;color:var(--muted)">PDF · ${Math.max(1, Math.round(file.size / 1024))} KB</span></span>
+      <a class="btn btn-ghost btn-sm" href="${fileUrl}" target="_blank" rel="noopener">Preview</a>
+    </div>
+    <div class="field"><label for="gpdf-msg">Message</label><textarea class="input" id="gpdf-msg" rows="13"></textarea></div>
+    ${canShare ? `<button class="btn btn-accent btn-block" id="gpdf-share" type="button" style="margin-bottom:8px">${icon("share", 18)} Share PDF with message</button>
+    <p class="hint" style="margin:0 0 12px">Opens your device's share sheet with the PDF attached. Choose WhatsApp or Mail, then the patient.</p>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ${canShare ? "btn-secondary" : "btn-accent"}" style="flex:1;min-width:170px" id="gpdf-wa" type="button">${icon("whatsapp", 18)} WhatsApp</button>
+      <button class="btn btn-secondary" style="flex:1;min-width:120px" id="gpdf-email" type="button">${icon("mail", 18)} Email</button>
+      <a class="btn btn-secondary" id="gpdf-dl" href="${fileUrl}" download="${esc(file.name)}">${icon("file", 18)} Download</a>
+      <button class="btn btn-secondary" id="gpdf-copy" type="button">${icon("copy", 18)} Copy message</button>
+    </div>
+    <p class="hint" style="margin:10px 0 0">WhatsApp and Email open the patient's chat or a new email with this message, and save the PDF to your downloads for you to attach.</p>`;
+  const $ = (id) => scrim.querySelector("#" + id);
+  const msg = $("gpdf-msg");
+  msg.value = guidePdfMessage(patient);
+  const saveFile = () => $("gpdf-dl").click();
+
+  if (canShare) {
+    $("gpdf-share").addEventListener("click", async () => {
+      try { await navigator.share({ files: [file], title: guideLinkSubject(patient), text: msg.value }); }
+      catch (ex) { if (ex.name !== "AbortError") toast("Couldn't open the share sheet. Use WhatsApp or Email instead.", "bad"); }
+    });
+  }
+  $("gpdf-wa").addEventListener("click", () => {
+    if (!patient.mobile) return toast("This patient has no mobile number on file", "bad");
+    saveFile();
+    window.open(waLink(patient.mobile, msg.value), "_blank");
+    toast("PDF saved to your downloads. Attach it in the WhatsApp chat.");
+  });
+  $("gpdf-email").addEventListener("click", () => {
+    saveFile();
+    openEmail(patient.email, guideLinkSubject(patient), msg.value);
+    toast("PDF saved to your downloads. Attach it to the email.");
+  });
+  $("gpdf-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(msg.value); toast("Message copied"); });
 }
 
 // ── dedicated refill link ────────────────────────────────────────
@@ -5150,6 +5256,7 @@ function publishedModal(patientId, w, pin) {
       ${pin ? `<div class="pin-display">${pin}</div><p class="hint" style="margin-bottom:14px">Their portal PIN — shown once. You can regenerate it any time from the patient page.</p>` : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" style="flex:1;min-width:170px" id="pub-guide">${icon("whatsapp", 18)} Send guide link</button>
+        <button class="btn btn-secondary" style="flex:1;min-width:170px" id="pub-pdf">${icon("file", 18)} Send guide PDF</button>
         <button class="btn btn-secondary" style="flex:1;min-width:170px" id="pub-wa">${icon("whatsapp", 18)} Send portal login</button>
         <button class="btn btn-secondary" id="pub-email">${icon("mail", 18)} Email login</button>
         <button class="btn btn-secondary" id="pub-copy">${icon("copy", 18)} Copy</button>
@@ -5157,6 +5264,7 @@ function publishedModal(patientId, w, pin) {
       <a class="btn btn-ghost btn-block" style="margin-top:8px" href="#/patient/${patientId}" id="pub-open">Open patient record</a>
     </div>`);
   scrim.querySelector("#pub-guide").addEventListener("click", () => guideLinkModal({ id: patientId, name: w.patient.name, title: w.patient.title, mobile: w.patient.mobile, email: w.patient.email, noMedication: !hasProgram }));
+  scrim.querySelector("#pub-pdf").addEventListener("click", () => guidePdfModal({ id: patientId, name: w.patient.name, title: w.patient.title, mobile: w.patient.mobile, email: w.patient.email, noMedication: !hasProgram }));
   scrim.querySelector("#pub-email").addEventListener("click", () => openEmail(w.patient.email, emailSubject, waText));
   scrim.querySelector("#pub-wa").addEventListener("click", () => window.open(waLink(w.patient.mobile, waText), "_blank"));
   scrim.querySelector("#pub-copy").addEventListener("click", async () => { await navigator.clipboard.writeText(waText); toast("Message copied"); });

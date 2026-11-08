@@ -21,29 +21,7 @@ const TAB_META = {
   safety: { label: "Side effects & safety", short: "Safety", icon: "shield" },
   followup: { label: "Follow-up & support", short: "Follow-up", icon: "calendar" },
 };
-const ROUTE_LABEL = { injection: "Subcutaneous injection", oral: "Oral tablet", nasal: "Nasal spray", topical: "Applied to the skin" };
-const ROUTE_NOUN = { injection: "injection", oral: "tablet", nasal: "spray", topical: "treatment" };
 const ARROW = `<svg class="gp-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>`;
-const DAY_TONES = ["#CBD9C0", "#A8C09A", "#7FA07A", "#5B8468", "#3C6957"];
-
-// ── small text helpers ───────────────────────────────────────────────
-const cap = (s) => { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); };
-const firstNameOf = (patient) => String(patient.name || "").trim().split(/\s+/)[0] || "there";
-const docInitials = (name) => String(name || "").replace(/^(dr|doctor)\.?\s+/i, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "Dr";
-const toNumber = (v) => Number(String(v == null ? "" : v).replace(/,/g, ""));
-
-// "1.5 mg" → { num: "1.5", unit: "mg" }; anything after the unit is kept so
-// "0.15 ml (15 units)" still reads in full.
-function splitDose(dose) {
-  const m = String(dose || "").trim().match(/^([\d.,]+)\s*([a-zA-Zµμ]+)?\s*(.*)$/);
-  return m ? { num: m[1], unit: m[2] || "", rest: m[3] || "" } : { num: "", unit: "", rest: String(dose || "") };
-}
-
-// "2–3 L daily" → { value: "2–3", unit: "L", rest: "daily" }
-function splitWater(water) {
-  const m = String(water || "").trim().match(/^([\d.,]+(?:\s*[–-]\s*[\d.,]+)?)\s*(L|litres?|liters?|ml)\b\.?\s*(.*)$/i);
-  return m ? { value: m[1].replace(/\s*-\s*/, "–"), unit: m[2].length > 2 ? "L" : m[2], rest: m[3] } : { value: String(water || ""), unit: "", rest: "" };
-}
 
 // A number that counts up when it scrolls into view. Screen readers and the
 // printed page get the real figure; the animated copy is hidden from them.
@@ -57,8 +35,6 @@ function countNum(n) {
 // ── prose from the master guide document ─────────────────────────────
 // Bullets become real lists, "1." lines numbered lists, **bold** and links
 // are kept, and the emoji the document uses as decoration are dropped.
-const EMOJI_LEAD = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator})[️‍\p{Extended_Pictographic}]*\s*/u;
-
 function inline(s) {
   let h = esc(s);
   h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -69,140 +45,21 @@ function inline(s) {
 
 // "Nausea (most common): eat smaller meals" → the label in bold.
 function labelled(s) {
-  const m = s.match(/^([^:]{2,48}):\s+(.+)$/);
-  return m && !/https?$/i.test(m[1]) ? `<strong>${inline(m[1])}:</strong> ${inline(m[2])}` : inline(s);
+  const l = splitLabel(s);
+  return l ? `<strong>${inline(l[0])}:</strong> ${inline(l[1])}` : inline(s);
 }
 
 function prose(text) {
-  const out = [];
-  let list = null;
-  const flush = () => {
-    if (!list) return;
-    out.push(`<${list.tag} class="gp-list${list.ck ? " gp-list-ck" : ""}">${list.items.join("")}</${list.tag}>`);
-    list = null;
-  };
-  const add = (tag, ck, html) => {
-    if (!list || list.tag !== tag || list.ck !== ck) { flush(); list = { tag, ck, items: [] }; }
-    list.items.push(`<li>${html}</li>`);
-  };
-  for (const raw of String(text || "").replace(/\r/g, "").split("\n")) {
-    const line = raw.trim();
-    let m;
-    if (!line) { flush(); continue; }
-    if ((m = line.match(/^(?:•\s*|[-–]\s+)(.+)$/u))) add("ul", false, labelled(m[1]));
-    else if ((m = line.match(/^(?:✔️?|✓|☑️?)\s*(.+)$/u))) add("ul", true, labelled(m[1]));
-    else if ((m = line.match(/^\d+[.)]\s+(.+)$/))) add("ol", false, inline(m[1]));
-    else { flush(); out.push(`<p>${inline(line.replace(EMOJI_LEAD, ""))}</p>`); }
-  }
-  flush();
-  return out.join("");
+  return parseProse(text).map((b) => {
+    if (b.type === "p") return `<p>${inline(b.text)}</p>`;
+    const items = b.items.map((it) => `<li>${b.type === "ol" ? inline(it) : labelled(it)}</li>`).join("");
+    return `<${b.type} class="gp-list${b.ck ? " gp-list-ck" : ""}">${items}</${b.type}>`;
+  }).join("");
 }
-
-// "HOW WEGOVY PILL WORKS" → "How Wegovy Pill works"
-function prettyHead(head, medication) {
-  let h = cap(String(head || "").toLowerCase());
-  if (medication) h = h.replace(new RegExp(String(medication).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), medication);
-  return h.replace(/\bglp-1\b/gi, "GLP-1").replace(/\bbpc-157\b/gi, "BPC-157");
-}
-
-function bulletsOf(text) {
-  return String(text || "").split("\n").map((l) => l.trim()).filter((l) => /^(?:•|[-–]\s|✔|✓)/u.test(l)).map((l) => l.replace(/^(?:•\s*|[-–]\s+|✔️?\s*|✓\s*)/u, ""));
-}
-
-// The master document's windows, sorted onto the page that answers them.
-function sortSections(sections, isGlp1) {
-  const s = { about: null, how: null, titration: null, glance: null, more: [], food: [], effects: null, urgent: null, notes: null, followup: null };
-  for (const sec of sections || []) {
-    const h = String(sec.head || "").toUpperCase();
-    if (/^HOW TO (TAKE|INJECT|USE|APPLY)/.test(h)) s.how = sec;
-    else if (/^HOW .*WORKS$|^HOW IT WORKS/.test(h)) s.about = sec;
-    else if (/TITRATION|DOSING/.test(h)) s.titration = sec;
-    else if (/AT A GLANCE/.test(h)) s.glance = sec;
-    else if (/^NUTRITION/.test(h)) { if (!isGlp1) s.food.push(sec); }
-    else if (/SUCCESS TIPS|LIFESTYLE/.test(h)) s.food.push(sec);
-    else if (/SIDE EFFECTS/.test(h)) s.effects = sec;
-    else if (/SEEK URGENT/.test(h)) s.urgent = sec;
-    else if (/SAFETY NOTES/.test(h)) s.notes = sec;
-    else if (/FOLLOW-UP/.test(h)) s.followup = sec;
-    else s.more.push(sec);
-  }
-  return s;
-}
-
-// ── models ───────────────────────────────────────────────────────────
-function planModel(plan, patient, clinic) {
-  const signer = plan.signedBy || {};
-  const isGlp1 = plan.category === "glp1";
-  const d0 = plan.diet || {};
-  const content = typeof guideContentFor === "function" ? guideContentFor(plan.medication, plan.route) : null;
-  const std = sortSections(sectionsForPatient(content ? content.sections : [], patient), isGlp1);
-  if (plan.category === "peptide" && typeof PEPTIDE_GENERAL_GUIDE !== "undefined") std.more.push(...sectionsForPatient(PEPTIDE_GENERAL_GUIDE, patient));
-  return {
-    kind: "plan", plan, patient, clinic, signer, isGlp1, std,
-    doctor: signer.name || "your doctor",
-    first: firstNameOf(patient),
-    info: plan.guideInfo || {},
-    diet: isGlp1 || d0.proteinMin || d0.calories ? dietPlanFor(d0) : null,
-    phase: (plan.phases || [])[0] || null,
-    doseOptions: Array.isArray(plan.doseOptions) ? plan.doseOptions.filter(Boolean) : [],
-    appName: signer.appName || "",
-    labs: Array.isArray(plan.labTests) ? plan.labTests : [],
-    supps: Array.isArray(plan.suppList) ? plan.suppList : [],
-    created: plan.created_at,
-  };
-}
-
-function visitModel(visit, patient, clinic) {
-  const signer = visit.signedBy || {};
-  return {
-    kind: "visit", visit, patient, clinic, signer, isGlp1: false,
-    std: sortSections([], false),
-    doctor: signer.name || "your doctor",
-    first: firstNameOf(patient),
-    info: {},
-    diet: dietPlanFor(visit.diet),
-    appName: signer.appName || "",
-    labs: Array.isArray(visit.labTests) ? visit.labTests : [],
-    supps: Array.isArray(visit.suppList) ? visit.suppList : [],
-    goals: Array.isArray(visit.goals) ? visit.goals : [],
-    created: visit.created_at,
-  };
-}
-
-function tabsFor(m) {
-  const t = ["overview"];
-  if (m.kind === "plan") t.push("medication");
-  if (m.diet || m.std.food.length || m.supps.length || (m.plan && m.plan.supplements)) t.push("food");
-  if (m.kind === "plan") t.push("safety");
-  t.push("followup");
-  return t;
-}
-
-// The follow-up window the text guide gives (three days either side), split
-// so the dates can be set large: { range: "15–21 November", year: 2026 }.
-function followWindow(next) {
-  if (!next) return null;
-  const base = new Date(String(next).includes("T") ? next : next + "T12:00:00");
-  if (isNaN(base)) return null;
-  const start = new Date(base.getTime() - 3 * 864e5), end = new Date(base.getTime() + 3 * 864e5);
-  const month = (d, short) => d.toLocaleDateString("en-GB", { month: short ? "short" : "long" });
-  const past = end.getTime() < Date.now();
-  const range = start.getMonth() === end.getMonth()
-    ? `${start.getDate()}–${end.getDate()} ${month(end)}`
-    : `${start.getDate()} ${month(start, true)} – ${end.getDate()} ${month(end, true)}`;
-  return { range, year: end.getFullYear(), past };
-}
-
-function proteinRange(d) {
-  if (!d) return null;
-  const min = toNumber(d.proteinMin), max = toNumber(d.proteinMax) || min;
-  if (min) return { min, max };
-  return d.proteinTarget ? { min: d.proteinTarget, max: d.proteinTarget } : null;
-}
-const rangeHTML = (r) => (r.min === r.max ? countNum(r.min) : `${countNum(r.min)}–${countNum(r.max)}`);
-const rangeText = (r) => (r.min === r.max ? `${r.min}` : `${r.min}–${r.max}`);
 
 // ── shared pieces ────────────────────────────────────────────────────
+const rangeHTML = (r) => (r.min === r.max ? countNum(r.min) : `${countNum(r.min)}–${countNum(r.max)}`);
+
 // Clay-like glyphs for the daily essentials: plain geometry, lit from the
 // same top-left as the 3D stage.
 let artSeq = 0;
@@ -389,18 +246,6 @@ function nextCard(m) {
     </article>`;
 }
 
-function welcomeLines(m) {
-  const t = m.patient.title ? m.patient.title + " " : "";
-  return [
-    `Dear ${t}${m.first},`,
-    "Welcome to your treatment journey.",
-    m.isGlp1
-      ? "Our goal is sustainable weight loss while protecting your health, preserving muscle, improving nutrition, and building habits that can continue long term."
-      : "Our goal is to support your recovery and long-term health through this treatment, guided by careful monitoring throughout.",
-    "We're here to support you throughout your treatment — with messages, follow-ups, refills, and personalised guidance whenever you need them.",
-  ];
-}
-
 function welcomeCard(m) {
   if (m.kind === "visit") {
     const v = m.visit;
@@ -433,11 +278,7 @@ function welcomeCard(m) {
 
 function overviewPanel(m) {
   const visit = m.kind === "visit";
-  const lede = visit
-    ? `${m.first}, this is the plan we talked about, built around your goals and your own nutrition needs.`
-    : m.isGlp1
-      ? `${m.first}, this is your daily plan for sustainable weight loss, good nutrition and habits that stay with you.`
-      : `${m.first}, this is your plan for ${m.plan.medication}: how to take it, what to expect, and when to contact us.`;
+  const lede = heroLede(m);
   return `
     <section class="gp-hero">
       <div class="gp-hero-copy">
@@ -458,54 +299,15 @@ function overviewPanel(m) {
 }
 
 // ── medication ───────────────────────────────────────────────────────
-// Steps from the master guide's "How to take it" window (its numbered
-// lines), falling back to the doctor's own instruction lines.
-function stepsFrom(m) {
-  const lines = (m.std.how ? m.std.how.body : "").split("\n").map((l) => l.trim());
-  const steps = [], before = [], after = [];
-  for (const l of lines) {
-    if (!l) continue;
-    const n = l.match(/^\d+[.)]\s+(.+)$/);
-    if (n) steps.push(n[1]);
-    else (steps.length ? after : before).push(l);
-  }
-  if (steps.length) return { steps, before: before.join("\n"), after: after.join("\n") };
-  const own = doctorInstructions(m).split("\n").map((l) => l.trim()).filter(Boolean);
-  return { steps: own, before: "", after: "", fromDoctor: true };
-}
-
-function doctorInstructions(m) {
-  const p = m.plan;
-  if (!p.instructions) return "";
-  // The generic "protein / hydration" reminder that ends GLP-1 instructions
-  // is covered in full on the food page.
-  const text = m.isGlp1
-    ? String(p.instructions).split("\n").filter((l) => !/prioritise protein at every meal/i.test(l) && !/stay well hydrated/i.test(l)).join("\n").trim()
-    : p.instructions;
-  return text;
-}
-
 function medicationPanel(m) {
   const p = m.plan;
   const noun = ROUTE_NOUN[p.route] || "medication";
   const st = stepsFrom(m);
   const docText = st.fromDoctor ? "" : doctorInstructions(m);
   const many = st.steps.length > 4;
-  const label = [`Current prescription`, m.phase && m.phase.weeks ? `${m.phase.weeks} week${m.phase.weeks == 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+  const label = [`Current prescription`, m.phase && m.phase.weeks ? weeksText(m.phase.weeks) : ""].filter(Boolean).join(" · ");
   const about = m.std.about ? prose(m.std.about.body) : m.info.howItWorks ? `<p>${esc(m.info.howItWorks)}</p>` : "";
-  const ladder = m.doseOptions;
-  const loose = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
-  const cur = ladder.findIndex((x) => loose(x) === loose(p.dose));
-  const future = cur >= 0 ? ladder.slice(cur + 1) : [];
-  const titrationLines = m.std.titration ? bulletsOf(m.std.titration.body) : [];
-  // "4mg" on the program matches "Days 31–60: 4 mg" in the schedule.
-  const lineFor = (dose) => {
-    const d = splitDose(dose);
-    if (!d.num) return "";
-    const num = d.num.replace(/\./g, "\\.");
-    const re = new RegExp(`(^|[^\\d.])${num}\\s*${d.unit ? d.unit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : ""}(?![\\d.a-z])`, "i");
-    return titrationLines.find((l) => re.test(l)) || "";
-  };
+  const { ladder, cur, future } = doseLadder(m);
   const more = [m.std.titration, ...m.std.more].filter(Boolean);
   return `
     ${pageHead("Your medication", `How to take your current ${noun}, and what the dose strengths in your program mean.`)}
@@ -533,9 +335,8 @@ function medicationPanel(m) {
       ${m.info.videoLink ? `<a class="gp-link gp-video" href="${esc(m.info.videoLink)}" target="_blank" rel="noopener">Watch how ${esc(p.medication)} works and how to take it ${ARROW}</a>` : ""}
     </article>` : ""}
     ${future.length ? `
-    <div class="gp-grid2">${future.map((dose) => {
+    <div class="gp-grid2">${future.map(({ dose, line, note }) => {
       const d = splitDose(dose);
-      const line = lineFor(dose);
       return `
       <details class="gp-dose">
         <summary>
@@ -545,7 +346,7 @@ function medicationPanel(m) {
         </summary>
         <div class="gp-acc-body gp-prose">
           ${line ? `<p>${labelled(line)}</p>` : ""}
-          <p>Your doctor moves you to ${esc(dose)} at a review, and only if your current dose is well tolerated. Keep taking ${esc(p.dose || "your current dose")} until then.</p>
+          <p>${esc(note)}</p>
         </div>
       </details>`;
     }).join("")}</div>` : ""}
@@ -554,21 +355,13 @@ function medicationPanel(m) {
 
 // ── food & habits ────────────────────────────────────────────────────
 function plateCard(d) {
-  const pct = (v, fb) => { const nums = String(v).match(/\d+/g); return nums ? nums.map(Number).reduce((a, b) => a + b, 0) / nums.length : fb; };
-  const under = (v) => /less|under|below|</i.test(String(v));
-  const parts = [
-    { k: "protein", name: "Protein", value: d.plate.protein, detail: "Lean meat, fish, eggs, Greek yoghurt or lentils. Eat this first.", color: "#5F8F72" },
-    { k: "fibre", name: "Fibre", value: d.plate.fibre, detail: "Vegetables and salad, filling about half the plate.", color: "#A9C09B" },
-    { k: "carbs", name: "Carbs", value: d.plate.carbs, detail: "A small portion of whole grains or starchy food. Skip it if you're already full.", color: "#D8B88E" },
-  ];
-  parts.forEach((p, i) => { const v = pct(p.value, i === 2 ? 15 : 45); p.share = Math.max(5, under(p.value) ? v * 0.75 : v); });
-  const total = parts.reduce((a, p) => a + p.share, 0);
+  const parts = plateParts(d);
   const C = 2 * Math.PI * 70, gap = 3;
   let start = 0;
   const segs = parts.map((p, i) => {
-    const len = Math.max(1, (p.share / total) * C - gap);
+    const len = Math.max(1, p.fraction * C - gap);
     const rot = -90 + (start / C) * 360;
-    start += (p.share / total) * C;
+    start += p.fraction * C;
     return `<g transform="rotate(${rot.toFixed(2)} 100 100)"><circle class="gp-seg" data-k="${p.k}" cx="100" cy="100" r="70" stroke="${p.color}" style="--len:${len.toFixed(1)};--i:${i}" stroke-dasharray="${len.toFixed(1)} ${C.toFixed(1)}"/></g>`;
   }).join("");
   return `
@@ -684,9 +477,7 @@ function foodPanel(m) {
 function safetyPanel(m) {
   const p = m.plan, info = m.info;
   const reasons = m.isGlp1 ? GLP1_MESSAGE_REASONS : PEPTIDE_MESSAGE_REASONS;
-  const urgentStd = m.std.urgent ? bulletsOf(m.std.urgent.body) : [];
-  const urgent = urgentStd.length ? urgentStd : (info.redFlags || []);
-  const urgentExtra = m.std.urgent ? m.std.urgent.body.split("\n").map((l) => l.trim()).filter((l) => l && !/^(?:•|[-–]\s|✔)/u.test(l)).join("\n") : "";
+  const { items: urgent, extra: urgentExtra } = urgentFor(m);
   const warnings = String(p.warnings || "").trim();
   return `
     ${pageHead("Side effects & when to seek help", "Keep this section easy to find if you feel unwell.")}
@@ -726,6 +517,7 @@ function timelineHTML(text) {
   for (const raw of String(text || "").split("\n")) {
     const l = raw.trim();
     if (!l) { flush(); continue; }
+    if (/\[insert [^\]]*\]/i.test(l)) continue; // an unfilled placeholder in the master document
     const b = l.match(/^(?:•\s*|[-–]\s+)(.+)$/u);
     if (b) {
       const mm = b[1].match(/^([^:]{2,40}):\s+(.+)$/);
@@ -738,21 +530,8 @@ function timelineHTML(text) {
 
 function followupPanel(m) {
   const visit = m.kind === "visit";
-  const next = visit ? m.visit.next_followup : m.plan.next_followup;
-  const w = followWindow(next);
-  const until = [];
-  if (!visit) {
-    const p = m.plan;
-    until.push(`continue ${p.medication}${p.dose ? " " + p.dose : ""}${p.frequency ? " " + guideFreqPhrase(p.frequency) : ""}`);
-    const pr = proteinRange(m.diet);
-    if (m.diet && pr) until.push(`aim for ${rangeText(pr)} g protein${toNumber(m.diet.calories) ? ` and approximately ${toNumber(m.diet.calories).toLocaleString("en-US")} kcal per day` : " a day"}`);
-    if (m.isGlp1) until.push(`drink ${(m.diet && m.diet.water) || "2–3 L daily"}`);
-  }
-  until.push("track your progress", "contact your doctor if needed");
-  const arrange = visit
-    ? "We'll review your progress together, and you're welcome to reach out sooner."
-    : m.appName ? `Arrange it through the ${m.appName}.` : "We'll be in touch to arrange it, or you're welcome to reach out.";
-  const care = "For non-medical matters such as appointments, payments, deliveries, technical support, or general assistance, our Customer Care Team is available to help.";
+  const w = followWindow(nextFollowupOf(m));
+  const care = CUSTOMER_CARE;
   const connect = m.appName ? `
     <div class="gp-grid2">
       <article class="gp-card"><h2>If you have the app</h2><p>With the ${esc(m.appName)} installed and subscribed, you can access everything — messaging, follow-ups, refills, and progress tracking — right there in the app.</p></article>
@@ -768,7 +547,7 @@ function followupPanel(m) {
     <article class="gp-card gp-card-tint gp-fu">
       <p class="gp-label">${visit ? "Next follow-up" : "Next follow-up &amp; medication refill"}</p>
       <h2 class="gp-fu-date">${w ? (w.past ? "Due now" : `${esc(w.range)} ${w.year}`) : "To be arranged"}</h2>
-      <p class="gp-measure">${w && w.past ? "Your follow-up is due. Please get in touch so we can arrange it." : esc(arrange)} Until then, ${esc(until.length === 2 ? until.join(" and ") : commaList(until, "and"))}.</p>
+      <p class="gp-measure">${w && w.past ? "Your follow-up is due. Please get in touch so we can arrange it." : esc(arrangeText(m))} Until then, ${esc(untilList(m))}.</p>
       ${visit ? "" : `<div class="gp-fu-actions"><button type="button" class="gp-btn gp-btn-dark" data-refill></button><p class="gp-small">Tell us how you're getting on. Your doctor reviews every request before anything changes.</p></div>`}
     </article>
     ${labsCard(m)}
@@ -778,9 +557,7 @@ function followupPanel(m) {
       ${visit
         ? `<h2>Prepared and signed by</h2>`
         : `<h2>A message from your doctor</h2>
-          <p class="gp-measure">${esc(m.first)}, remember that this is your journey, not a race. ${m.isGlp1
-          ? "The medication is one part of the process. Our goal is safe weight loss, better health, muscle preservation, and habits you can maintain long term."
-          : "The medication is one part of the process. Our goal is safe, steady progress and a full recovery you can build on."} Stay consistent, stay connected with us, and allow the process time to work. I look forward to seeing your progress.</p>`}
+          <p class="gp-measure">${esc(closingMessage(m))}</p>`}
       ${signatureHTML(m, "")}
     </article>`;
 }
@@ -793,6 +570,7 @@ function shellHTML(m) {
   const clinicName = m.signer.clinic || (m.clinic && m.clinic.name) || "";
   const who = `${m.patient.title ? m.patient.title + " " : ""}${m.patient.name || ""}`.trim();
   const plans = G.data.plans || [];
+  const pdfUrl = `/api/guide/${encodeURIComponent(TOKEN)}/pdf`;
   const panels = {
     overview: () => overviewPanel(m),
     medication: () => medicationPanel(m),
@@ -819,7 +597,7 @@ function shellHTML(m) {
         ${tabs.map((t) => `<a class="gp-tab" href="#${t}" data-tab="${t}" data-tab-link>${esc(TAB_META[t].label)}</a>`).join("")}
         <div class="gp-tabs-hl" aria-hidden="true">${tabs.map((t) => `<span class="gp-tab">${esc(TAB_META[t].label)}</span>`).join("")}</div>
       </div></div>
-      <button type="button" class="gp-print" data-print aria-label="Save as PDF">${icon("printer", 16)}<span>Save as PDF</span></button>
+      <a class="gp-print" href="${pdfUrl}" download aria-label="Save as PDF">${icon("file", 16)}<span>Save as PDF</span></a>
     </div></nav>
     ${switcher}
     <main class="gp-main gp-wrap" id="gp-main">
@@ -828,7 +606,7 @@ function shellHTML(m) {
     <footer class="gp-foot"><div class="gp-wrap gp-foot-in">
       <div class="gp-foot-brand"><b>${esc(clinicName || "Your clinic")}</b><span>Issued ${esc(fmtDate(m.created))}</span></div>
       <p>If you have any questions about your ${m.kind === "visit" ? "plan" : "treatment"}, please contact ${esc(clinicName || m.doctor)} directly. If you need urgent medical help, contact your nearest emergency service.</p>
-      <button type="button" class="gp-chip-btn" data-print>${icon("printer", 15)} Save as PDF</button>
+      <a class="gp-chip-btn" href="${pdfUrl}" download>${icon("file", 15)} Save as PDF</a>
     </div></footer>
     <nav class="gp-bnav" aria-label="Guide sections">
       ${tabs.map((t) => `<a href="#${t}" data-tab="${t}" data-tab-link><span class="gp-bn-ico">${icon(TAB_META[t].icon, 21)}</span><span>${esc(TAB_META[t].short)}</span></a>`).join("")}
@@ -927,8 +705,9 @@ function finishAnimations() {
   document.querySelectorAll(".gp-count").forEach((c) => { c.textContent = Number(c.dataset.to).toLocaleString("en-US"); });
 }
 
-// The PDF carries every section in full, so closed sections open for the
-// print and close again afterwards.
+// Printing the page itself (Ctrl+P) carries every section in full, so closed
+// sections open for the print and close again afterwards. Save as PDF doesn't
+// print: it downloads the PDF the server builds, with no web address in it.
 let printOpened = [];
 function beforePrint() {
   finishAnimations();
@@ -939,23 +718,6 @@ function beforePrint() {
 function afterPrint() {
   printOpened.forEach((d) => { d.open = false; });
   printOpened = [];
-}
-
-// Browsers open their print sheet, where "Save as PDF" lives. Some in-app
-// browsers (inside WhatsApp, Instagram and the like) have no print at all and
-// silently ignore the call, so the patient is told where it will work.
-function savePdf() {
-  let opened = false;
-  const mark = () => { opened = true; };
-  window.addEventListener("beforeprint", mark, { once: true });
-  beforePrint(); // not every browser announces the print, so open everything first
-  try { window.print(); } catch { /* no print in this browser */ }
-  setTimeout(() => {
-    window.removeEventListener("beforeprint", mark);
-    if (opened) return;
-    afterPrint();
-    toast("This app's browser can't save PDFs. Open the link in Safari or Chrome, then tap Save as PDF again.", "err");
-  }, 700);
 }
 
 // Plate: hovering, focusing or tapping a portion lights up its share of the
@@ -1019,7 +781,6 @@ function paintRefill() {
 
 function wire(root) {
   root.querySelectorAll("[data-tab-link]").forEach((a) => a.addEventListener("click", () => { G.focusNext = true; }));
-  root.querySelectorAll("[data-print]").forEach((b) => b.addEventListener("click", savePdf));
   root.querySelectorAll("[data-plan]").forEach((b) => b.addEventListener("click", () => {
     const plan = (G.data.plans || []).find((pl) => pl.id === Number(b.dataset.plan));
     if (!plan || plan.id === G.model.plan.id) return;
