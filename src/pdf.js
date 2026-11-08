@@ -2,7 +2,8 @@
 // Helvetica fonts (every PDF reader has them, so nothing is embedded), filled
 // and rounded shapes, strokes, arcs, and PNG images with transparency. Text
 // is WinAnsi-encoded; characters outside it are swapped for a near
-// equivalent or left out. Coordinates are in points from the top-left.
+// equivalent or left out. Links are clickable web addresses. Coordinates are
+// in points from the top-left.
 "use strict";
 const zlib = require("node:zlib");
 
@@ -108,7 +109,9 @@ function decodePng(buf) {
 
 // ── pages ────────────────────────────────────────────────────────────
 class Page {
-  constructor() { this.ops = []; this.images = new Set(); }
+  constructor() { this.ops = []; this.images = new Set(); this.links = []; }
+  // A clickable area opening `url`; the box is (x, y) top-left, w × h.
+  link(x, y, w, h, url) { this.links.push({ rect: [x, PAGE_H - y - h, x + w, PAGE_H - y], url }); }
   fillColor(hex) { this.ops.push(`${rgb(hex)} rg`); }
   // Rectangle with optional rounded corners: radius, or [tl, tr, br, bl].
   rect(x, y, w, h, { fill, stroke, lineWidth = 0.75, radius = 0 } = {}) {
@@ -202,7 +205,8 @@ class PdfDocument {
     for (const pg of this.pages) {
       const content = add(stream("/Filter /FlateDecode", zlib.deflateSync(Buffer.from(pg.ops.join("\n"), "latin1"))));
       const xobj = [...pg.images].map((img) => `/Im${img.id} ${ref(img.obj)}`).join(" ");
-      pageIds.push(add(Buffer.from(`<< /Type /Page /Parent ${ref(pagesId)} /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents ${ref(content)} /Resources << /Font << /F1 ${ref(f1)} /F2 ${ref(f2)} >>${xobj ? ` /XObject << ${xobj} >>` : ""} >> >>`)));
+      const annots = pg.links.map((l) => add(Buffer.from(`<< /Type /Annot /Subtype /Link /Rect [${l.rect.map(num).join(" ")}] /Border [0 0 0] /A << /Type /Action /S /URI /URI ${pdfString([...Buffer.from(l.url, "latin1")])} >> >>`)));
+      pageIds.push(add(Buffer.from(`<< /Type /Page /Parent ${ref(pagesId)} /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents ${ref(content)} /Resources << /Font << /F1 ${ref(f1)} /F2 ${ref(f2)} >>${xobj ? ` /XObject << ${xobj} >>` : ""} >>${annots.length ? ` /Annots [${annots.map(ref).join(" ")}]` : ""} >>`)));
     }
     objs[catalogId - 1] = Buffer.from(`<< /Type /Catalog /Pages ${ref(pagesId)} >>`);
     objs[pagesId - 1] = Buffer.from(`<< /Type /Pages /Kids [${pageIds.map(ref).join(" ")}] /Count ${pageIds.length} >>`);

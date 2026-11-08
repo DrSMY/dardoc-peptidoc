@@ -2,7 +2,8 @@
 // a link. Same content as the guide link page: the program, the master-guide
 // windows and the wording all come from the browser scripts (patient-guides,
 // guide, g/guide-model), run here so the two can't drift apart. Set out for
-// A4, it names the facility and never prints a web address.
+// A4, it names the facility and prints no web address except a video's,
+// which is a clickable link.
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -33,11 +34,25 @@ const LEAD = 14.4;
 const PAD = 16;
 
 // ── text ─────────────────────────────────────────────────────────────
-// No web addresses on paper: markdown links keep their words, bare links go,
-// and a line that was only there to carry a link ("Book here: …") goes too.
+// No web addresses on paper apart from videos: a video address becomes a
+// link showing its short form; other markdown links keep their words, bare
+// links go, and a line only there to carry a link ("Book here: …") goes too.
+const isVideoUrl = (url) => /(?:^|\/\/|\.)(?:youtu\.be|youtube\.com|vimeo\.com)\//i.test(url);
+// What's printed for a link: no "https://www.", and no tracking parameters,
+// but anything that identifies the video (youtube.com/watch?v=…) stays, so a
+// printed copy can still be typed in.
+function shortUrl(url) {
+  try {
+    const u = new URL(url);
+    [...u.searchParams.keys()].forEach((k) => { if (/^(si|feature|pp|utm_.*|fbclid|gclid)$/i.test(k)) u.searchParams.delete(k); });
+    return (u.host.replace(/^www\./i, "") + u.pathname + (u.search || "")).replace(/\/$/, "");
+  } catch { return url.replace(/^https?:\/\/(www\.)?/i, ""); }
+}
+const videoLink = (url) => `[${shortUrl(url)}](${url})`;
 function cleanBody(text) {
   return String(text || "").split("\n").map((line) => {
     if (!/https?:\/\/|www\./i.test(line)) return line;
+    if (isVideoUrl(line)) return line.replace(/(^|[\s(:])(https?:\/\/[^\s)]+)/g, (_, pre, url) => (isVideoUrl(url) ? `${pre}${videoLink(url)}` : pre));
     const out = line
       .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^\s)]+\)/g, "$1")
       .replace(/\s*\(?(?:https?:\/\/|www\.)[^\s)]+\)?/g, "")
@@ -48,9 +63,11 @@ function cleanBody(text) {
 
 function runsOf(s, bold = false) {
   const out = [];
-  String(s || "").split(/(\*\*[^*]+\*\*)/).forEach((part) => {
+  String(s || "").split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/).forEach((part) => {
     if (!part) return;
-    if (/^\*\*[^*]+\*\*$/.test(part)) out.push({ t: part.slice(2, -2), b: true });
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+    if (link) out.push({ t: link[1], b: bold, link: link[2] });
+    else if (/^\*\*[^*]+\*\*$/.test(part)) out.push({ t: part.slice(2, -2), b: true });
     else out.push({ t: part, b: bold });
   });
   return out;
@@ -69,7 +86,7 @@ function wrap(runs, width, size) {
     for (const piece of String(r.t).split(/(\s+)/)) {
       if (!piece) continue;
       if (/^\s+$/.test(piece)) { space = true; continue; }
-      toks.push({ t: piece, b: r.b, space });
+      toks.push({ t: piece, b: r.b, link: r.link, space });
       space = false;
     }
   }
@@ -102,16 +119,22 @@ function merge(toks) {
   for (const tk of toks) {
     const t = (tk.space ? " " : "") + tk.t;
     const last = segs[segs.length - 1];
-    if (last && last.b === tk.b) last.t += t;
-    else segs.push({ t, b: tk.b });
+    if (last && last.b === tk.b && last.link === tk.link) last.t += t;
+    else if (tk.link && tk.space) { segs.push({ t: " ", b: tk.b }); segs.push({ t: tk.t, b: tk.b, link: tk.link }); }
+    else segs.push({ t, b: tk.b, link: tk.link });
   }
   return segs;
 }
 function drawLine(pg, line, x, baseline, size, color) {
   let cx = x;
   for (const s of line.segs) {
-    pg.text(s.t, cx, baseline, { size, bold: s.b, color });
-    cx += textWidth(s.t, s.b, size);
+    const w = textWidth(s.t, s.b, size);
+    if (s.link) {
+      pg.text(s.t, cx, baseline, { size, bold: s.b, color: C.emerald });
+      pg.line(cx, baseline + 1.6, cx + w, baseline + 1.6, { color: C.emerald, width: 0.6 });
+      pg.link(cx, baseline - size * 0.85, w, size * 1.2, s.link);
+    } else pg.text(s.t, cx, baseline, { size, bold: s.b, color });
+    cx += w;
   }
 }
 
@@ -419,9 +442,14 @@ function medication(flow, m, multi) {
 
   const about = m.std.about ? m.std.about.body : m.info.howItWorks || "";
   const { ladder, cur, future } = G.doseLadder(m);
-  if (about || ladder.length) {
+  if (about || ladder.length || m.info.videoLink) {
     const a = headingRows(`About ${p.medication}`, IN, { size: 13 });
     if (about) a.push(...proseRows(about, IN));
+    // The program's own video, unless the steps above already link it.
+    const vid = m.info.videoLink;
+    if (vid && /^https?:\/\//i.test(vid) && !cleanBody(m.std.how ? m.std.how.body : "").includes(`(${vid})`)) {
+      a.push(gap(8), ...textRows([{ t: `Watch how ${p.medication} works and how to take it: `, b: false }, { t: shortUrl(vid), b: false, link: vid }], IN));
+    }
     if (ladder.length) {
       a.push(gap(10), ...textRows("Approved dose strengths", IN, { size: 8.8, color: C.muted }), gap(4));
       a.push(...chipsRow(ladder.map((d, i) => (i === cur ? `${d} · current` : d)), cur, IN));

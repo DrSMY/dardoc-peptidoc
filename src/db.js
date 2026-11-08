@@ -654,6 +654,10 @@ once("protein-from-goal-weight", () => {
 seed();
 const DEFAULT_ORG = seedOrganizations();
 
+// "Mr Test", sample data for demonstrations: once per database, so deleting
+// him later is permanent.
+once("demo-patient-mr-test", () => require("./demo-patient").seedDemoPatient(db, hashSecret, crypto));
+
 // The organisation a new record belongs to when none is named — the practice
 // this install was set up for.
 function defaultOrgId() { return DEFAULT_ORG.id; }
