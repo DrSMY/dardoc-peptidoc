@@ -660,9 +660,17 @@ async function viewPatients() {
     <div><h1>Patients</h1><div class="sub">${S.patients.length} registered</div></div>
     ${canPrescribe() ? `<a class="btn btn-primary" href="#/consult">${icon("plus", 18)} New consultation</a>` : ""}
   </div>
-  <div class="field" style="max-width:420px">
-    <label for="pt-search" style="position:absolute;left:-9999px">Search patients</label>
-    <input class="input" id="pt-search" type="search" placeholder="Search by name or mobile…">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px 20px;flex-wrap:wrap">
+    <div class="field" style="flex:1 1 280px;max-width:420px">
+      <label for="pt-search" style="position:absolute;left:-9999px">Search patients</label>
+      <input class="input" id="pt-search" type="search" placeholder="Search by name or mobile…">
+    </div>
+    ${isSuperadmin() ? `
+    <div role="group" aria-label="Download the practice report as Excel" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted);margin-right:2px">${icon("file", 15)} Excel report</span>
+      ${[["month", "This month"], ["3m", "3 months"], ["6m", "6 months"], ["all", "All"]].map(([r, label]) =>
+        `<a class="btn btn-secondary btn-sm" href="/api/reports/practice?range=${r}" download>${label}</a>`).join("")}
+    </div>` : ""}
   </div>
   <div class="card" id="pt-list"></div>`;
   const CAP = 60;
@@ -698,7 +706,7 @@ async function viewPatient(id) {
   let d;
   try { d = await api("GET", `/api/patients/${id}`); }
   catch (e) { view().innerHTML = `<div class="empty">${icon("alert", 34)}<div class="empty-title">${esc(e.message)}</div></div>`; return; }
-  const { patient: p, plans, doses, checkins, messages, refillRequests, visits, patientForms } = d;
+  const { patient: p, plans, doses, checkins, messages, refillRequests, visits, patientForms, fileEdits } = d;
   const activePlan = plans.find((pl) => pl.status === "active");
   const weights = checkins.filter((c) => c.weight_kg != null).map((c) => ({ x: c.date, y: c.weight_kg })).reverse();
   // The patient's actual current weight — the latest logged weight (check-ins
@@ -776,7 +784,10 @@ async function viewPatient(id) {
       <div class="two-col">
         <div style="display:flex;flex-direction:column;gap:18px">
           <div class="card card-pad">
-            <div class="card-title">${icon("user", 19)} Patient chart</div>
+            <div class="card-title" style="justify-content:space-between">
+              <span style="display:flex;align-items:center;gap:10px">${icon("user", 19)} Patient chart</span>
+              ${isSuperadmin() ? `<button class="btn btn-secondary btn-sm" type="button" data-file-edit="chart">${icon("edit", 15)} Edit</button>` : ""}
+            </div>
             <div class="emr-grid">
               <div><span class="emr-lbl">Name</span><span class="emr-val">${esc(p.title ? p.title + " " : "")}${esc(p.name)}</span></div>
               <div><span class="emr-lbl">Patient no.</span><span class="emr-val">${esc(p.id)}</span></div>
@@ -807,7 +818,10 @@ async function viewPatient(id) {
           <div class="card card-pad">
             <div class="card-title" style="justify-content:space-between">
               <span style="display:flex;align-items:center;gap:10px">${icon("file", 19)} Clinical record (EMR)</span>
-              <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy record</button>
+              <span style="display:flex;gap:6px;flex-wrap:wrap">
+                ${isSuperadmin() && (activePlan || visits.length) ? `<button class="btn btn-secondary btn-sm" type="button" data-file-edit="record">${icon("edit", 15)} Edit</button>` : ""}
+                <button class="btn btn-secondary btn-sm" id="rec-copy" type="button">${icon("copy", 15)} Copy record</button>
+              </span>
             </div>
             <pre style="margin:0;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;line-height:1.5;color:var(--muted)">${esc(clinicalRecord)}</pre>
           </div>` : ""}
@@ -840,6 +854,8 @@ async function viewPatient(id) {
           </div>
 
           ${refillHistoryCardHTML(plans, refillRequests)}
+
+          ${fileEditsCardHTML(fileEdits)}
         </div>
 
         <div style="display:flex;flex-direction:column;gap:18px">
@@ -884,6 +900,7 @@ async function viewPatient(id) {
           </div>
         </div>
       </div>`;
+      wireFileEditing(box, { p, plans, doses, checkins, refillRequests, visits, reload: () => viewPatient(id) });
       const recCopy = box.querySelector("#rec-copy");
       if (recCopy) recCopy.addEventListener("click", async () => { await navigator.clipboard.writeText(clinicalRecord); toast("Clinical record copied"); });
       box.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", async () => {
@@ -965,20 +982,27 @@ async function viewPatient(id) {
     }
 
     if (S.detailTab === "logs") {
+      const admin = isSuperadmin();
+      const addBtn = (kind, label) => (admin ? `<button class="btn btn-secondary btn-sm" type="button" data-file-edit="${kind}">${icon("plus", 15)} ${label}</button>` : "");
       box.innerHTML = `
       <div class="two-col">
         <div class="card card-pad">
-          <div class="card-title">${icon("syringe", 19)} Dose log</div>
-          ${doses.length ? `<div class="table-scroll"><table class="table">
-            <thead><tr><th>Date</th><th>Dose</th><th>Site</th><th>Notes</th></tr></thead>
-            <tbody>${doses.map((dl) => `<tr><td>${esc(fmtDate(dl.taken_at, true))}</td><td>${esc(dl.dose || "—")}</td><td>${esc(dl.site || "—")}</td><td>${esc(dl.notes || "")}</td></tr>`).join("")}</tbody>
+          <div class="card-title card-title-split">
+            <span>${icon("syringe", 19)} Dose log</span>${addBtn("dose", "Add dose")}
+          </div>
+          ${doses.length ? `<div class="table-scroll"><table class="table dose-table">
+            <thead><tr><th>Date</th><th>Dose</th><th>Site</th><th>Notes</th>${admin ? `<th><span style="position:absolute;left:-9999px">Actions</span></th>` : ""}</tr></thead>
+            <tbody>${doses.map((dl) => `<tr><td>${esc(fmtDate(dl.taken_at, true))}</td><td data-label="Dose"${dl.dose ? "" : ` class="is-empty"`}>${esc(dl.dose || "—")}</td><td data-label="Site"${dl.site ? "" : ` class="is-empty"`}>${esc(dl.site || "—")}</td><td data-label="Notes"${dl.notes ? "" : ` class="is-empty"`}>${esc(dl.notes || "")}</td>${admin ? `<td class="dose-acts" style="text-align:right;white-space:nowrap">${fileActs("dose", dl.id)}</td>` : ""}</tr>`).join("")}</tbody>
           </table></div>` : `<div class="empty">${icon("syringe", 30)}<p>No doses logged yet.</p></div>`}
         </div>
         <div class="card card-pad">
-          <div class="card-title">${icon("clipboard", 19)} Check-in history</div>
-          ${checkins.length ? checkins.map((c) => checkinCard(c)).join("") : `<div class="empty">${icon("clipboard", 30)}<p>No check-ins yet.</p></div>`}
+          <div class="card-title card-title-split">
+            <span>${icon("clipboard", 19)} Check-in history</span>${addBtn("checkin", "Add weight or check-in")}
+          </div>
+          ${checkins.length ? checkins.map((c) => checkinCard(c, fileActs("checkin", c.id))).join("") : `<div class="empty">${icon("clipboard", 30)}<p>No check-ins yet.</p></div>`}
         </div>
       </div>`;
+      wireFileEditing(box, { p, plans, doses, checkins, refillRequests, visits, reload: () => viewPatient(id) });
     }
 
     if (S.detailTab === "messages") {
@@ -1065,7 +1089,7 @@ function intakeSummaryCard(p) {
   </div>`;
 }
 
-function checkinCard(c) {
+function checkinCard(c, acts = "") {
   const bad = [];
   for (const s of S.presets.symptoms) {
     const v = c.symptoms[s.key];
@@ -1082,10 +1106,315 @@ function checkinCard(c) {
       <div style="font-size:12.5px;color:var(--muted)">${esc(bad.join(" · ") || "Feeling well — no symptoms reported")}</div>
       ${c.notes ? `<div style="font-size:12.5px;color:var(--muted);font-style:italic">"${esc(c.notes)}"</div>` : ""}
     </div>
+    ${acts}
   </div>`;
 }
 
 // modal() lives in shared.js — used across doctor/portal/guide pages.
+
+// ── Super admin: correcting a patient's file ─────────────────────
+// The chart, the record text, and single entries in the dose, weight,
+// check-in and refill logs. The server refuses these for anyone else, so the
+// buttons are only drawn for the Super admin. None of it changes what the
+// patient is prescribed (that is Edit program); it corrects what the file says.
+function fileActs(kind, id) {
+  return isSuperadmin() ? `
+    <span class="file-acts">
+      <button type="button" class="btn btn-ghost btn-sm" data-file-edit="${kind}" data-id="${id}">Edit</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-file-del="${kind}" data-id="${id}">Delete</button>
+    </span>` : "";
+}
+
+// A form in a modal: Save shows the server's message if it refuses.
+function fileFormModal({ title, hint, body, wide, saveLabel = "Save changes", onOpen, onSave }) {
+  const scrim = modal(`
+    <div class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" data-close aria-label="Close">${icon("x", 18)}</button></div>
+    ${hint ? `<p class="hint" style="margin:-6px 0 14px">${hint}</p>` : ""}
+    <form id="ff-form" novalidate>
+      ${body}
+      <p class="err-text" id="ff-err" role="alert" hidden></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="submit" class="btn btn-primary" id="ff-save"><span class="spin"></span><span class="btn-label">${esc(saveLabel)}</span></button>
+      </div>
+    </form>`, wide);
+  const err = scrim.querySelector("#ff-err"), btn = scrim.querySelector("#ff-save");
+  if (onOpen) onOpen(scrim);
+  scrim.querySelector("#ff-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.hidden = true;
+    btn.classList.add("loading"); btn.disabled = true;
+    try { await onSave(scrim); scrim.remove(); }
+    catch (ex) { err.textContent = ex.message || "Couldn't save. Please try again."; err.hidden = false; }
+    finally { btn.classList.remove("loading"); btn.disabled = false; }
+  });
+  return scrim;
+}
+const numOrNull = (v) => (String(v ?? "").trim() === "" ? null : Number(v));
+
+function patientChartEditModal(p, reload) {
+  // A working copy shaped like the consultation's patient, so the intake
+  // questions drawn there can be reused here.
+  const draft = { gender: p.gender || "", activityLevel: p.activity_level || "", title: p.title || "", intake: JSON.parse(JSON.stringify(p.intake || {})) };
+  const formOnly = ["planning_pregnancy", "thyroid_history", "pancreas_history"];
+  const v = (x) => esc(x ?? "");
+  const titles = [...new Set(["Mr", "Ms", "Mrs", "Dr", p.title].filter(Boolean))];
+  const chips = (key, options) => options.map((o) => `<button type="button" class="chip ${draft[key] === o ? "on" : ""}" data-fe-chip="${key}" data-v="${esc(o)}">${esc(o)}</button>`).join("");
+  const body = `
+    <div class="intake-sec-title first">${icon("user", 15)} Identity</div>
+    <div class="form-grid">
+      <div class="field full"><label for="fe-name">Full name (as per passport/ID)</label><input class="input" id="fe-name" value="${v(p.name)}" autocomplete="off"></div>
+      <div class="field full"><label>Title</label><div class="chip-row" id="fe-title">${chips("title", titles)}</div></div>
+      <div class="field"><label for="fe-mobile">Mobile number</label><input class="input" id="fe-mobile" type="tel" inputmode="tel" value="${v(p.mobile)}"><span class="hint">This is also the patient's sign-in for the patient app.</span></div>
+      <div class="field"><label for="fe-email">Email</label><input class="input" id="fe-email" type="email" value="${v(p.email)}"></div>
+      <div class="field full"><label for="fe-natid">Emirates ID / passport number</label><input class="input" id="fe-natid" value="${v(p.national_id)}" autocomplete="off"></div>
+      <div class="field"><label for="fe-dob">Date of birth</label><input class="input" id="fe-dob" type="date" min="1900-01-01" max="${todayISO()}" value="${v(p.dob)}"></div>
+      <div class="field"><label for="fe-age">Age</label><input class="input" id="fe-age" type="number" inputmode="numeric" min="12" max="110" value="${v(p.age)}"><span class="hint">Worked out from the date of birth when one is set.</span></div>
+      <div class="field full"><label>Gender</label><div class="chip-row" id="fe-gender">${chips("gender", ["Male", "Female", "Other"])}</div></div>
+    </div>
+    <div class="intake-sec-title">${icon("scale", 15)} Measurements</div>
+    <div class="form-grid">
+      <div class="field"><label for="fe-height">Height (cm)</label><input class="input" id="fe-height" type="number" inputmode="decimal" min="100" max="250" step="0.1" value="${v(p.height_cm)}"></div>
+      <div class="field"><label for="fe-start">Starting weight (kg)</label><input class="input" id="fe-start" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${v(p.start_weight_kg)}"></div>
+      <div class="field"><label for="fe-max">Maximum weight reached (kg)</label><input class="input" id="fe-max" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${v(p.max_weight_kg)}"></div>
+      <div class="field"><label for="fe-goal">Goal weight (kg)</label><input class="input" id="fe-goal" type="number" inputmode="decimal" min="25" max="350" step="0.1" value="${v(p.goal_weight_kg)}"></div>
+      <div class="field full"><span class="hint">The current weight is the latest weight on the Logs tab. Correct or add weights there.</span></div>
+      <div class="field full"><label>Activity level</label><div class="chip-row" id="fe-activity">${chips("activityLevel", Object.keys(S.presets.activityLevels || {}))}</div></div>
+    </div>
+    <div class="intake-sec-title">${icon("clipboard", 15)} Medical chart</div>
+    <div class="field"><label for="fe-chronic">Chronic illnesses</label><textarea class="input" id="fe-chronic" rows="2" placeholder="None reported">${v(p.chronic_illnesses)}</textarea></div>
+    <div class="field"><label for="fe-meds">Current medications</label><textarea class="input" id="fe-meds" rows="2" placeholder="None reported">${v(p.medications)}</textarea></div>
+    <div class="field"><label for="fe-allergies">Allergies</label><textarea class="input" id="fe-allergies" rows="2" placeholder="No known drug allergies">${v(p.allergies)}</textarea></div>
+    <div class="field"><label for="fe-notes">Notes</label><textarea class="input" id="fe-notes" rows="2">${v(p.notes)}</textarea></div>
+    <div class="intake-sec-title">${icon("clipboard", 15)} Intake answers</div>
+    <p class="hint" style="margin:-4px 0 10px">Shown under Intake &amp; assessment on the patient page.</p>
+    <div id="fe-intake"></div>`;
+
+  const paintIntake = (scrim) => {
+    const box = scrim.querySelector("#fe-intake");
+    const qs = S.presets.intakeQuestions.filter((q) => !q.patientField && intakeVisible(q, draft)
+      && !(formOnly.includes(q.id) && (p.intake || {})[q.id] === undefined)
+      && !(draft.gender === "Male" && /pregnan|breastfeed/.test(q.id)));
+    let section = "";
+    box.innerHTML = qs.map((q) => {
+      const head = q.section !== section ? `<div class="fe-sub">${esc(q.section)}</div>` : "";
+      section = q.section;
+      const sev = q.id === "allergies" && draft.intake.allergies__gate === true ? `
+        <div class="field"><label>Allergy severity</label><div class="chip-row">${["Mild", "Moderate", "Severe / life-threatening"].map((x) =>
+          `<button type="button" class="chip ${draft.intake.allergies__severity === x ? "on" : ""}" data-iqchip="allergies__severity" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div></div>` : "";
+      return head + renderIntakeQuestion(q, draft) + sev;
+    }).join("");
+    wireIntake(box, () => paintIntake(scrim), draft);
+  };
+
+  fileFormModal({
+    title: `Edit ${p.name}'s chart`, wide: true,
+    hint: "Corrects the patient's details and medical chart. Every change is kept in the edit history.",
+    body,
+    onOpen(scrim) {
+      paintIntake(scrim);
+      scrim.querySelectorAll("[data-fe-chip]").forEach((b) => b.addEventListener("click", () => {
+        const key = b.dataset.feChip;
+        draft[key] = draft[key] === b.dataset.v ? "" : b.dataset.v;
+        b.parentNode.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.v === draft[key]));
+        if (key === "gender") paintIntake(scrim);
+      }));
+      const dob = scrim.querySelector("#fe-dob"), age = scrim.querySelector("#fe-age");
+      const syncAge = () => { age.disabled = !!dob.value; };
+      dob.addEventListener("input", syncAge);
+      syncAge();
+    },
+    async onSave(scrim) {
+      const g = (id) => scrim.querySelector("#" + id).value;
+      const dob = g("fe-dob");
+      await api("PATCH", `/api/patients/${p.id}`, {
+        fileEdit: true,
+        name: g("fe-name"), title: draft.title, mobile: g("fe-mobile"), email: g("fe-email").trim(), nationalId: g("fe-natid").trim(),
+        dob, ...(dob ? {} : { age: numOrNull(g("fe-age")) }), gender: draft.gender,
+        heightCm: numOrNull(g("fe-height")), startWeightKg: numOrNull(g("fe-start")), maxWeightKg: numOrNull(g("fe-max")), goalWeightKg: numOrNull(g("fe-goal")),
+        activityLevel: draft.activityLevel || "Sedentary",
+        chronicIllnesses: g("fe-chronic").trim(), medications: g("fe-meds").trim(), allergies: g("fe-allergies").trim(), notes: g("fe-notes").trim(),
+        intake: draft.intake,
+      });
+      toast("Chart updated");
+      reload();
+    },
+  });
+}
+
+function clinicalRecordEditModal(p, plans, visits, reload) {
+  const active = plans.find((pl) => pl.status === "active");
+  const records = [
+    ...(active ? [{ key: "planId", id: active.id, label: `Consultation record, ${fmtDate(active.created_at)}`, text: active.clinical_suggestion || "" }] : []),
+    ...[...visits].reverse().map((vr) => ({ key: "visitId", id: vr.id, label: `Visit record, ${fmtDate(vr.created_at)}`, text: vr.clinical_suggestion || "" })),
+  ];
+  if (!records.length) return toast("There is no consultation record to edit yet", "bad");
+  fileFormModal({
+    title: "Edit clinical record", wide: true,
+    hint: "Corrects the wording of the record. Refill updates at the end of the record are written from the refill history, so correct those under Refill requests &amp; history.",
+    body: records.map((r, i) => `
+      <div class="field"><label for="fr-${i}">${esc(r.label)}</label>
+        <textarea class="input" id="fr-${i}" rows="${records.length > 1 ? 12 : 20}" spellcheck="true" style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.5">${esc(r.text)}</textarea></div>`).join(""),
+    async onSave(scrim) {
+      let changed = 0;
+      for (const [i, r] of records.entries()) {
+        const text = scrim.querySelector(`#fr-${i}`).value;
+        if (text === r.text) continue;
+        await api("PATCH", `/api/patients/${p.id}/clinical-record`, { [r.key]: r.id, text });
+        changed++;
+      }
+      toast(changed ? "Clinical record updated" : "Nothing was changed");
+      if (changed) reload();
+    },
+  });
+}
+
+// "2026-07-27T07:33:00.000Z" as the value a date-and-time field shows locally.
+function localDateTime(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function doseEditModal(p, plans, dose, reload) {
+  const active = plans.filter((pl) => pl.status === "active");
+  const plan = dose ? plans.find((pl) => pl.id === dose.plan_id) : active[0];
+  const sites = [...new Set([...INJECTION_SITES.map((z) => z.name), dose && dose.site].filter(Boolean))];
+  fileFormModal({
+    title: dose ? "Edit dose" : "Add a dose",
+    hint: dose ? "Corrects this entry in the dose log." : `Adds a dose to ${esc(p.name)}'s log, as if they had logged it themselves.`,
+    saveLabel: dose ? "Save changes" : "Add dose",
+    body: `
+      ${!dose && active.length > 1 ? `<div class="field"><label for="fd-plan">Medication</label><select class="input" id="fd-plan">${active.map((pl) => `<option value="${pl.id}">${esc(pl.medication)}</option>`).join("")}</select></div>` : ""}
+      <div class="form-grid">
+        <div class="field"><label for="fd-at">Date and time taken</label><input class="input" id="fd-at" type="datetime-local" max="${localDateTime()}" value="${localDateTime(dose && dose.taken_at)}"></div>
+        <div class="field"><label for="fd-dose">Dose</label><input class="input" id="fd-dose" value="${esc(dose ? dose.dose || "" : (plan && plan.dose) || "")}" list="fd-doses" autocomplete="off">
+          <datalist id="fd-doses">${((plan && plan.doseOptions) || []).map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
+        <div class="field full"><label for="fd-site">Site</label><input class="input" id="fd-site" value="${esc((dose && dose.site) || "")}" list="fd-sites" autocomplete="off" placeholder="Where it was injected or applied (optional)">
+          <datalist id="fd-sites">${sites.map((x) => `<option value="${esc(x)}">`).join("")}</datalist></div>
+        <div class="field full"><label for="fd-notes">Notes</label><textarea class="input" id="fd-notes" rows="2">${esc((dose && dose.notes) || "")}</textarea></div>
+      </div>`,
+    onOpen(scrim) {
+      const sel = scrim.querySelector("#fd-plan");
+      if (sel) sel.addEventListener("change", () => { const pl = active.find((x) => x.id === Number(sel.value)); scrim.querySelector("#fd-dose").value = (pl && pl.dose) || ""; });
+    },
+    async onSave(scrim) {
+      const g = (id) => scrim.querySelector("#" + id);
+      const at = g("fd-at").value;
+      if (!at) throw new Error("Enter the date and time the dose was taken.");
+      const payload = { takenAt: new Date(at).toISOString(), dose: g("fd-dose").value, site: g("fd-site").value, notes: g("fd-notes").value };
+      if (dose) await api("PATCH", `/api/dose-logs/${dose.id}`, payload);
+      else await api("POST", `/api/patients/${p.id}/dose-logs`, { ...payload, planId: g("fd-plan") ? Number(g("fd-plan").value) : plan && plan.id });
+      toast(dose ? "Dose updated" : "Dose added");
+      reload();
+    },
+  });
+}
+
+function checkinEditModal(p, c, reload) {
+  const sym = (c && c.symptoms) || {};
+  fileFormModal({
+    title: c ? "Edit weight or check-in" : "Add a weight or check-in", wide: true,
+    hint: c ? "Corrects this entry. The patient's current weight follows the latest weight in the log." : `Adds an entry to ${esc(p.name)}'s log. A weight alone is enough.`,
+    saveLabel: c ? "Save changes" : "Add entry",
+    body: `
+      <div class="form-grid">
+        <div class="field"><label for="fc-date">Date</label><input class="input" id="fc-date" type="date" max="${todayISO()}" value="${esc((c && c.date) || todayISO())}"></div>
+        <div class="field"><label for="fc-weight">Weight (kg)</label><input class="input" id="fc-weight" type="number" inputmode="decimal" min="20" max="400" step="0.1" value="${esc((c && c.weight_kg) ?? "")}"></div>
+      </div>
+      <div class="intake-sec-title">${icon("activity", 15)} Symptoms</div>
+      <div class="form-grid">${S.presets.symptoms.map((s) => `
+        <div class="field"><label for="fc-s-${s.key}">${esc(s.label)}</label>
+          <select class="input" id="fc-s-${s.key}" data-sym="${s.key}"><option value="">Not recorded</option>${s.options.map((o) => `<option ${sym[s.key] === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`).join("")}
+      </div>
+      <div class="field"><label for="fc-notes">Notes</label><textarea class="input" id="fc-notes" rows="2">${esc((c && c.notes) || "")}</textarea></div>`,
+    async onSave(scrim) {
+      const symptoms = {};
+      scrim.querySelectorAll("[data-sym]").forEach((el) => { if (el.value) symptoms[el.dataset.sym] = el.value; });
+      const payload = { date: scrim.querySelector("#fc-date").value, weightKg: scrim.querySelector("#fc-weight").value, symptoms, notes: scrim.querySelector("#fc-notes").value };
+      if (c) await api("PATCH", `/api/checkins/${c.id}`, payload);
+      else await api("POST", `/api/patients/${p.id}/checkins`, payload);
+      toast(c ? "Entry updated" : "Entry added");
+      reload();
+    },
+  });
+}
+
+function refillEntryEditModal(p, plans, r, reload) {
+  const plan = plans.find((pl) => pl.id === r.plan_id) || {};
+  const opt = (value, label, cur) => `<option value="${value}" ${cur === value ? "selected" : ""}>${label}</option>`;
+  fileFormModal({
+    title: "Edit refill entry", wide: true,
+    hint: `${esc(r.prior_medication || plan.medication || "Refill")}, ${esc(fmtDate(r.decided_at || r.created_at))}. This corrects the record only. To change the dose the patient is on now, use Edit program.`,
+    body: `
+      <div class="form-grid">
+        <div class="field"><label for="fx-weight">Weight (kg)</label><input class="input" id="fx-weight" type="number" inputmode="decimal" min="20" max="400" step="0.1" value="${esc(r.weight_kg ?? "")}"></div>
+        <div class="field"><label for="fx-qty">Quantity</label><input class="input" id="fx-qty" type="number" inputmode="numeric" min="1" max="24" value="${esc(r.quantity ?? "")}"></div>
+        <div class="field"><label for="fx-has">Side effects</label><select class="input" id="fx-has">${opt("", "Not recorded", r.has_side_effects || "")}${opt("no", "None", r.has_side_effects)}${opt("yes", "Yes", r.has_side_effects)}</select></div>
+        <div class="field"><label for="fx-sev">Severity</label><select class="input" id="fx-sev">${opt("", "Not recorded", r.side_effect_severity || "")}${opt("mild", "Mild", r.side_effect_severity)}${opt("moderate", "Moderate", r.side_effect_severity)}${opt("severe", "Severe", r.side_effect_severity)}</select></div>
+        <div class="field full"><label for="fx-details">Side-effect details</label><textarea class="input" id="fx-details" rows="2">${esc(r.side_effects || "")}</textarea></div>
+        ${plan.category === "glp1" && !r.results_felt ? "" : `<div class="field full"><label for="fx-results">How it's working</label><textarea class="input" id="fx-results" rows="2">${esc(r.results_felt || "")}</textarea></div>`}
+        <div class="field"><label for="fx-action">Patient asked for</label><select class="input" id="fx-action">${opt("", "Not recorded", r.dose_action || "")}${["same", "increase", "decrease", "custom", "talk"].map((a) => opt(a, doseActionLabel(a, ""), r.dose_action)).join("")}</select></div>
+        <div class="field"><label for="fx-req">Dose asked for</label><input class="input" id="fx-req" value="${esc(r.requested_dose || "")}" placeholder="Only for a specific dose"></div>
+        <div class="field full"><label for="fx-notes">Patient's message</label><textarea class="input" id="fx-notes" rows="2">${esc(r.notes || "")}</textarea></div>
+        <div class="field"><label for="fx-prior">Dose before</label><input class="input" id="fx-prior" value="${esc(r.prior_dose || "")}"></div>
+        ${r.status === "approved" ? `<div class="field"><label for="fx-decided">Dose after</label><input class="input" id="fx-decided" value="${esc(r.decided_dose || "")}"></div>` : ""}
+      </div>`,
+    onOpen(scrim) {
+      const has = scrim.querySelector("#fx-has"), sev = scrim.querySelector("#fx-sev");
+      const sync = () => { sev.disabled = has.value !== "yes"; if (sev.disabled) sev.value = ""; };
+      has.addEventListener("change", sync);
+      sync();
+    },
+    async onSave(scrim) {
+      const g = (id) => { const el = scrim.querySelector("#" + id); return el ? el.value : undefined; };
+      await api("PATCH", `/api/refill-requests/${r.id}`, {
+        weightKg: g("fx-weight"), quantity: g("fx-qty") || null, hasSideEffects: g("fx-has"), sideEffectSeverity: g("fx-sev"), sideEffects: g("fx-details"),
+        resultsFelt: g("fx-results"), doseAction: g("fx-action"), requestedDose: g("fx-req"), notes: g("fx-notes"), priorDose: g("fx-prior"), decidedDose: g("fx-decided"),
+      });
+      toast("Refill entry updated");
+      reload();
+    },
+  });
+}
+
+// Every correction made to this file, newest first. Super admin only.
+function fileEditsCardHTML(edits) {
+  if (!isSuperadmin() || !edits || !edits.length) return "";
+  return `
+  <details class="card card-pad file-history">
+    <summary><span class="card-title" style="margin:0">${icon("clock", 19)} Edit history <span class="badge badge-gray">${edits.length}</span></span></summary>
+    <p class="hint" style="margin:10px 0 6px">Corrections made to this file by the Super admin.</p>
+    ${edits.map((e) => `
+      <div class="rx-row">
+        <div style="min-width:0">
+          <div class="rx-name" style="overflow-wrap:anywhere">${esc(e.summary)}</div>
+          <div class="rx-meta">${esc(fmtDate(e.created_at, true))}${e.user_name ? ` · ${esc(e.user_name)}` : ""}</div>
+        </div>
+      </div>`).join("")}
+  </details>`;
+}
+
+function wireFileEditing(scope, { p, plans, doses, checkins, refillRequests, visits, reload }) {
+  if (!isSuperadmin()) return;
+  const find = (list, id) => list.find((x) => x.id === Number(id));
+  scope.querySelectorAll("[data-file-edit]").forEach((b) => b.addEventListener("click", () => {
+    const kind = b.dataset.fileEdit, id = b.dataset.id;
+    if (kind === "chart") patientChartEditModal(p, reload);
+    if (kind === "record") clinicalRecordEditModal(p, plans, visits, reload);
+    if (kind === "dose") doseEditModal(p, plans, id ? find(doses, id) : null, reload);
+    if (kind === "checkin") checkinEditModal(p, id ? find(checkins, id) : null, reload);
+    if (kind === "refill" && find(refillRequests, id)) refillEntryEditModal(p, plans, find(refillRequests, id), reload);
+  }));
+  scope.querySelectorAll("[data-file-del]").forEach((b) => b.addEventListener("click", async () => {
+    const kind = b.dataset.fileDel;
+    const what = { dose: "this dose", checkin: "this weight or check-in", refill: "this refill entry" }[kind];
+    const path = { dose: "dose-logs", checkin: "checkins", refill: "refill-requests" }[kind];
+    if (!confirm(`Delete ${what} from ${p.name}'s file? It can't be brought back. The edit history keeps a note of what was removed.`)) return;
+    try { await api("DELETE", `/api/${path}/${b.dataset.id}`); toast("Deleted"); reload(); }
+    catch (ex) { toast(ex.message, "bad"); }
+  }));
+}
+
 
 // ── shareable guide link ─────────────────────────────────────────
 // The link opens the patient's active guide as a web page (no sign-in), with
@@ -1750,6 +2079,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
           <div class="alert-name">${esc(r.prior_medication || planName(r.plan_id))}${r.prior_dose ? ` · ${esc(r.prior_dose)}` : ""}</div>
           <div class="alert-meta">Patient request · ${esc(fmtDate(r.created_at))} · ${timeAgo(r.created_at)}</div>
           ${refillDetailsHTML(r)}
+          ${fileActs("refill", r.id)}
         </div>
         <button class="btn btn-secondary btn-sm" style="align-self:flex-start" data-review-refill="${r.plan_id}">Review</button>
       </div>`).join("")}
@@ -1763,6 +2093,7 @@ function refillHistoryCardHTML(plans, refillRequests) {
             ${r.source === "patient" ? "Patient request" : "Logged in clinic"} · ${esc(fmtDate(r.decided_at || r.created_at))}${r.decided_by_name ? ` · by ${esc(r.decided_by_name)}` : ""}
           </div>
           ${refillDetailsHTML(r)}
+          ${fileActs("refill", r.id)}
         </div>
       </div>`).join("") : (!pending.length ? `<p class="hint">No refills logged yet.</p>` : "")}
   </div>`;
@@ -2481,12 +2812,11 @@ function paintWizard() {
 
 // ── intake question rendering (ported from Consult-Buddy intake) ─────────
 // `conditionalOn.value` may be a string or an array of strings (OR match).
-function intakeVisible(q) {
+function intakeVisible(q, patient = S.wizard.patient) {
   if (!q.conditionalOn) return true;
-  const w = S.wizard;
   const src = q.conditionalOn.questionId === "gender"
-    ? w.patient.gender
-    : w.patient.intake[q.conditionalOn.questionId];
+    ? patient.gender
+    : patient.intake[q.conditionalOn.questionId];
   if (!src) return false;
   const targets = Array.isArray(q.conditionalOn.value) ? q.conditionalOn.value : [q.conditionalOn.value];
   if (Array.isArray(src)) return src.some((a) => targets.some((t) => a.includes(t)));
@@ -2495,14 +2825,16 @@ function intakeVisible(q) {
 
 function reqMark(q) { return q.required ? ' <span class="req">*</span>' : ""; }
 
-function renderIntakeQuestion(q) {
-  const ans = S.wizard.patient.intake;
+// `patient` is the object the answers live on: the consultation's patient by
+// default, or the copy the chart editor is working on.
+function renderIntakeQuestion(q, patient = S.wizard.patient) {
+  const ans = patient.intake;
   const val = ans[q.id];
   if (q.type === "select") {
     // `patientField` questions (e.g. activity level) bind straight to the
     // patient record instead of the free-form intake bag.
     const bind = q.patientField ? "patient" : "intake";
-    const curVal = q.patientField ? S.wizard.patient[q.patientField] : val;
+    const curVal = q.patientField ? patient[q.patientField] : val;
     return `<div class="field"><label>${esc(q.question)}${reqMark(q)}</label>
       <div class="chip-row">${q.options.map((o) => `<button type="button" class="chip ${curVal === o ? "on" : ""}" data-iqchip="${q.id}" data-field="${q.patientField || q.id}" data-bind="${bind}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>
       ${q.hasNotes && curVal && curVal !== "No" ? `<textarea class="input" data-iqnotes="${q.id}" rows="2" placeholder="Notes (optional)" style="margin-top:6px">${esc(ans[q.id + "__notes"] || "")}</textarea>` : ""}
@@ -2530,12 +2862,11 @@ function renderIntakeQuestion(q) {
 }
 
 // Wire intake question events within a scope. `rerender` re-renders the step.
-function wireIntake(scope, rerender) {
-  const w = S.wizard;
-  const ans = w.patient.intake;
+function wireIntake(scope, rerender, patient = S.wizard.patient) {
+  const ans = patient.intake;
   scope.querySelectorAll("[data-iqchip]").forEach((b) => b.addEventListener("click", () => {
     const key = b.dataset.field || b.dataset.iqchip, v = b.dataset.v;
-    if (b.dataset.bind === "patient") w.patient[key] = (w.patient[key] === v ? "" : v);
+    if (b.dataset.bind === "patient") patient[key] = (patient[key] === v ? "" : v);
     else ans[key] = (ans[key] === v ? "" : v);
     rerender();
   }));

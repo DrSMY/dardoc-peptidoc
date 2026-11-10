@@ -397,6 +397,24 @@ CREATE TABLE IF NOT EXISTS refill_due_ignored (
   PRIMARY KEY (patient_id, due)
 );`);
 
+// ── corrections to a patient's file ────────────────────────────────
+// The Super admin can correct any part of a file after the fact (the chart,
+// the record text, a dose, a weight, a refill). Each correction is kept here
+// with what it replaced, so the file's history can always be read back.
+db.exec(`
+CREATE TABLE IF NOT EXISTS patient_file_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id),
+  area TEXT NOT NULL,                           -- chart | record | dose | checkin | refill
+  action TEXT NOT NULL,                         -- edited | added | deleted
+  summary TEXT NOT NULL DEFAULT '',
+  before_json TEXT,
+  after_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_patient_file_edits_patient ON patient_file_edits(patient_id);`);
+
 // ── GLP-1 patient-education video links ──────────────────────────
 // Optional, per-medication URL the doctor pastes in from the admin panel —
 // never guessed or auto-filled — shown in the guide only once set.

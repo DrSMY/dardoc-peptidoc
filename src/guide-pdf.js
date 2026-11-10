@@ -213,13 +213,25 @@ class Flow {
   place(rows, { fill, stroke, pad = 0, radius = 9 } = {}) {
     if (!rows.length) return;
     const total = rows.reduce((s, r) => s + r.h, 0) + pad * 2;
-    if ((fill || stroke) && total <= BOTTOM - TOP && this.y + total > BOTTOM) this.newPage();
+    // A section heading waiting to be placed goes on the same page as what
+    // follows it: a whole box when the box fits a page, else its first lines.
+    const head = this.pendingHead;
+    this.pendingHead = null;
+    const headH = head ? head.reduce((s, r) => s + r.h, 0) + 8 : 0;
+    if ((fill || stroke) && total + headH <= BOTTOM - TOP && this.y + headH + total > BOTTOM) this.newPage();
+    else if (head && this.y + headH + Math.min(total, 96) > BOTTOM) this.newPage();
+    if (head) {
+      if (this.y > TOP) this.y += 8;
+      for (const r of head) { r.draw(this.pg, M, this.y, CW); this.y += r.h; }
+    }
     let i = 0;
     while (i < rows.length) {
       const top = this.y;
       let y = top + pad, j = i;
       while (j < rows.length) {
-        const keep = rows[j].keepNext && j + 1 < rows.length ? rows[j + 1].h : 0;
+        // A heading stays with the line after it, through any spacing rows.
+        let keep = 0;
+        for (let k = j; rows[k].keepNext && k + 1 < rows.length; k++) keep += rows[k + 1].h;
         if (y + rows[j].h + keep + pad > BOTTOM && !(j === i && top === TOP)) break;
         y += rows[j].h; j++;
       }
@@ -235,12 +247,23 @@ class Flow {
     }
   }
   box(rows, fill, stroke) { this.place(rows, { fill, stroke, pad: PAD }); this.gap(12); }
-  // A chapter opens on a fresh page unless most of this one is still free.
-  chapter(title, lede) {
-    if (this.y > TOP + (BOTTOM - TOP) * 0.38) this.newPage();
-    else this.gap(18);
+  // The page being written, counting from 1.
+  get pageNo() { return this.doc.pages.length; }
+  // Ends the page, unless nothing has been put on it yet.
+  pageBreak() { if (this.y > TOP) this.newPage(); }
+  // A chapter opens on a fresh page unless most of this one is still free;
+  // `fresh` makes it always start one. Returns the page it starts on.
+  chapter(title, lede, fresh) {
+    if (fresh) this.pageBreak();
+    else if (this.y > TOP + (BOTTOM - TOP) * 0.38) this.newPage();
+    else if (this.y > TOP) this.gap(18);
+    const page = this.pageNo;
     this.place([...textRows(title, CW, { size: 21, bold: true, color: C.ink, lead: 26 }), gap(4), ...(lede ? textRows(lede, CW, { size: 11, color: C.muted, lead: 15.5 }) : []), gap(14)]);
+    return page;
   }
+  // A heading inside a chapter. It is drawn with the next thing placed, so
+  // it never sits alone at the foot of a page.
+  section(title) { this.pendingHead = headingRows(title, CW, { size: 15, after: 8 }); }
 }
 
 const IN = CW - 2 * PAD; // width inside a box
@@ -292,19 +315,20 @@ function statsRow(cards) {
 
 function essentials(flow, m) {
   const d = m.diet;
-  if (d) {
-    const cards = [];
-    const kcal = G.toNumber(d.calories);
-    if (kcal) cards.push({ label: "Daily calories", value: kcal.toLocaleString("en-US"), unit: "kcal", note: "Approximately, per day" });
-    const pr = G.proteinRange(d);
-    if (pr) cards.push({ label: "Protein", value: G.rangeText(pr), unit: "g", note: "Include with every meal" });
-    const w = G.splitWater(d.water);
-    cards.push({ label: "Water", value: w.value, unit: w.unit, note: `${w.rest ? G.cap(w.rest) + ", unless" : "Unless"} advised otherwise` });
-    if (cards.length < 3) cards.push({ label: "Fibre", value: "25–35", unit: "g", note: "A day" });
-    flow.place([...headingRows("Your daily essentials", CW, { size: 13, before: 4, after: 8 }), statsRow(cards)]);
-    flow.gap(14);
-    return;
-  }
+  if (!d) return;
+  const cards = [];
+  const kcal = G.toNumber(d.calories);
+  if (kcal) cards.push({ label: "Daily calories", value: kcal.toLocaleString("en-US"), unit: "kcal", note: "Approximately, per day" });
+  const pr = G.proteinRange(d);
+  if (pr) cards.push({ label: "Protein", value: G.rangeText(pr), unit: "g", note: "Include with every meal" });
+  const w = G.splitWater(d.water);
+  cards.push({ label: "Water", value: w.value, unit: w.unit, note: `${w.rest ? G.cap(w.rest) + ", unless" : "Unless"} advised otherwise` });
+  if (cards.length < 3) cards.push({ label: "Fibre", value: "25–35", unit: "g", note: "A day" });
+  flow.place([...headingRows("Your daily essentials", CW, { size: 13, before: 4, after: 8 }), statsRow(cards)]);
+  flow.gap(14);
+}
+
+function glanceBox(flow, m) {
   const glance = m.std.glance ? G.bulletsOf(m.std.glance.body) : [];
   if (!glance.length) return;
   const rows = headingRows("Your protocol at a glance", IN, { size: 12 });
@@ -340,10 +364,8 @@ function signatureRows(m, width) {
   return rows;
 }
 
-function overview(flow, models, facility, logo) {
-  const m = models[0];
+function letterhead(flow, m, facility, logo) {
   const pg = flow.pg;
-  // letterhead
   if (logo) {
     const aspect = logo.w / logo.h, w = Math.min(160, aspect * 32);
     pg.image(logo, M, 40, w, w / aspect);
@@ -359,33 +381,101 @@ function overview(flow, models, facility, logo) {
   right(`Issued ${fmtDate(m.created)}`, 89, { size: 8.6, color: C.muted });
   pg.line(M, 100, PAGE_W - M, 100, { color: C.line, width: 0.6 });
   flow.y = 124;
-
   flow.place([
     ...textRows(m.kind === "visit" ? "Your health. In balance." : "Your care. In balance.", CW, { size: 30, bold: true, color: C.ink, lead: 36 }),
     gap(6),
     ...textRows(G.heroLede(m), CW * 0.86, { size: 11.5, color: C.muted, lead: 16.5 }),
   ]);
   flow.gap(18);
+}
 
-  if (m.kind === "visit") {
-    const rows = headingRows("Your goals", IN, { size: 14 });
-    rows.push(...textRows(m.goals.length ? m.goals.join("  ·  ") : "Your doctor will go through your goals with you at your next visit.", IN));
-    rows.push(ruleRow(8, 8), ...textRows("Your plan is built around these goals and your own nutrition needs.", IN, { color: C.ink }));
-    flow.box(rows, C.tint);
-  } else {
-    models.forEach((pm) => flow.box(treatmentRows(pm), C.tint));
-  }
+// Every medication on one table: what it is, the dose, how often, how it is
+// taken and for how long.
+function prescribedRows(models) {
+  const cols = [{ head: "Medication", w: 136 }, { head: "Dose", w: 112 }, { head: "How often", w: 80 }, { head: "How it's taken", w: 86 }, { head: "Duration", w: IN - 136 - 112 - 80 - 86 }];
+  const xs = cols.map((_, i) => cols.slice(0, i).reduce((a, c) => a + c.w, 0));
+  const rows = [{
+    h: 18,
+    draw(pg, x, y, w) {
+      cols.forEach((c, i) => pg.text(c.head, x + xs[i], y + 9, { size: 8.4, color: C.muted }));
+      pg.line(x, y + 15, x + w, y + 15, { color: "#CDD6C6", width: 0.6 });
+    },
+  }];
+  models.forEach((m, n) => {
+    const p = m.plan;
+    const cells = [
+      wrap([{ t: p.medication, b: true }], cols[0].w - 10, 10.4),
+      wrap(runsOf(p.dose || "As advised"), cols[1].w - 10, 9.4),
+      wrap(runsOf(G.cap(G.guideFreqPhrase(p.frequency)) || "As advised"), cols[2].w - 10, 9.4),
+      wrap(runsOf(G.ROUTE_LABEL[p.route] || G.cap(p.route) || ""), cols[3].w - 10, 9.4),
+      wrap(runsOf([m.phase && m.phase.weeks ? G.weeksText(m.phase.weeks) : "", p.quantity > 1 ? `Quantity ${p.quantity}` : ""].filter(Boolean).join(", ") || "Until review"), cols[4].w, 9.4),
+    ];
+    const lines = Math.max(...cells.map((c) => c.length));
+    rows.push({
+      h: lines * 13.2 + 14,
+      draw(pg, x, y, w) {
+        if (n) pg.line(x, y, x + w, y, { color: "#D9E0D2", width: 0.5 });
+        cells.forEach((c, i) => c.forEach((ln, k) => drawLine(pg, ln, x + xs[i], y + 17 + k * 13.2, i ? 9.4 : 10.4, i ? C.text : C.ink)));
+      },
+    });
+  });
+  return rows;
+}
+
+// Page 1: everything that has been prescribed, the daily figures, the next
+// follow-up and where to find each part. Returns the slot the contents list
+// is drawn into once the page numbers are known.
+function summaryPage(flow, models, facility, logo, entryCount) {
+  const m = models[0];
+  letterhead(flow, m, facility, logo);
+  flow.box([
+    ...headingRows("What has been prescribed", IN, { size: 13, after: 4 }),
+    ...prescribedRows(models),
+    ruleRow(6, 8, "#CDD6C6"),
+    ...textRows(`Continue ${models.length > 1 ? "each dose" : "this dose"} unless your doctor advises otherwise.`, IN, { color: C.ink }),
+  ], C.tint);
   essentials(flow, models.find((x) => x.diet) || m);
   nextBox(flow, models);
+  const slot = {};
+  flow.place([
+    ...headingRows("In this guide", CW, { size: 13, before: 4, after: 4 }),
+    { h: entryCount * 17 + 2, draw(pg, x, y, w) { Object.assign(slot, { pg, x, y, w }); } },
+  ]);
+  flow.pageBreak();
+  return slot;
+}
 
-  if (m.kind === "visit") {
-    const v = m.visit;
-    const rows = [...textRows(`From ${m.doctor}`, IN, { size: 8.6, color: C.muted }), gap(2), ...headingRows(v.advice ? "Advice from your doctor" : "Your health plan", IN, { size: 14 })];
-    rows.push(...proseRows(v.advice || "Here is the plan we talked about. It's built around your goals and your own nutrition needs.", IN));
-    flow.box(rows, C.beige);
-    if (v.medicationWhy) flow.box([...headingRows("How medication could help", IN), ...proseRows(v.medicationWhy, IN)], null, C.line);
-    return;
-  }
+function fillContents(slot, entries) {
+  if (!slot.pg) return;
+  entries.forEach((e, i) => {
+    const y = slot.y + i * 17;
+    if (i) slot.pg.line(slot.x, y, slot.x + slot.w, y, { color: C.line, width: 0.5 });
+    const lx = slot.x + (e.sub ? 14 : 0);
+    slot.pg.text(e.label, lx, y + 12, { size: 9.8, bold: !e.sub, color: e.sub ? C.text : C.ink });
+    if (e.note) slot.pg.text(e.note, lx + textWidth(e.label, true, 9.8) + 8, y + 12, { size: 9, color: C.muted });
+    const t = `Page ${e.page}`;
+    slot.pg.text(t, slot.x + slot.w - textWidth(t, false, 9.4), y + 12, { size: 9.4, color: C.muted });
+  });
+}
+
+// A plan with nothing prescribed: goals, daily figures, follow-up and the
+// doctor's advice, as before.
+function visitOverview(flow, m, facility, logo) {
+  letterhead(flow, m, facility, logo);
+  const rows = headingRows("Your goals", IN, { size: 14 });
+  rows.push(...textRows(m.goals.length ? m.goals.join("  ·  ") : "Your doctor will go through your goals with you at your next visit.", IN));
+  rows.push(ruleRow(8, 8), ...textRows("Your plan is built around these goals and your own nutrition needs.", IN, { color: C.ink }));
+  flow.box(rows, C.tint);
+  essentials(flow, m);
+  nextBox(flow, [m]);
+  const v = m.visit;
+  const advice = [...textRows(`From ${m.doctor}`, IN, { size: 8.6, color: C.muted }), gap(2), ...headingRows(v.advice ? "Advice from your doctor" : "Your health plan", IN, { size: 14 })];
+  advice.push(...proseRows(v.advice || "Here is the plan we talked about. It's built around your goals and your own nutrition needs.", IN));
+  flow.box(advice, C.beige);
+  if (v.medicationWhy) flow.box([...headingRows("How medication could help", IN), ...proseRows(v.medicationWhy, IN)], null, C.line);
+}
+
+function welcomeBox(flow, m) {
   const rows = [...textRows(`From ${m.doctor}`, IN, { size: 8.6, color: C.muted }), gap(2), ...headingRows("Your journey, not a race.", IN, { size: 14 })];
   G.welcomeLines(m).forEach((l, i) => { if (i) rows.push(gap(5)); rows.push(...textRows(l, IN)); });
   rows.push(gap(6), ...textRows(m.doctor, IN, { bold: true, color: C.ink }));
@@ -417,9 +507,14 @@ function chipsRow(labels, current, width) {
   }));
 }
 
-function medication(flow, m, multi) {
+// One medication, start to finish: how to take it, the dosage, what it is,
+// and its own side effects. Returns the page the chapter starts on.
+function medicationChapter(flow, m) {
   const p = m.plan;
-  flow.chapter(multi ? `Your medication: ${p.medication}` : "Your medication", `How to take your current ${G.ROUTE_NOUN[p.route] || "medication"}, and what the dose strengths in your program mean.`);
+  const page = flow.chapter(p.medication, `How to take your ${G.ROUTE_NOUN[p.route] || "medication"}, your dosage, and the side effects to know about.`, true);
+  glanceBox(flow, m);
+
+  flow.section("How to take it");
   const st = G.stepsFrom(m);
   const docText = st.fromDoctor ? "" : G.doctorInstructions(m);
   const rows = [
@@ -440,39 +535,48 @@ function medication(flow, m, multi) {
   if (docText) rows.push(gap(10), ...headingRows("Instructions from your doctor", IN, { size: 10, after: 3 }), ...proseRows(docText, IN));
   flow.box(rows, C.tint);
 
-  const about = m.std.about ? m.std.about.body : m.info.howItWorks || "";
+  flow.section("Your dosage");
   const { ladder, cur, future } = G.doseLadder(m);
-  if (about || ladder.length || m.info.videoLink) {
-    const a = headingRows(`About ${p.medication}`, IN, { size: 13 });
-    if (about) a.push(...proseRows(about, IN));
-    // The program's own video, unless the steps above already link it.
-    const vid = m.info.videoLink;
-    if (vid && /^https?:\/\//i.test(vid) && !cleanBody(m.std.how ? m.std.how.body : "").includes(`(${vid})`)) {
-      a.push(gap(8), ...textRows([{ t: `Watch how ${p.medication} works and how to take it: `, b: false }, { t: shortUrl(vid), b: false, link: vid }], IN));
+  const d = [
+    ...textRows([{ t: "Current dose: ", b: false }, { t: p.dose || "as advised by your doctor", b: true }, { t: p.frequency ? `, ${G.guideFreqPhrase(p.frequency)}` : "", b: false }], IN, { size: 11, color: C.ink, lead: 16 }),
+  ];
+  const facts = [m.phase && m.phase.weeks ? `Current duration: ${G.weeksText(m.phase.weeks)}` : "", p.quantity > 1 ? `Quantity dispensed: ${p.quantity}` : ""].filter(Boolean);
+  if (facts.length) d.push(...textRows(facts.join("  ·  "), IN, { size: 9.2, color: C.muted }));
+  if (ladder.length) {
+    d.push(gap(10), ...textRows("Approved dose strengths", IN, { size: 8.8, color: C.muted }), gap(4));
+    d.push(...chipsRow(ladder.map((x, i) => (i === cur ? `${x} · current` : x)), cur, IN));
+  }
+  d.push(...textRows("Your doctor may adjust this at your next review.", IN, { size: 8.6, color: C.muted }));
+  future.forEach((fd) => {
+    d.push(ruleRow(8, 8));
+    d.push(...textRows([{ t: fd.dose, b: true }, { t: " · future dose, only if prescribed", b: false }], IN, { color: C.ink }));
+    if (fd.line) d.push(...textRows(labelledRuns(cleanBody(fd.line)), IN, { size: 9.2, color: C.muted }));
+    d.push(...textRows(fd.note, IN, { size: 9.2, color: C.muted }));
+  });
+  flow.box(d, null, C.line);
+  if (m.std.titration) {
+    flow.place([...headingRows(G.prettyHead(m.std.titration.head, p.medication), CW, { size: 11, before: 2, after: 4 }), ...proseRows(m.std.titration.body, CW)]);
+    flow.gap(10);
+  }
+
+  const about = m.std.about ? m.std.about.body : m.info.howItWorks || "";
+  // The program's own video, unless the steps above already link it.
+  const vid = m.info.videoLink;
+  const showVid = vid && /^https?:\/\//i.test(vid) && !cleanBody(m.std.how ? m.std.how.body : "").includes(`(${vid})`);
+  if (about || showVid || m.std.more.length) {
+    flow.section(`About ${p.medication}`);
+    if (about || showVid) {
+      const a = [];
+      if (about) a.push(...proseRows(about, IN));
+      if (showVid) a.push(...(about ? [gap(8)] : []), ...textRows([{ t: `Watch how ${p.medication} works and how to take it: `, b: false }, { t: shortUrl(vid), b: false, link: vid }], IN));
+      flow.box(a, null, C.line);
     }
-    if (ladder.length) {
-      a.push(gap(10), ...textRows("Approved dose strengths", IN, { size: 8.8, color: C.muted }), gap(4));
-      a.push(...chipsRow(ladder.map((d, i) => (i === cur ? `${d} · current` : d)), cur, IN));
-      a.push(...textRows("Your doctor may adjust this at your next review.", IN, { size: 8.6, color: C.muted }));
-    }
-    flow.box(a, null, C.line);
+    m.std.more.forEach((s) => { flow.place([...headingRows(G.prettyHead(s.head, p.medication), CW, { size: 11, before: 4, after: 4 }), ...proseRows(s.body, CW)]); flow.gap(6); });
   }
-  if (future.length) {
-    const f = headingRows("Future doses", IN, { size: 12 });
-    future.forEach((fd, i) => {
-      if (i) f.push(ruleRow(6, 6));
-      f.push(...textRows([{ t: fd.dose, b: true }, { t: " · future dose, only if prescribed", b: false }], IN, { color: C.ink }));
-      if (fd.line) f.push(...textRows(labelledRuns(cleanBody(fd.line)), IN, { size: 9.2, color: C.muted }));
-      f.push(...textRows(fd.note, IN, { size: 9.2, color: C.muted }));
-    });
-    flow.box(f, null, C.line);
-  }
-  const more = [m.std.titration, ...m.std.more].filter(Boolean);
-  if (more.length) {
-    flow.place(headingRows(`More about ${p.medication}`, CW, { size: 14, before: 6, after: 4 }));
-    more.forEach((s) => { flow.place([...headingRows(G.prettyHead(s.head, p.medication), CW, { size: 11, before: 8, after: 4 }), ...proseRows(s.body, CW)]); });
-    flow.gap(8);
-  }
+
+  flow.section(`Side effects of ${p.medication}`);
+  sideEffects(flow, m);
+  return page;
 }
 
 function plateRow(d) {
@@ -551,8 +655,8 @@ function food(flow, models) {
   models.forEach((x) => x.std.food.forEach((s) => { if (!stdFood.some((y) => y.head === s.head && y.body === s.body)) stdFood.push(s); }));
   const supps = models.flatMap((x) => x.supps);
   const suppText = models.map((x) => x.plan && x.plan.supplements).filter(Boolean);
-  if (!d && !stdFood.length && !supps.length && !suppText.length) return;
-  flow.chapter("Food & everyday habits", d ? "Eat enough to nourish your body, even as your appetite changes." : "Small, steady habits that support your treatment.");
+  if (!d && !stdFood.length && !supps.length && !suppText.length) return 0;
+  const page = flow.chapter("Food & everyday habits", d ? "Eat enough to nourish your body, even as your appetite changes." : "Small, steady habits that support your treatment.");
   if (d) {
     const pr = G.proteinRange(d);
     const w = G.splitWater(d.water);
@@ -632,11 +736,11 @@ function food(flow, models) {
     stdFood.forEach((s) => flow.place([...headingRows(G.prettyHead(s.head, med), CW, { size: 11, before: 8, after: 4 }), ...proseRows(s.body, CW)]));
     flow.gap(8);
   }
+  return page;
 }
 
-function safety(flow, m, multi) {
+function sideEffects(flow, m) {
   const p = m.plan, info = m.info;
-  flow.chapter(multi ? `Side effects & safety: ${p.medication}` : "Side effects & when to seek help", "Keep this section easy to find if you feel unwell.");
   const c = headingRows("Common side effects", CW, { size: 12.5 });
   if (info.commonSideEffects) c.push(...textRows(`Common effects include ${G.lcFirst(info.commonSideEffects.replace(/\.$/, ""))}.`, CW), gap(5));
   if (m.std.effects) c.push(...proseRows(m.std.effects.body, CW), gap(5));
@@ -686,7 +790,7 @@ function timelineRows(text, width) {
 function followup(flow, models, facility) {
   const m = models[0];
   const visit = m.kind === "visit";
-  flow.chapter("Follow-up & support", visit ? "Stay connected through your next check-in." : "Stay connected through your next check-in and refill.");
+  const page = flow.chapter("Follow-up & support", visit ? "Stay connected through your next check-in." : "Stay connected through your next check-in and refill.");
   const w = G.followWindow(G.nextFollowupOf(m));
   const until = G.untilItems(m);
   if (models.length > 1) until.splice(0, 1, `continue ${G.commaList(models.map((x) => `${x.plan.medication}${x.plan.dose ? " " + x.plan.dose : ""}${x.plan.frequency ? " " + G.guideFreqPhrase(x.plan.frequency) : ""}`), "and")}`);
@@ -733,6 +837,7 @@ function followup(flow, models, facility) {
     : [...headingRows("A message from your doctor", IN, { size: 12.5 }), ...textRows(G.closingMessage(m), IN), ...signatureRows(m, IN)];
   flow.box(letter, C.beige);
   flow.place(textRows(`If you have any questions about your ${visit ? "plan" : "treatment"}, please contact ${facility} directly. If you need urgent medical help, contact your nearest emergency service.`, CW, { size: 8.8, color: C.muted }));
+  return page;
 }
 
 function fmtDate(iso) {
@@ -752,11 +857,22 @@ function guidePdf({ patient, clinic, plans, visit }, { logo } = {}) {
   const doc = new PdfDocument({ title: `${visit ? "Personal health plan" : "Personal treatment guide"} — ${who}`, author: facility, subject: visit ? "Personal health plan" : "Personal treatment guide" });
   const img = logo ? doc.loadPng(logo) : null;
   const flow = new Flow(doc);
-  overview(flow, models, facility, img);
-  if (!visit) models.forEach((m) => medication(flow, m, models.length > 1));
-  food(flow, models);
-  if (!visit) models.forEach((m) => safety(flow, m, models.length > 1));
-  followup(flow, models, facility);
+  if (visit) {
+    visitOverview(flow, first, facility, img);
+    food(flow, models);
+    followup(flow, models, facility);
+  } else {
+    // Page 1 says what has been prescribed; then each medication in full
+    // (how to take it, dosage, side effects); then what applies to all of it.
+    const slot = summaryPage(flow, models, facility, img, models.length + 3);
+    const entries = models.map((m) => ({ label: m.plan.medication, note: "How to take it, your dosage, side effects", page: medicationChapter(flow, m) }));
+    entries.push({ label: "General guide", note: "For your whole program", page: flow.chapter("General guide", "For your whole program: food and everyday habits, follow-up and support.", true) });
+    welcomeBox(flow, first);
+    const foodPage = food(flow, models);
+    if (foodPage) entries.push({ label: "Food & everyday habits", page: foodPage, sub: true });
+    entries.push({ label: "Follow-up & support", page: followup(flow, models, facility), sub: true });
+    fillContents(slot, entries);
+  }
 
   // Running head and foot on every page; the address bar never appears.
   const n = doc.pages.length;

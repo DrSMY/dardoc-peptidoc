@@ -5,6 +5,7 @@ const { db, hashSecret, verifySecret } = require("./db");
 const presets = require("./presets");
 const protocolMap = require("./protocol-map.js");
 const { guidePdf } = require("./guide-pdf");
+const { practiceReport } = require("./practice-report");
 
 const SESSION_HOURS = { doctor: 24 * 14, patient: 24 * 90 };
 
@@ -959,6 +960,26 @@ route("GET", "/api/patients", (req, res) => {
   json(res, 200, rows.map((r) => ({ ...withLiveAge(r), pin_hash: undefined })));
 });
 
+// The practice report: every patient seen in a period, with their programs,
+// refills, weights and check-ins, as one Excel workbook. It is the whole
+// practice's patient data in one file, so only the Super admin may take it.
+route("GET", "/api/reports/practice", (req, res) => {
+  const me = requireSuperadmin(req);
+  if (!me) return json(res, 403, { error: "Only the Super admin can download the practice report." });
+  const range = ["month", "3m", "6m", "all"].includes(req.query.range) ? req.query.range : "month";
+  const org = db.prepare("SELECT id, name FROM organizations WHERE id = ?").get(me.org_id) || { id: me.org_id, name: me.org_name || "" };
+  const { buffer, fileName } = practiceReport(org, range, me);
+  const name = fileName.replace(/[^\p{L}\p{N} ._()-]/gu, "").trim();
+  const ascii = name.replace(/[^\x20-\x7E]/g, "").trim() || "Practice report.xlsx";
+  res.writeHead(200, {
+    "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Content-Length": buffer.length,
+    "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow",
+  });
+  res.end(buffer);
+});
+
 route("POST", "/api/patients", async (req, res, _p, body) => {
   const doc = requireClinician(req);
   if (!doc) return json(res, 403, NOT_CLINICIAN);
@@ -1014,15 +1035,32 @@ route("GET", "/api/patients/:id", (req, res, p) => {
     return { ...formListRow(f), summary: answers ? formSummaryText(f, answers, formJson(f.flags_json, []), p.id) : "" };
   });
   const intake = JSON.parse(patient.intake_json || "{}");
+  const fileEdits = me.role === "superadmin" ? db.prepare(`
+    SELECT e.id, e.area, e.action, e.summary, e.created_at, u.name AS user_name FROM patient_file_edits e
+    LEFT JOIN users u ON u.id = e.user_id WHERE e.patient_id = ? ORDER BY e.id DESC LIMIT 100`).all(p.id) : [];
   json(res, 200, { patient: { ...patient, pin_hash: undefined, intake_json: undefined, intake },
-    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests, visits, patientForms });
+    plans, doses, checkins, messages: withSender(messages, patient.doctor_id), refillRequests, visits, patientForms, fileEdits });
 });
 
 route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
-  const me = getDoctor(req);
-  if (!me) return json(res, 401, { error: "Not signed in." });
+  const me = requireClinician(req);
+  if (!me) return json(res, 403, NOT_CLINICIAN);
   const patient = patientInOrg(p.id, me);
   if (!patient) return json(res, 404, NOT_IN_ORG);
+  // Correcting the chart outside a consultation is the Super admin's job.
+  if (body.fileEdit && me.role !== "superadmin") return json(res, 403, NOT_SUPERADMIN);
+  if (body.name !== undefined) {
+    body.name = String(body.name).trim();
+    if (!body.name) return json(res, 400, { error: "Enter the patient's name." });
+  }
+  if (body.mobile !== undefined) {
+    const mobile = normMobile(body.mobile);
+    if (!mobile) return json(res, 400, { error: "Enter a mobile number." });
+    // The mobile number is the patient's sign-in, so no two files can share one.
+    if (db.prepare("SELECT 1 AS x FROM patients WHERE mobile = ? AND id != ?").get(mobile, p.id)) {
+      return json(res, 409, { error: "That mobile number is already on another patient's file." });
+    }
+  }
   const fields = { name: "name", title: "title", age: "age", gender: "gender", heightCm: "height_cm",
     // `weightKg` from a follow-up consultation is this visit's *current*
     // weight — the original starting weight is only ever touched via the
@@ -1052,6 +1090,257 @@ route("PATCH", "/api/patients/:id", async (req, res, p, body) => {
   if (!sets.length) return json(res, 400, { error: "Nothing to update." });
   vals.push(p.id);
   db.prepare(`UPDATE patients SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+  if (body.fileEdit) {
+    const now = db.prepare("SELECT * FROM patients WHERE id = ?").get(p.id);
+    const before = {}, after = {};
+    for (const col of [...Object.values(fields), "dob", "mobile"]) {
+      if (String(patient[col] ?? "") !== String(now[col] ?? "")) { before[col] = patient[col]; after[col] = now[col]; }
+    }
+    const was = JSON.parse(patient.intake_json || "{}"), is = JSON.parse(now.intake_json || "{}");
+    for (const k of new Set([...Object.keys(was), ...Object.keys(is)])) {
+      if (JSON.stringify(was[k] ?? null) !== JSON.stringify(is[k] ?? null)) { before[`intake.${k}`] = was[k] ?? null; after[`intake.${k}`] = is[k] ?? null; }
+    }
+    const changed = Object.keys(after);
+    if (changed.length) logFileEdit(p.id, me, "chart", "edited", `Chart: ${changed.map((c) => FILE_FIELD_LABEL[c] || c.replace(/^intake\./, "").replace(/__/g, " ").replace(/_/g, " ")).join(", ")}`, before, after);
+  }
+  json(res, 200, { ok: true });
+});
+
+// ── Super admin: correcting a patient's file ─────────────────────
+// The chart above, the record text, and single entries in the dose, weight,
+// check-in and refill logs. Nothing here changes what the patient is
+// prescribed (that is Edit program); it corrects what the file says.
+const NOT_SUPERADMIN = { error: "Only the Super admin can change this part of a patient's file." };
+const FILE_FIELD_LABEL = {
+  name: "name", title: "title", age: "age", dob: "date of birth", gender: "gender", height_cm: "height", mobile: "mobile", email: "email",
+  current_weight_kg: "current weight", start_weight_kg: "starting weight", max_weight_kg: "maximum weight", goal_weight_kg: "goal weight",
+  activity_level: "activity level", chronic_illnesses: "chronic illnesses", medications: "current medications", allergies: "allergies",
+  notes: "notes", national_id: "Emirates ID / passport", archived: "archived",
+};
+function logFileEdit(patientId, user, area, action, summary, before, after) {
+  db.prepare("INSERT INTO patient_file_edits (patient_id, user_id, area, action, summary, before_json, after_json) VALUES (?,?,?,?,?,?,?)")
+    .run(patientId, user.id, area, action, String(summary).slice(0, 500),
+      before == null ? null : JSON.stringify(before), after == null ? null : JSON.stringify(after));
+}
+// The row, with its patient, when the Super admin's organisation owns it.
+function fileRow(req, res, table, id) {
+  const me = requireSuperadmin(req);
+  if (!me) { json(res, 403, NOT_SUPERADMIN); return null; }
+  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const patient = row && patientInOrg(row.patient_id, me);
+  if (!patient) { json(res, 404, NOT_IN_ORG); return null; }
+  return { me, row, patient };
+}
+function filePatient(req, res, id) {
+  const me = requireSuperadmin(req);
+  if (!me) { json(res, 403, NOT_SUPERADMIN); return null; }
+  const patient = patientInOrg(id, me);
+  if (!patient) { json(res, 404, NOT_IN_ORG); return null; }
+  return { me, patient };
+}
+const validDay = (v) => {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const ok = d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]) && d.getTime() <= Date.now() + 864e5 && Number(m[1]) >= 2000;
+  return ok ? m[0] : null;
+};
+const validWeight = (v) => {
+  if (v === "" || v === null || v === undefined) return null;
+  const kg = Number(v);
+  return kg >= 20 && kg <= 400 ? Math.round(kg * 10) / 10 : NaN;
+};
+const fmtDay = (ymd) => String(ymd).slice(0, 10).split("-").reverse().join("/");
+
+route("PATCH", "/api/patients/:id/clinical-record", async (req, res, p, body) => {
+  const ctx = filePatient(req, res, p.id);
+  if (!ctx) return;
+  const text = String(body.text ?? "").replace(/\r/g, "").slice(0, 60000);
+  let old;
+  if (body.planId) {
+    const plan = db.prepare("SELECT id, clinical_suggestion FROM plans WHERE id = ? AND patient_id = ?").get(Number(body.planId), p.id);
+    if (!plan) return json(res, 404, { error: "Record not found." });
+    old = plan.clinical_suggestion || "";
+    // One consultation saves the same record on each program it prescribed.
+    db.prepare("UPDATE plans SET clinical_suggestion = ? WHERE patient_id = ? AND (id = ? OR (? != '' AND clinical_suggestion = ?))").run(text, p.id, plan.id, old, old);
+  } else if (body.visitId) {
+    const visit = db.prepare("SELECT id, clinical_suggestion FROM visit_records WHERE id = ? AND patient_id = ?").get(Number(body.visitId), p.id);
+    if (!visit) return json(res, 404, { error: "Record not found." });
+    old = visit.clinical_suggestion || "";
+    db.prepare("UPDATE visit_records SET clinical_suggestion = ? WHERE id = ?").run(text, visit.id);
+  } else return json(res, 400, { error: "Choose which record to change." });
+  if (old !== text) logFileEdit(p.id, ctx.me, "record", "edited", "Clinical record text", { text: old }, { text });
+  json(res, 200, { ok: true });
+});
+
+// Doses. A program remembers when its first dose was taken; that is kept
+// true when the first dose is corrected, added before, or removed.
+function doseFields(body, plan) {
+  const t = new Date(body.takenAt);
+  if (!body.takenAt || isNaN(t) || t.getTime() > Date.now() + 864e5 || t.getUTCFullYear() < 2000) return { error: "Enter the date and time the dose was taken." };
+  return {
+    takenAt: t.toISOString(), dose: String(body.dose ?? (plan ? plan.dose : "") ?? "").trim().slice(0, 80),
+    site: String(body.site || "").trim().slice(0, 80), notes: String(body.notes || "").trim().slice(0, 1000),
+  };
+}
+function refreshFirstDose(planId, { removedAt, newAt, added } = {}) {
+  if (!planId) return;
+  const plan = db.prepare("SELECT first_dose_at FROM plans WHERE id = ?").get(planId);
+  if (!plan) return;
+  let first = plan.first_dose_at;
+  // The dose that set it was moved or removed: the next one takes its place.
+  if (removedAt && removedAt === first) {
+    first = db.prepare("SELECT MIN(taken_at) AS t FROM dose_logs WHERE plan_id = ? AND taken_at >= ?").get(planId, removedAt).t || null;
+  }
+  // A new first dose, or one now dated before it. A program with no first
+  // dose yet (new, or just switched to another medication) only gets one
+  // from a dose that is added, never from correcting an old one.
+  if (newAt && (first ? newAt < first : added || removedAt === plan.first_dose_at)) first = newAt;
+  if (first !== plan.first_dose_at) db.prepare("UPDATE plans SET first_dose_at = ? WHERE id = ?").run(first, planId);
+}
+const doseText = (d) => `${fmtDay(d.taken_at)}${d.dose ? `, ${d.dose}` : ""}`;
+
+route("POST", "/api/patients/:id/dose-logs", async (req, res, p, body) => {
+  const ctx = filePatient(req, res, p.id);
+  if (!ctx) return;
+  const plan = body.planId
+    ? db.prepare("SELECT * FROM plans WHERE id = ? AND patient_id = ?").get(Number(body.planId), p.id)
+    : db.prepare("SELECT * FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC").get(p.id);
+  const f = doseFields(body, plan);
+  if (f.error) return json(res, 400, f);
+  const r = db.prepare("INSERT INTO dose_logs (patient_id, plan_id, taken_at, dose, site, notes) VALUES (?,?,?,?,?,?)")
+    .run(p.id, plan ? plan.id : null, f.takenAt, f.dose, f.site, f.notes);
+  refreshFirstDose(plan && plan.id, { newAt: f.takenAt, added: true });
+  const row = db.prepare("SELECT * FROM dose_logs WHERE id = ?").get(Number(r.lastInsertRowid));
+  logFileEdit(p.id, ctx.me, "dose", "added", `Dose added: ${doseText(row)}`, null, row);
+  json(res, 200, { ok: true, id: row.id });
+});
+
+route("PATCH", "/api/dose-logs/:id", async (req, res, p, body) => {
+  const ctx = fileRow(req, res, "dose_logs", p.id);
+  if (!ctx) return;
+  const f = doseFields(body, null);
+  if (f.error) return json(res, 400, f);
+  db.prepare("UPDATE dose_logs SET taken_at = ?, dose = ?, site = ?, notes = ? WHERE id = ?").run(f.takenAt, f.dose, f.site, f.notes, p.id);
+  refreshFirstDose(ctx.row.plan_id, { removedAt: ctx.row.taken_at, newAt: f.takenAt });
+  const row = db.prepare("SELECT * FROM dose_logs WHERE id = ?").get(p.id);
+  logFileEdit(ctx.patient.id, ctx.me, "dose", "edited", `Dose corrected: ${doseText(ctx.row)}`, ctx.row, row);
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/dose-logs/:id", (req, res, p) => {
+  const ctx = fileRow(req, res, "dose_logs", p.id);
+  if (!ctx) return;
+  db.prepare("DELETE FROM dose_logs WHERE id = ?").run(p.id);
+  refreshFirstDose(ctx.row.plan_id, { removedAt: ctx.row.taken_at });
+  logFileEdit(ctx.patient.id, ctx.me, "dose", "deleted", `Dose deleted: ${doseText(ctx.row)}`, ctx.row, null);
+  json(res, 200, { ok: true });
+});
+
+// Weights and check-ins. The latest logged weight is the patient's current
+// weight, so it is brought back in line after every change.
+function checkinFields(body) {
+  const date = validDay(body.date);
+  if (!date) return { error: "Enter a valid date, not in the future." };
+  const weight = validWeight(body.weightKg);
+  if (Number.isNaN(weight)) return { error: "Enter a weight between 20 and 400 kg, or leave it empty." };
+  const symptoms = {};
+  for (const s of presets.SYMPTOMS) {
+    const v = body.symptoms && body.symptoms[s.key];
+    if (v && s.options.includes(v)) symptoms[s.key] = v;
+  }
+  const notes = String(body.notes || "").trim().slice(0, 2000);
+  if (weight === null && !Object.keys(symptoms).length && !notes) return { error: "Add a weight, a symptom or a note." };
+  return { date, weight, symptoms, notes, flagged: checkinFlag(symptoms).length ? 1 : 0 };
+}
+function syncCurrentWeight(patientId) {
+  const last = db.prepare("SELECT weight_kg FROM checkins WHERE patient_id = ? AND weight_kg IS NOT NULL ORDER BY date DESC, id DESC LIMIT 1").get(patientId);
+  if (last) db.prepare("UPDATE patients SET current_weight_kg = ? WHERE id = ?").run(last.weight_kg, patientId);
+}
+const checkinText = (c) => `${fmtDay(c.date)}${c.weight_kg ? `, ${c.weight_kg} kg` : ""}`;
+
+route("POST", "/api/patients/:id/checkins", async (req, res, p, body) => {
+  const ctx = filePatient(req, res, p.id);
+  if (!ctx) return;
+  const f = checkinFields(body);
+  if (f.error) return json(res, 400, f);
+  const plan = db.prepare("SELECT id FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC").get(p.id);
+  const r = db.prepare("INSERT INTO checkins (patient_id, plan_id, date, weight_kg, symptoms_json, notes, flagged, reviewed) VALUES (?,?,?,?,?,?,?,?)")
+    .run(p.id, plan ? plan.id : null, f.date, f.weight, JSON.stringify(f.symptoms), f.notes, f.flagged, f.flagged ? 1 : 0);
+  syncCurrentWeight(p.id);
+  const row = db.prepare("SELECT * FROM checkins WHERE id = ?").get(Number(r.lastInsertRowid));
+  logFileEdit(p.id, ctx.me, "checkin", "added", `Weight or check-in added: ${checkinText(row)}`, null, row);
+  json(res, 200, { ok: true, id: row.id });
+});
+
+route("PATCH", "/api/checkins/:id", async (req, res, p, body) => {
+  const ctx = fileRow(req, res, "checkins", p.id);
+  if (!ctx) return;
+  const f = checkinFields(body);
+  if (f.error) return json(res, 400, f);
+  db.prepare("UPDATE checkins SET date = ?, weight_kg = ?, symptoms_json = ?, notes = ?, flagged = ? WHERE id = ?")
+    .run(f.date, f.weight, JSON.stringify(f.symptoms), f.notes, f.flagged, p.id);
+  syncCurrentWeight(ctx.patient.id);
+  const row = db.prepare("SELECT * FROM checkins WHERE id = ?").get(p.id);
+  logFileEdit(ctx.patient.id, ctx.me, "checkin", "edited", `Weight or check-in corrected: ${checkinText(ctx.row)}`, ctx.row, row);
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/checkins/:id", (req, res, p) => {
+  const ctx = fileRow(req, res, "checkins", p.id);
+  if (!ctx) return;
+  db.prepare("DELETE FROM checkins WHERE id = ?").run(p.id);
+  syncCurrentWeight(ctx.patient.id);
+  logFileEdit(ctx.patient.id, ctx.me, "checkin", "deleted", `Weight or check-in deleted: ${checkinText(ctx.row)}`, ctx.row, null);
+  json(res, 200, { ok: true });
+});
+
+// Refill history. Corrects what was recorded; the program's dose is not
+// touched. The weight entry a refill logged follows a corrected weight.
+const refillText = (r) => `${fmtDay(r.decided_at || r.created_at)}${r.prior_medication ? `, ${r.prior_medication}` : ""}`;
+
+route("PATCH", "/api/refill-requests/:id", async (req, res, p, body) => {
+  const ctx = fileRow(req, res, "refill_requests", p.id);
+  if (!ctx) return;
+  const old = ctx.row;
+  const weight = body.weightKg === undefined ? old.weight_kg : validWeight(body.weightKg);
+  if (Number.isNaN(weight)) return json(res, 400, { error: "Enter a weight between 20 and 400 kg, or leave it empty." });
+  const pick = (v, allowed, fallback) => (v === undefined ? fallback : allowed.includes(v) ? v : "");
+  const text = (v, fallback, max) => (v === undefined ? fallback : String(v).trim().slice(0, max));
+  const has = pick(body.hasSideEffects, ["yes", "no"], old.has_side_effects || "");
+  const next = {
+    weight_kg: weight, has_side_effects: has,
+    side_effect_severity: has === "yes" ? pick(body.sideEffectSeverity, ["mild", "moderate", "severe"], old.side_effect_severity || "") : "",
+    side_effects: text(body.sideEffects, old.side_effects || "", 2000), results_felt: text(body.resultsFelt, old.results_felt || "", 2000),
+    dose_action: pick(body.doseAction, ["same", "increase", "decrease", "custom", "talk"], old.dose_action || ""),
+    requested_dose: text(body.requestedDose, old.requested_dose || "", 40), notes: text(body.notes, old.notes || "", 2000),
+    prior_dose: text(body.priorDose, old.prior_dose || "", 40),
+    decided_dose: old.status === "approved" ? text(body.decidedDose, old.decided_dose || "", 40) : old.decided_dose || "",
+    quantity: body.quantity === undefined ? old.quantity : (Number(body.quantity) > 0 ? Math.round(Number(body.quantity)) : null),
+  };
+  db.prepare(`UPDATE refill_requests SET weight_kg = ?, has_side_effects = ?, side_effect_severity = ?, side_effects = ?, results_felt = ?,
+    dose_action = ?, requested_dose = ?, notes = ?, prior_dose = ?, decided_dose = ?, quantity = ? WHERE id = ?`)
+    .run(next.weight_kg, next.has_side_effects, next.side_effect_severity, next.side_effects, next.results_felt,
+      next.dose_action, next.requested_dose, next.notes, next.prior_dose, next.decided_dose, next.quantity, p.id);
+  if (old.weight_kg && next.weight_kg && old.weight_kg !== next.weight_kg) {
+    db.prepare(`UPDATE checkins SET weight_kg = ? WHERE id = (SELECT id FROM checkins WHERE patient_id = ? AND weight_kg = ? AND date = date(?)
+      AND (notes LIKE 'Reported with refill request%' OR notes LIKE 'Recorded at refill%') ORDER BY id DESC LIMIT 1)`)
+      .run(next.weight_kg, old.patient_id, old.weight_kg, old.created_at);
+    syncCurrentWeight(old.patient_id);
+  }
+  logFileEdit(ctx.patient.id, ctx.me, "refill", "edited", `Refill entry corrected: ${refillText(old)}`, old, db.prepare("SELECT * FROM refill_requests WHERE id = ?").get(p.id));
+  json(res, 200, { ok: true });
+});
+
+route("DELETE", "/api/refill-requests/:id", (req, res, p) => {
+  const ctx = fileRow(req, res, "refill_requests", p.id);
+  if (!ctx) return;
+  db.prepare("DELETE FROM refill_requests WHERE id = ?").run(p.id);
+  // With no request left waiting, the program stops asking for a review.
+  if (ctx.row.status === "pending" && !db.prepare("SELECT 1 AS x FROM refill_requests WHERE plan_id = ? AND status = 'pending'").get(ctx.row.plan_id)) {
+    db.prepare("UPDATE plans SET needs_refill = 0 WHERE id = ?").run(ctx.row.plan_id);
+  }
+  logFileEdit(ctx.patient.id, ctx.me, "refill", "deleted", `Refill entry deleted: ${refillText(ctx.row)}`, ctx.row, null);
   json(res, 200, { ok: true });
 });
 
