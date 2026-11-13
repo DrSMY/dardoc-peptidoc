@@ -3914,7 +3914,7 @@ function wizIntakeObjective() {
   const qs = S.presets.intakeQuestions.filter((q) => q.section === "Objective-Specific Questions" && q.id !== "additional_notes" && intakeVisible(q));
   wizIntakeShell(`
     <div class="card-title">${icon("activity", 19)} Objective-Specific Questions</div>
-    ${qs.map(renderIntakeQuestion).join("")}
+    ${qs.map((q) => renderIntakeQuestion(q)).join("")}
   `, wizSidePanel());
   wireNotesPanel(view());
   wirePeptideInfoButtons(view());
