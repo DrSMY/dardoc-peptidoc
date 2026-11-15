@@ -218,6 +218,7 @@ async function viewDashboard() {
   </div>
 
   <div id="practice-stats"></div>
+  ${isSuperadmin() ? `<div id="clinic-insights"></div>` : ""}
 
   <div class="stat-grid" style="margin-bottom:20px">
     ${stat("users", "var(--brand-soft)", "var(--brand)", d.activePatients, "Active patients")}
@@ -316,6 +317,7 @@ async function viewDashboard() {
   wireRefillDue(d.refillDue);
   paintRefillBadge(d.refillDue.length);
   renderPracticeStats(d);
+  if (isSuperadmin()) loadInsights();
 }
 
 // ── who is up for refill ─────────────────────────────────────────────
@@ -640,6 +642,319 @@ function renderPracticeStats(d) {
     } catch { /* keep showing the previous range on failure */ }
     renderPracticeStats(d);
   }));
+}
+
+// ── Clinical insights: Super admin only ──────────────────────────
+// Average BMI over time, who the patients are, weight results, side effects
+// and current doses. The server refuses everyone else, so this is never
+// requested for a doctor or a view-only admin.
+const INSIGHT_RANGES = [
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "3m", label: "3 months" },
+  { key: "6m", label: "6 months" },
+  { key: "all", label: "All time" },
+];
+const INSIGHT_TABS = [
+  { key: "bmi", label: "BMI", ico: "scale" },
+  { key: "patients", label: "Patients", ico: "users" },
+  { key: "results", label: "Results", ico: "trend" },
+  { key: "safety", label: "Side effects", ico: "alert" },
+  { key: "doses", label: "Current doses", ico: "syringe" },
+];
+const INSIGHT_SEVERITY = [
+  { key: "mild", label: "Mild", color: "#EBD7A8" },
+  { key: "moderate", label: "Moderate", color: "#C6953F" },
+  { key: "severe", label: "Severe", color: "#7C4D10" },
+  { key: "notGiven", label: "Severity not given", color: "#CFCAB4" },
+];
+const INSIGHT_GENDER_COLOR = { Female: "#C08A2A", Male: "#4E7A3A" };
+const INSIGHT_DOSE_LIMIT = 9;
+const INSIGHT_FEW = 10;
+
+const insNum = (n, digits = 1) => (n == null ? "–" : Number(n).toFixed(digits));
+// −3.0 with a real minus sign; a gain shows its plus.
+const insSigned = (n, unit = "") => (n == null ? "–" : `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}${unit}`);
+const insPct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
+const insPeople = (n) => `${n} patient${n === 1 ? "" : "s"}`;
+const insEmpty = (ico, text) => `<div class="empty" style="padding:22px 0">${icon(ico, 28)}<p>${esc(text)}</p></div>`;
+
+// Rows of label · value with a bar under each. `of` is what 100% means.
+function insBars(rows, of, opts = {}) {
+  const max = Math.max(1, ...rows.map((r) => r.n));
+  return rows.map((r, i) => `
+    <div class="ins-bar">
+      <div class="ins-bar-head"><span>${r.dot ? `<span class="ins-dot" style="background:${r.dot}"></span>` : ""}${esc(r.label)}</span><b>${r.n}${of ? ` <span class="hint">(${insPct(r.n, of)}%)</span>` : ""}</b></div>
+      <div class="ins-track">${r.n ? `<div class="ins-fill bar-grow-x" style="width:${(r.n / (opts.share ? Math.max(1, of) : max)) * 100}%;animation-delay:${i * 40}ms${opts.color ? `;background:${opts.color}` : ""}"></div>` : ""}</div>
+    </div>`).join("");
+}
+
+// One bar split into labelled parts, with the legend below it.
+function insSplit(parts, aria) {
+  const shown = parts.filter((p) => p.n > 0);
+  const total = shown.reduce((s, p) => s + p.n, 0);
+  if (!total) return "";
+  return `
+    <div class="ins-split" role="img" aria-label="${esc(aria)}">${shown.map((p) => `<span style="flex:${p.n} 1 0;background:${p.color}" title="${esc(p.label)}: ${p.n} (${insPct(p.n, total)}%)"></span>`).join("")}</div>
+    <div class="ins-legend">${shown.map((p) => `
+      <div class="ins-legend-row"><span><span class="ins-dot" style="background:${p.color}"></span>${esc(p.label)}</span><b>${p.n} <span class="hint">(${insPct(p.n, total)}%)</span>${p.extra ? ` <span class="ins-extra">${esc(p.extra)}</span>` : ""}</b></div>`).join("")}
+    </div>`;
+}
+
+// Average BMI for each day, week or month of the period. A stretch with no
+// patients leaves a gap in the line instead of a made-up value.
+function insTrendChart(trend) {
+  const pts = trend.map((t, i) => ({ ...t, i })).filter((t) => t.average != null);
+  if (!pts.length) return "";
+  // Drawn at the size it will be shown, so the labels stay readable on a phone.
+  const narrow = window.innerWidth < 640;
+  const W = narrow ? 340 : 640, H = narrow ? 200 : 210, PAD = { t: 22, r: narrow ? 14 : 24, b: 30, l: narrow ? 34 : 40 };
+  let lo = Math.min(...pts.map((p) => p.average)), hi = Math.max(...pts.map((p) => p.average));
+  const room = Math.max(0.6, (hi - lo) * 0.25);
+  lo = Math.floor((lo - room) * 2) / 2; hi = Math.ceil((hi + room) * 2) / 2;
+  while (Math.round((hi - lo) * 2) % 3) hi += 0.5; // three even steps of half a point
+  const n = trend.length;
+  const px = (i) => (n === 1 ? (PAD.l + W - PAD.r) / 2 : PAD.l + (i / (n - 1)) * (W - PAD.l - PAD.r));
+  const py = (v) => PAD.t + (1 - (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
+  let grid = "";
+  for (let g = 0; g <= 3; g++) {
+    const v = lo + ((hi - lo) * g) / 3, y = py(v).toFixed(1);
+    grid += `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="#E5E2D6" stroke-width="1"/><text x="${PAD.l - 8}" y="${+y + 4}" text-anchor="end" font-size="11" fill="#8B8C78">${v.toFixed(1)}</text>`;
+  }
+  // Label every few buckets, counted back from the latest so "now" is always named.
+  const every = Math.ceil(n / (narrow ? 4 : 7));
+  let xLabels = "";
+  for (let i = n - 1; i >= 0; i -= every) {
+    xLabels += `<text x="${px(i).toFixed(1)}" y="${H - 9}" text-anchor="${n === 1 ? "middle" : i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" font-size="11" fill="#8B8C78">${esc(trend[i].label)}</text>`;
+  }
+  let path = "";
+  pts.forEach((p, k) => { path += `${k && pts[k - 1].i === p.i - 1 ? "L" : "M"}${px(p.i).toFixed(1)},${py(p.average).toFixed(1)} `; });
+  const last = pts[pts.length - 1];
+  // An average of only a few patients swings easily, so those points are drawn hollow.
+  const few = (p) => p.patients < INSIGHT_FEW;
+  const dots = pts.map((p) => `<circle class="ins-pt" data-i="${p.i}" cx="${px(p.i).toFixed(1)}" cy="${py(p.average).toFixed(1)}" r="4.5" fill="${few(p) ? "#fff" : "#283618"}" stroke="${few(p) ? "#283618" : "#fff"}" stroke-width="2"/>`).join("");
+  const band = n === 1 ? W - PAD.l - PAD.r : (W - PAD.l - PAD.r) / (n - 1);
+  const hits = trend.map((t, i) => `<rect class="ins-hit" data-i="${i}" x="${(px(i) - band / 2).toFixed(1)}" y="0" width="${band.toFixed(1)}" height="${H}" fill="transparent"/>`).join("");
+  return `
+  <div class="ins-chart" data-w="${W}" data-trend='${esc(JSON.stringify(trend.map((t, i) => ({ t: t.title, a: t.average, p: t.patients, x: px(i) / W, y: t.average == null ? null : py(t.average) / H }))))}'>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Average BMI over the period">
+      ${grid}${xLabels}
+      <line class="ins-cross" x1="0" y1="${PAD.t}" x2="0" y2="${H - PAD.b}" stroke="#8B8C78" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
+      <path d="${path.trim()}" fill="none" stroke="#283618" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text x="${Math.min(px(last.i), W - PAD.r - 2).toFixed(1)}" y="${(py(last.average) - 11).toFixed(1)}" text-anchor="${last.i === n - 1 && n > 1 ? "end" : "middle"}" font-size="12" font-weight="700" fill="#20231E">${last.average.toFixed(1)}</text>
+      ${hits}
+    </svg>
+    <div class="ins-tip" role="status"></div>
+  </div>
+  ${pts.some(few) ? `<p class="ins-key"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="#fff" stroke="#283618" stroke-width="2"/></svg> Fewer than ${INSIGHT_FEW} patients, so read with care</p>` : ""}`;
+}
+
+function wireInsTrend(box) {
+  const chart = box.querySelector(".ins-chart");
+  if (!chart) return;
+  const data = JSON.parse(chart.dataset.trend), W = Number(chart.dataset.w), tip = chart.querySelector(".ins-tip"), cross = chart.querySelector(".ins-cross");
+  const svg = chart.querySelector("svg");
+  const show = (i) => {
+    const d = data[i];
+    if (!d) return;
+    tip.innerHTML = `<b>${esc(d.t)}</b>${d.a == null ? "No patients seen" : `Average BMI ${d.a.toFixed(1)} · ${insPeople(d.p)}`}`;
+    const edge = W < 600 ? 30 : 14; // keep the label inside the chart
+    tip.style.left = `${Math.min(100 - edge, Math.max(edge, d.x * 100))}%`;
+    tip.style.top = `${(d.y == null ? 0.42 : d.y) * 100}%`;
+    tip.classList.add("on");
+    cross.setAttribute("x1", d.x * W); cross.setAttribute("x2", d.x * W); cross.setAttribute("visibility", "visible");
+    chart.querySelectorAll(".ins-pt").forEach((c) => c.setAttribute("r", Number(c.dataset.i) === i ? 6 : 4.5));
+  };
+  const hide = () => {
+    tip.classList.remove("on"); cross.setAttribute("visibility", "hidden");
+    chart.querySelectorAll(".ins-pt").forEach((c) => c.setAttribute("r", 4.5));
+  };
+  svg.addEventListener("pointermove", (e) => { const h = e.target.closest(".ins-hit"); if (h) show(Number(h.dataset.i)); });
+  svg.addEventListener("pointerdown", (e) => { const h = e.target.closest(".ins-hit"); if (h) show(Number(h.dataset.i)); });
+  svg.addEventListener("pointerleave", hide);
+}
+
+function insBmiPanel(d) {
+  const b = d.bmi;
+  if (!b.patients) return insEmpty("scale", `No patients with a height and weight on file were seen in this period.`);
+  const stepWord = { day: "day", week: "week", month: "month" }[b.step];
+  const hasTrend = b.trend.some((t) => t.average != null);
+  return `
+  <div class="two-col">
+    <div class="ins-block">
+      <div class="ins-title">Average BMI by ${stepWord}</div>
+      <p class="hint">Patients seen in each ${stepWord}, at the weight on file then</p>
+      ${hasTrend ? insTrendChart(b.trend) : insEmpty("chart", "No patients seen in this period.")}
+      ${hasTrend ? `<details class="ins-more"><summary>Show as a table</summary>
+        <div class="table-scroll"><table class="table ins-table"><thead><tr><th>${stepWord === "day" ? "Day" : stepWord === "week" ? "Week" : "Month"}</th><th>Average BMI</th><th>Patients</th></tr></thead>
+        <tbody>${b.trend.map((t) => `<tr><td>${esc(t.title)}</td><td>${t.average == null ? "–" : t.average.toFixed(1)}</td><td>${t.patients}</td></tr>`).join("")}</tbody></table></div>
+      </details>` : ""}
+    </div>
+    <div class="ins-block">
+      <div class="ins-title">BMI categories</div>
+      <p class="hint">${insPeople(b.patients)} with height and weight on file</p>
+      ${insBars(b.categories, b.patients, { share: true })}
+    </div>
+  </div>`;
+}
+
+function insPatientsPanel(d) {
+  const p = d.profile;
+  if (!d.patients) return insEmpty("users", "No patients were seen in this period.");
+  const genderParts = p.gender.map((g) => ({ label: g.label, n: g.n, color: INSIGHT_GENDER_COLOR[g.label], extra: g.bmi == null ? "" : `average BMI ${g.bmi.toFixed(1)}` }));
+  const c = p.conditions;
+  return `
+  <div class="ins-grid">
+    <div class="ins-block">
+      <div class="ins-title">Gender</div>
+      <p class="hint">${insPeople(d.patients)} in this period</p>
+      ${insSplit(genderParts, "Gender split") || insEmpty("users", "Gender is not recorded for these patients.")}
+      ${p.genderUnknown ? `<p class="ins-note">Not recorded for ${insPeople(p.genderUnknown)}.</p>` : ""}
+    </div>
+    <div class="ins-block">
+      <div class="ins-title">Age</div>
+      ${p.age.patients ? `<p class="hint">Average age ${p.age.average.toFixed(1)} years · ${insPeople(p.age.patients)}</p>${insBars(p.age.bands, p.age.patients, { share: true })}`
+        : insEmpty("user", "Age is not recorded for these patients.")}
+    </div>
+    <div class="ins-block">
+      <div class="ins-title">Health conditions</div>
+      ${c.patients ? `<p class="hint">${insPeople(c.patients)} with a recorded medical history</p>
+        ${c.rows.length ? insBars(c.rows.slice(0, 8), c.patients) : ""}
+        <p class="ins-note">${c.none} reported no condition${c.other ? ` · ${c.other} with another condition` : ""}.</p>`
+        : insEmpty("clipboard", "No medical history is recorded for these patients.")}
+    </div>
+  </div>`;
+}
+
+function insResultsPanel(d) {
+  const r = d.results;
+  if (!r.eligible) return insEmpty("trend", "No patients on a weight-loss (GLP-1) program were seen in this period.");
+  if (!r.patients) return insEmpty("trend", `None of the ${r.eligible} weight-loss patients seen in this period has a later weight on file yet. Results appear as refills and check-ins come in.`);
+  const fact = (val, lbl, sub) => `<div class="ins-fact"><div class="ins-fact-val">${val}</div><div class="ins-fact-lbl">${lbl}</div>${sub ? `<div class="ins-sub">${sub}</div>` : ""}</div>`;
+  return `
+  <div class="ins-facts">
+    ${fact(insSigned(r.avgKg, " kg"), "Average weight change", `${insSigned(r.avgPct, "%")} of starting weight`)}
+    ${fact(`${r.lost5} of ${r.patients}`, "Lost 5% or more", `${insPct(r.lost5, r.patients)}% of these patients`)}
+    ${fact(`${r.lost10} of ${r.patients}`, "Lost 10% or more", `${insPct(r.lost10, r.patients)}% of these patients`)}
+    ${r.bmiPatients ? fact(`${r.bmiStart.toFixed(1)} → ${r.bmiNow.toFixed(1)}`, "Average BMI, start to now", `${insSigned(round1Client(r.bmiNow - r.bmiStart))} points`) : ""}
+  </div>
+  <p class="ins-note">Based on ${r.patients} of ${r.eligible} patients on a weight-loss (GLP-1) program who have a later weight on file${r.avgWeeks != null ? `, ${r.avgWeeks.toFixed(0)} weeks after starting on average` : ""}. ${r.patients < 20 ? "With this few patients the figures are a first indication, not a trend." : ""}</p>
+  <div class="ins-title" style="margin-top:16px">Results by medication</div>
+  <div class="table-scroll"><table class="table ins-table">
+    <thead><tr><th>Medication</th><th>Patients</th><th>Average change</th><th>Lost 5% or more</th><th>Lost 10% or more</th></tr></thead>
+    <tbody>${r.byMedication.map((m) => `<tr>
+      <td>${esc(m.medication)}</td><td>${m.patients}</td>
+      <td>${insSigned(m.avgKg, " kg")} <span class="hint">(${insSigned(m.avgPct, "%")})</span></td>
+      <td>${m.lost5} <span class="hint">(${insPct(m.lost5, m.patients)}%)</span></td>
+      <td>${m.lost10} <span class="hint">(${insPct(m.lost10, m.patients)}%)</span></td></tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function insSafetyPanel(d) {
+  const s = d.safety;
+  if (!s.reports) return insEmpty("checkCircle", "No refill requests or symptom check-ins were received in this period.");
+  const sev = INSIGHT_SEVERITY.map((x) => ({ label: x.label, n: s.severity[x.key], color: x.color }));
+  return `
+  <div class="ins-grid">
+    <div class="ins-block">
+      <div class="ins-title">Side-effect rate</div>
+      <div class="ins-big">${s.rate}%</div>
+      <p class="hint">${s.withEffects} of ${s.reports} reports mention a side effect · ${s.patientsAffected} of ${insPeople(s.patients)}</p>
+      ${s.withEffects ? `<div style="margin-top:12px">${insSplit(sev, "Side-effect severity")}</div>` : ""}
+    </div>
+    <div class="ins-block">
+      <div class="ins-title">Most common side effects</div>
+      ${s.common.length ? `<p class="hint">Share of the ${s.withEffects} reports with side effects</p>${insBars(s.common, s.withEffects, { share: true })}`
+        : `<p class="hint" style="margin-top:8px">${s.withEffects ? "The reports with side effects don't name a recognised symptom." : "No side effects reported in this period."}</p>`}
+    </div>
+  </div>
+  <div class="ins-title" style="margin-top:16px">Side effects by medication</div>
+  <div class="table-scroll"><table class="table ins-table">
+    <thead><tr><th>Medication</th><th>Reports</th><th>With side effects</th><th>Rate</th></tr></thead>
+    <tbody>${s.byMedication.map((m) => `<tr><td>${esc(m.medication)}</td><td>${m.reports}</td><td>${m.withEffects}</td><td>${m.rate}%</td></tr>`).join("")}</tbody>
+  </table></div>
+  <p class="ins-note">Counted from refill requests and symptom check-ins. ${s.reports < 20 ? "With this few reports the rates are a first indication only." : ""}</p>`;
+}
+
+function insDosesPanel(d) {
+  if (!d.doses.length) return insEmpty("syringe", "No patient is on an active program right now.");
+  const all = S.insAllDoses || d.doses.length <= INSIGHT_DOSE_LIMIT;
+  const list = all ? d.doses : d.doses.slice(0, INSIGHT_DOSE_LIMIT);
+  return `
+  <p class="hint" style="margin-bottom:12px">Patients on active treatment today, by medication and dose. This does not change with the period.</p>
+  <div class="ins-grid">
+    ${list.map((m) => `
+    <div class="ins-block">
+      <div class="ins-title"><span class="ins-dot" style="background:${(CATEGORY_META[m.category] || {}).color || "#8B8C78"}"></span>${esc(m.medication)}</div>
+      <p class="hint">${insPeople(m.patients)}</p>
+      ${insBars(m.doses.map((x) => ({ label: x.dose, n: x.n })), m.patients, { share: true, color: (CATEGORY_META[m.category] || {}).color })}
+    </div>`).join("")}
+  </div>
+  ${all ? "" : `<button class="btn btn-secondary btn-sm" style="margin-top:14px" data-ins-alldoses>Show all ${d.doses.length} medications</button>`}`;
+}
+
+const round1Client = (n) => Math.round(n * 10) / 10;
+
+function insightsHTML(d) {
+  const range = S.insRange || "all", tab = S.insTab || "bmi";
+  const r = d.results, s = d.safety;
+  const kpi = (ico, bg, fg, val, lbl, sub) => `<div class="stat pstat-kpi"><div class="stat-ico" style="background:${bg};color:${fg}">${icon(ico, 19)}</div><div class="stat-val">${val}</div><div class="stat-lbl">${lbl}</div><div class="ins-sub">${sub}</div></div>`;
+  const panel = { bmi: insBmiPanel, patients: insPatientsPanel, results: insResultsPanel, safety: insSafetyPanel, doses: insDosesPanel }[tab](d);
+  return `
+  <div class="card card-pad ins-card" style="margin-bottom:20px">
+    <div class="ins-head">
+      <div>
+        <div class="card-title" style="margin:0">${icon("shield", 19)} Clinical insights <span class="badge badge-cyan">Super admin only</span></div>
+        <p class="hint" style="margin-top:2px">Patient profile, results and safety · ${esc(d.period.label)}</p>
+      </div>
+      <div class="pstat-tabs" role="group" aria-label="Period">
+        ${INSIGHT_RANGES.map((x) => `<button class="pstat-tab ${range === x.key ? "on" : ""}" data-insrange="${x.key}" aria-pressed="${range === x.key}">${x.label}</button>`).join("")}
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      ${kpi("scale", "var(--brand-soft)", "var(--brand)", insNum(d.bmi.average), "Average BMI", d.bmi.patients ? `${esc(d.bmi.category)} · ${insPeople(d.bmi.patients)}` : "No measurements in this period")}
+      ${kpi("users", "var(--accent-soft)", "var(--accent)", d.patients.toLocaleString(), range === "all" ? "Patients on file" : "Patients seen", range === "all" ? "Every consulted patient" : `of ${d.patientsTotal.toLocaleString()} on file`)}
+      ${kpi("trend", "var(--primary-soft)", "var(--gold-deep)", r.patients ? insSigned(r.avgKg, " kg") : "–", "Average weight change", r.patients ? `${insSigned(r.avgPct, "%")} · ${insPeople(r.patients)} with a later weight` : "No later weights on file yet")}
+      ${kpi("alert", "var(--amber-soft)", "var(--amber)", s.reports ? `${s.rate}%` : "–", "Side-effect rate", s.reports ? `${s.withEffects} of ${s.reports} reports` : "No reports in this period")}
+    </div>
+
+    <div class="tabs ins-tabs" role="tablist">
+      ${INSIGHT_TABS.map((x) => `<button class="tab ${tab === x.key ? "on" : ""}" role="tab" aria-selected="${tab === x.key}" data-instab="${x.key}">${icon(x.ico, 15)} ${x.label}</button>`).join("")}
+    </div>
+    <div role="tabpanel">${panel}</div>
+    <p class="ins-foot">The demo patient is not counted. Periods use UAE dates.</p>
+  </div>`;
+}
+
+function renderInsights(d) {
+  const box = document.getElementById("clinic-insights");
+  if (!box) return;
+  box.style.opacity = "";
+  box.innerHTML = insightsHTML(d);
+  wireInsTrend(box);
+  box.querySelectorAll("[data-instab]").forEach((b) => b.addEventListener("click", () => { S.insTab = b.dataset.instab; renderInsights(d); }));
+  box.querySelectorAll("[data-ins-alldoses]").forEach((b) => b.addEventListener("click", () => { S.insAllDoses = true; renderInsights(d); }));
+  box.querySelectorAll("[data-insrange]").forEach((b) => b.addEventListener("click", async () => {
+    S.insRange = b.dataset.insrange;
+    box.style.opacity = "0.5";
+    let next = d;
+    try { next = await api("GET", `/api/dashboard/insights?range=${encodeURIComponent(S.insRange)}`); } catch { /* keep the period that is showing */ }
+    S.insRange = next.range;
+    renderInsights(next);
+  }));
+}
+
+async function loadInsights() {
+  const box = document.getElementById("clinic-insights");
+  if (!box) return;
+  box.innerHTML = `<div class="skel" style="height:260px;margin-bottom:20px"></div>`;
+  try {
+    renderInsights(await api("GET", `/api/dashboard/insights?range=${encodeURIComponent(S.insRange || "all")}`));
+  } catch {
+    box.innerHTML = ""; // the rest of the dashboard still works without it
+  }
 }
 
 function alertSummary(symptoms) {

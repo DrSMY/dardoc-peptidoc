@@ -6,6 +6,7 @@ const presets = require("./presets");
 const protocolMap = require("./protocol-map.js");
 const { guidePdf } = require("./guide-pdf");
 const { practiceReport } = require("./practice-report");
+const { clinicalInsights } = require("./insights");
 
 const SESSION_HOURS = { doctor: 24 * 14, patient: 24 * 90 };
 
@@ -904,6 +905,14 @@ route("GET", "/api/dashboard", (req, res) => {
     activePatients, totalPatients, checkins7, doses7, unread, alerts, refillDue, patientForms, recent, refillRequests,
     prescriptionsTotal, consultationsTotal, categoryBreakdown, medBreakdown, recentPlans, doctorBreakdown, refillsTotal,
   });
+});
+
+// Clinical insights on the dashboard: BMI over time, patient profile, weight
+// results, side effects and current doses. Super admin only.
+route("GET", "/api/dashboard/insights", (req, res) => {
+  const me = requireSuperadmin(req);
+  if (!me) return json(res, 403, { error: "Only the Super admin can see clinical insights." });
+  json(res, 200, clinicalInsights(me.org_id, req.query && req.query.range), { "Cache-Control": "no-store" });
 });
 
 // ── doctor: full messages inbox (every patient thread, most recent first) ──

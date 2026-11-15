@@ -9,13 +9,15 @@
 const presets = require("./presets");
 
 const DAY = 864e5;
+// Numbers no real phone can have. Practice statistics leave these files out.
+const DEMO_MOBILES = ["971000000001", "971000000002", "971000000003", "971000000004"];
 
 function seedDemoPatient(db, hashSecret, crypto) {
   const adminEmail = (process.env.ADMIN_EMAIL || "drsamimoha2018@gmail.com").toLowerCase();
   const doc = db.prepare("SELECT id, name, org_id FROM users WHERE lower(email) = ? AND org_id IS NOT NULL").get(adminEmail)
     || db.prepare("SELECT id, name, org_id FROM users WHERE org_id IS NOT NULL AND role IN ('superadmin','doctor') ORDER BY id LIMIT 1").get();
   if (!doc) return console.log("Demo patient skipped: no doctor account to attach it to.");
-  const mobile = ["971000000001", "971000000002", "971000000003", "971000000004"].find((m) => !db.prepare("SELECT 1 AS x FROM patients WHERE mobile = ?").get(m));
+  const mobile = DEMO_MOBILES.find((m) => !db.prepare("SELECT 1 AS x FROM patients WHERE mobile = ?").get(m));
   if (!mobile) return console.log("Demo patient skipped: no free demo number.");
 
   const now = new Date();
@@ -196,4 +198,4 @@ function seedDemoPatient(db, hashSecret, crypto) {
   }
 }
 
-module.exports = { seedDemoPatient };
+module.exports = { seedDemoPatient, DEMO_MOBILES };
