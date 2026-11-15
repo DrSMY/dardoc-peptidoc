@@ -41,12 +41,12 @@ window.addEventListener("hashchange", () => { if (S.user) route(); });
 
 // ── login ────────────────────────────────────────────────────────
 function renderLogin() {
-  document.title = "Sign in — DoCare";
+  document.title = "Sign in — DocCare";
   app.innerHTML = `
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:22px">
-        <img src="/brand/docare-olive-sm.png" alt="DoCare" style="height:72px;width:auto">
+        <img src="/brand/doccare-logo-forest.svg" alt="DocCare" width="226" height="64" style="height:64px;width:auto">
         <div style="font-size:12.5px;color:var(--muted)">Doctor dashboard</div>
       </div>
       <h1 style="font-size:22px;margin-bottom:4px">Welcome back</h1>
@@ -125,11 +125,11 @@ function navForUser() {
 }
 
 function renderShell() {
-  document.title = "Doctor Dashboard — DoCare";
+  document.title = "Doctor Dashboard — DocCare";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line"><img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:30px;width:auto"></div>
-    <button class="icon-btn" style="color:#fff" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
+    <div class="brand-line"><img src="/brand/doccare-logo-ivory.svg" alt="DocCare" width="113" height="32" style="height:32px;width:auto"></div>
+    <button class="icon-btn" style="color:var(--on-forest)" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
     ${navForUser().map((n) => `<a href="${n.hash}">${esc(n.label)}</a>`).join("")}
@@ -137,7 +137,7 @@ function renderShell() {
   <div class="shell">
     <aside class="sidebar">
       <div class="sb-brand" style="flex-direction:column;align-items:flex-start;gap:7px">
-        <img src="/brand/docare-gold-sm.png" alt="DoCare" style="height:56px;width:auto">
+        <img src="/brand/doccare-logo-ivory.svg" alt="DocCare" width="162" height="46" style="height:46px;width:auto">
         <div class="sb-sub">${esc(S.user.orgName || "Doctor dashboard")}</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
@@ -487,8 +487,8 @@ function stat(ico, bg, fg, val, lbl) {
 
 // ── Practice statistics: animated, interactive KPIs + charts ─────
 const CATEGORY_META = {
-  glp1: { label: "GLP-1 / Weight loss", color: "#283618", icon: "scale" },      // rich olive (brand)
-  peptide: { label: "Peptides", color: "#C6A15B", icon: "droplet" },           // rich gold
+  glp1: { label: "GLP-1 / Weight loss", color: "#00382F", icon: "scale" },      // forest (brand)
+  peptide: { label: "Peptides", color: "#C6A15B", icon: "droplet" },           // gold
   custom: { label: "Custom", color: "#6C4FB0", icon: "layers" },
 };
 
@@ -599,10 +599,10 @@ function practiceStatsHTML(d) {
       <div style="font-weight:700;font-size:13.5px;margin-bottom:10px">Top prescribed medications</div>
       ${medRows.map((m) => {
         const pct = Math.round((m.n / medTotal) * 100);
-        const color = (CATEGORY_META[m.category] || {}).color || "#8B8C78";
+        const color = (CATEGORY_META[m.category] || {}).color || "#8A9A93";
         return `<div style="margin-bottom:9px">
           <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${esc(m.medication)}</span><b>${m.n} <span class="hint">(${pct}%)</span></b></div>
-          <div style="height:6px;border-radius:4px;background:#ECEBE3;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div></div>
+          <div style="height:6px;border-radius:4px;background:var(--sunken);overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div></div>
         </div>`;
       }).join("")}
     </div>` : ""}
@@ -614,7 +614,7 @@ function practiceStatsHTML(d) {
         const pct = Math.round((x.consultations / doctorMax) * 100);
         return `<div style="margin-bottom:9px">
           <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${esc(x.doctor_name)}</span><b>${x.consultations} consult${x.consultations === 1 ? "" : "s"} <span class="hint">· ${x.prescriptions} Rx</span></b></div>
-          <div style="height:6px;border-radius:4px;background:#ECEBE3;overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:#283618;border-radius:4px"></div></div>
+          <div style="height:6px;border-radius:4px;background:var(--sunken);overflow:hidden"><div class="bar-grow-x" style="width:${pct}%;height:100%;background:var(--brand);border-radius:4px"></div></div>
         </div>`;
       }).join("")}
     </div>` : ""}
@@ -666,9 +666,9 @@ const INSIGHT_SEVERITY = [
   { key: "mild", label: "Mild", color: "#EBD7A8" },
   { key: "moderate", label: "Moderate", color: "#C6953F" },
   { key: "severe", label: "Severe", color: "#7C4D10" },
-  { key: "notGiven", label: "Severity not given", color: "#CFCAB4" },
+  { key: "notGiven", label: "Severity not given", color: "#CBBBA5" },
 ];
-const INSIGHT_GENDER_COLOR = { Female: "#C08A2A", Male: "#4E7A3A" };
+const INSIGHT_GENDER_COLOR = { Female: "#B8862B", Male: "#257263" };
 const INSIGHT_DOSE_LIMIT = 9;
 const INSIGHT_FEW = 10;
 
@@ -719,35 +719,35 @@ function insTrendChart(trend) {
   let grid = "";
   for (let g = 0; g <= 3; g++) {
     const v = lo + ((hi - lo) * g) / 3, y = py(v).toFixed(1);
-    grid += `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="#E5E2D6" stroke-width="1"/><text x="${PAD.l - 8}" y="${+y + 4}" text-anchor="end" font-size="11" fill="#8B8C78">${v.toFixed(1)}</text>`;
+    grid += `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="#E6D9C5" stroke-width="1"/><text x="${PAD.l - 8}" y="${+y + 4}" text-anchor="end" font-size="11" fill="#4F6962">${v.toFixed(1)}</text>`;
   }
   // Label every few buckets, counted back from the latest so "now" is always named.
   const every = Math.ceil(n / (narrow ? 4 : 7));
   let xLabels = "";
   for (let i = n - 1; i >= 0; i -= every) {
-    xLabels += `<text x="${px(i).toFixed(1)}" y="${H - 9}" text-anchor="${n === 1 ? "middle" : i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" font-size="11" fill="#8B8C78">${esc(trend[i].label)}</text>`;
+    xLabels += `<text x="${px(i).toFixed(1)}" y="${H - 9}" text-anchor="${n === 1 ? "middle" : i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" font-size="11" fill="#4F6962">${esc(trend[i].label)}</text>`;
   }
   let path = "";
   pts.forEach((p, k) => { path += `${k && pts[k - 1].i === p.i - 1 ? "L" : "M"}${px(p.i).toFixed(1)},${py(p.average).toFixed(1)} `; });
   const last = pts[pts.length - 1];
   // An average of only a few patients swings easily, so those points are drawn hollow.
   const few = (p) => p.patients < INSIGHT_FEW;
-  const dots = pts.map((p) => `<circle class="ins-pt" data-i="${p.i}" cx="${px(p.i).toFixed(1)}" cy="${py(p.average).toFixed(1)}" r="4.5" fill="${few(p) ? "#fff" : "#283618"}" stroke="${few(p) ? "#283618" : "#fff"}" stroke-width="2"/>`).join("");
+  const dots = pts.map((p) => `<circle class="ins-pt" data-i="${p.i}" cx="${px(p.i).toFixed(1)}" cy="${py(p.average).toFixed(1)}" r="4.5" fill="${few(p) ? "#FFFCF8" : "#00382F"}" stroke="${few(p) ? "#00382F" : "#FFFCF8"}" stroke-width="2"/>`).join("");
   const band = n === 1 ? W - PAD.l - PAD.r : (W - PAD.l - PAD.r) / (n - 1);
   const hits = trend.map((t, i) => `<rect class="ins-hit" data-i="${i}" x="${(px(i) - band / 2).toFixed(1)}" y="0" width="${band.toFixed(1)}" height="${H}" fill="transparent"/>`).join("");
   return `
   <div class="ins-chart" data-w="${W}" data-trend='${esc(JSON.stringify(trend.map((t, i) => ({ t: t.title, a: t.average, p: t.patients, x: px(i) / W, y: t.average == null ? null : py(t.average) / H }))))}'>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Average BMI over the period">
       ${grid}${xLabels}
-      <line class="ins-cross" x1="0" y1="${PAD.t}" x2="0" y2="${H - PAD.b}" stroke="#8B8C78" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
-      <path d="${path.trim()}" fill="none" stroke="#283618" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <line class="ins-cross" x1="0" y1="${PAD.t}" x2="0" y2="${H - PAD.b}" stroke="#4F6962" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>
+      <path d="${path.trim()}" fill="none" stroke="#00382F" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
       ${dots}
-      <text x="${Math.min(px(last.i), W - PAD.r - 2).toFixed(1)}" y="${(py(last.average) - 11).toFixed(1)}" text-anchor="${last.i === n - 1 && n > 1 ? "end" : "middle"}" font-size="12" font-weight="700" fill="#20231E">${last.average.toFixed(1)}</text>
+      <text x="${Math.min(px(last.i), W - PAD.r - 2).toFixed(1)}" y="${(py(last.average) - 11).toFixed(1)}" text-anchor="${last.i === n - 1 && n > 1 ? "end" : "middle"}" font-size="12" font-weight="700" fill="#0C2620">${last.average.toFixed(1)}</text>
       ${hits}
     </svg>
     <div class="ins-tip" role="status"></div>
   </div>
-  ${pts.some(few) ? `<p class="ins-key"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="#fff" stroke="#283618" stroke-width="2"/></svg> Fewer than ${INSIGHT_FEW} patients, so read with care</p>` : ""}`;
+  ${pts.some(few) ? `<p class="ins-key"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="#FFFCF8" stroke="#00382F" stroke-width="2"/></svg> Fewer than ${INSIGHT_FEW} patients, so read with care</p>` : ""}`;
 }
 
 function wireInsTrend(box) {
@@ -886,7 +886,7 @@ function insDosesPanel(d) {
   <div class="ins-grid">
     ${list.map((m) => `
     <div class="ins-block">
-      <div class="ins-title"><span class="ins-dot" style="background:${(CATEGORY_META[m.category] || {}).color || "#8B8C78"}"></span>${esc(m.medication)}</div>
+      <div class="ins-title"><span class="ins-dot" style="background:${(CATEGORY_META[m.category] || {}).color || "#8A9A93"}"></span>${esc(m.medication)}</div>
       <p class="hint">${insPeople(m.patients)}</p>
       ${insBars(m.doses.map((x) => ({ label: x.dose, n: x.n })), m.patients, { share: true, color: (CATEGORY_META[m.category] || {}).color })}
     </div>`).join("")}
@@ -1143,7 +1143,7 @@ async function viewPatient(id) {
 
           <div class="card card-pad">
             <div class="card-title">${icon("trend", 19)} Weight trend</div>
-            ${weights.length > 1 ? lineChart(weights, { color: "#283618", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
+            ${weights.length > 1 ? lineChart(weights, { color: "#00382F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Weight entries from check-ins will chart here.</p></div>`}
           </div>
 
           <div class="card card-pad">
@@ -3460,7 +3460,7 @@ function applyQuickFillFields(r) {
 // per past prescription) so the doctor can decide to reuse the record.
 function existingPatientMatchHTML(p, plans) {
   const rows = (plans || []).slice(0, 4).map((pl) => `
-    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0;border-top:1px solid rgba(0,0,0,.07)">
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0;border-top:1px solid var(--border)">
       <span>${esc(fmtDate(pl.created_at))} · ${esc(pl.medication)}${pl.dose ? " " + esc(pl.dose) : ""}</span>
       <span class="badge ${pl.status === "active" ? "badge-green" : pl.status === "completed" ? "badge-cyan" : "badge-gray"}">${esc(pl.status)}</span>
     </div>`).join("");

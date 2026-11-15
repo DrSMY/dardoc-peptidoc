@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#F8F7F2">
+<meta name="theme-color" content="#F5EBDD">
 <title>Complete your details</title>
 <!--OG-->
-<link rel="stylesheet" href="/theme.css?v=docare75">
-<link rel="stylesheet" href="/patient-page.css?v=docare75">
+<link rel="stylesheet" href="/theme.css?v=docare82">
+<link rel="stylesheet" href="/patient-page.css?v=docare82">
 <style>
   /* progress through the required questions */
   .fp-progress { position: sticky; top: 0; z-index: 5; margin: -24px -16px 20px; padding: 8px 16px; background: var(--bg); }
   .fp-progress-track { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
   .fp-progress-fill { height: 100%; background: var(--brand); transform-origin: left; transform: scaleX(0); transition: transform .25s ease; }
   /* top of the form */
-  .fp-medlabel { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold-bronze); }
+  .fp-medlabel { margin: 0 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--brand); }
   .fp-meds { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
   .fp-meds .rp-med { margin: 0; }
   .fp-intro { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -39,15 +39,15 @@
     -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
   .fp-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
   .fp-chip:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-soft); font-weight: 600; }
-  .fp-chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .fp-chip:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
   @media (hover: hover) { .fp-chip:not(:has(input:checked)):hover { border-color: var(--sage); } }
   /* abnormal lab results */
   .fp-labs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
   .fp-labs:empty { display: none; }
   .fp-lab { padding: 8px 14px 14px; background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 16px; }
-  .fp-lab-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--gold-bronze); }
+  .fp-lab-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--brand); }
   .fp-lab-remove { min-height: 44px; margin-right: -8px; padding: 0 8px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; font-weight: 500; letter-spacing: 0; text-transform: none; text-decoration: underline; cursor: pointer; touch-action: manipulation; }
-  .fp-lab-remove:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .fp-lab-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .fp-addlab { min-height: 48px; }
   /* final confirmation */
   .fp-confirm { display: flex; gap: 12px; align-items: flex-start; padding: 16px; margin-bottom: 8px; cursor: pointer;
@@ -66,8 +66,8 @@
   <div class="skel rp-skel" style="height:110px"></div>
   <div class="skel rp-skel" style="height:300px"></div>
 </main>
-<script src="/shared.js?v=docare75"></script>
-<script src="/guide.js?v=docare77"></script>
-<script src="/f/app.js?v=docare75"></script>
+<script src="/shared.js?v=docare82"></script>
+<script src="/guide.js?v=docare82"></script>
+<script src="/f/app.js?v=docare82"></script>
 </body>
 </html>

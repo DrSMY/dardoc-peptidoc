@@ -72,9 +72,9 @@ float calcAO(vec3 p, vec3 n) {
 vec3 shade(vec3 p, vec3 rd, float m) {
   vec3 n = calcNormal(p);
   vec3 alb = vec3(0.925, 0.915, 0.875); float ks = 0.14; float sp = 20.0;
-  if (m > 1.5 && m < 2.5) { alb = vec3(0.075, 0.40, 0.31); ks = 0.5; sp = 56.0; }
+  if (m > 1.5 && m < 2.5) { alb = vec3(0.03, 0.36, 0.30); ks = 0.5; sp = 56.0; }
   else if (m > 2.5 && m < 3.5) { alb = vec3(0.945, 0.937, 0.905); ks = 0.2; sp = 32.0; }
-  else if (m > 3.5 && m < 4.5) { alb = vec3(0.70, 0.79, 0.62); ks = 0.2; sp = 28.0; }
+  else if (m > 3.5 && m < 4.5) { alb = vec3(0.64, 0.78, 0.745); ks = 0.2; sp = 28.0; }
   else if (m > 4.5 && m < 5.5) { alb = vec3(0.85, 0.70, 0.45); ks = 0.6; sp = 44.0; }
   else if (m > 5.5) { alb = vec3(0.915, 0.91, 0.87); ks = 0.05; sp = 10.0; }
   alb = pow(alb, vec3(2.2));
@@ -105,7 +105,7 @@ void main() {
   vec3 rd = normalize(uv.x * uu + uv.y * vv + 1.45 * ww);
 
   vec2 g = uv - vec2(0.0, 0.06);
-  vec3 col = mix(vec3(0.898, 0.925, 0.867), vec3(0.945, 0.961, 0.925), exp(-2.4 * dot(g, g)));
+  vec3 col = mix(vec3(0.933, 0.882, 0.812), vec3(0.984, 0.957, 0.922), exp(-2.4 * dot(g, g)));
   if (rd.y < 0.0) {
     float tf = (-1.09 - ro.y) / rd.y;
     vec2 f = (ro + rd * tf).xz;
@@ -159,16 +159,16 @@ void main() {
     wrap.className = "gp-stage-art";
     wrap.innerHTML = `<svg viewBox="0 0 400 360" aria-hidden="true">
       <defs>
-        <radialGradient id="gpFbS" cx="38%" cy="32%" r="70%"><stop offset="0" stop-color="#FBFAF4"/><stop offset=".7" stop-color="#E4E2D6"/><stop offset="1" stop-color="#CFCFC1"/></radialGradient>
-        <linearGradient id="gpFbR" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E7A5E"/><stop offset="1" stop-color="#0E4A3A"/></linearGradient>
+        <radialGradient id="gpFbS" cx="38%" cy="32%" r="70%"><stop offset="0" stop-color="#FDF9F4"/><stop offset=".7" stop-color="#E9DDCB"/><stop offset="1" stop-color="#CFC1AB"/></radialGradient>
+        <linearGradient id="gpFbR" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E6557"/><stop offset="1" stop-color="#00382F"/></linearGradient>
       </defs>
-      <ellipse cx="200" cy="300" rx="150" ry="34" fill="#E6E5DA"/>
-      <ellipse cx="200" cy="292" rx="150" ry="34" fill="#F1F0E8"/>
-      <ellipse cx="200" cy="292" rx="96" ry="21" fill="none" stroke="#DAD8CB" stroke-width="5"/>
-      <ellipse cx="200" cy="150" rx="128" ry="52" transform="rotate(-28 200 150)" fill="none" stroke="#F4F3EC" stroke-width="12"/>
+      <ellipse cx="200" cy="300" rx="150" ry="34" fill="#E6D9C5"/>
+      <ellipse cx="200" cy="292" rx="150" ry="34" fill="#F7EEE2"/>
+      <ellipse cx="200" cy="292" rx="96" ry="21" fill="none" stroke="#DDCFBA" stroke-width="5"/>
+      <ellipse cx="200" cy="150" rx="128" ry="52" transform="rotate(-28 200 150)" fill="none" stroke="#FBF4EB" stroke-width="12"/>
       <circle cx="200" cy="150" r="62" fill="url(#gpFbS)"/>
       <ellipse cx="200" cy="150" rx="104" ry="40" transform="rotate(52 200 150)" fill="none" stroke="url(#gpFbR)" stroke-width="22"/>
-      <circle cx="104" cy="96" r="17" fill="#B4C6A6"/>
+      <circle cx="104" cy="96" r="17" fill="#A3C7BE"/>
       <circle cx="292" cy="196" r="7" fill="#D7B274"/>
     </svg>`;
     return wrap;

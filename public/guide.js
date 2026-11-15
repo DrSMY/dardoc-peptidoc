@@ -81,7 +81,7 @@ function standardGuideSections(plan, patient) {
 // and the doctor's per-patient Guide tab.
 function guidePickerHTML(plans, activeId) {
   if (plans.length <= 1) return "";
-  const mc = typeof medColor === "function" ? medColor : () => "#283618";
+  const mc = typeof medColor === "function" ? medColor : () => "#00382F";
   return `<div class="g-picker">
     ${plans.map((p) => `<button type="button" class="g-pick-chip ${p.id === activeId ? "on" : ""}" data-gpick="${p.id}" style="--mc:${mc(p)}">${typeof medFormIcon === "function" ? medFormIcon(p, 17) : icon(routeIcon(p.route), 15)} ${esc(p.medication)}${p.dose ? " · " + esc(p.dose) : ""}</button>`).join("")}
   </div>`;
@@ -853,21 +853,15 @@ const GUIDE_CSS = `
 .g-head {
   position: relative; overflow: hidden;
   display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px;
-  background: linear-gradient(135deg, var(--brand-strong), var(--brand) 55%, var(--gold-bronze) 130%);
-  color: #fff;
-}
-.g-head::before {
-  content: ""; position: absolute; inset: -40% -10% auto auto; width: 60%; height: 220%;
-  background: radial-gradient(closest-side, rgba(225,199,132,.22), transparent 70%);
-  pointer-events: none;
+  background: var(--brand);
+  color: var(--on-forest);
 }
 .g-brand { display: flex; gap: 12px; align-items: center; }
-.g-brand img { filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
 /* the clinic's own logo sits on a white chip so any colours read on the dark header */
-.g-logo-chip { display: inline-flex; align-items: center; justify-content: center; background: #fff; border-radius: 12px; padding: 6px 12px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,.22); }
+.g-logo-chip { display: inline-flex; align-items: center; justify-content: center; background: #fff; border-radius: 12px; padding: 6px 12px; flex-shrink: 0; }
 .g-brand .g-logo-chip img { height: 44px; max-width: 170px; width: auto; object-fit: contain; filter: none; display: block; }
 @media (max-width: 480px) { .g-brand .g-logo-chip img { height: 36px; max-width: 130px; } .g-head { padding: 14px 16px; flex-wrap: wrap; gap: 8px; } .g-brand-sub { white-space: nowrap; } .g-issued { text-align: left; width: 100%; } }
-.g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; }
+.g-logo { width: 42px; height: 42px; border-radius: 12px; background: rgba(245,235,221,.16); display: flex; align-items: center; justify-content: center; }
 .g-brand-name { font-family: var(--font-head); font-weight: 700; font-size: 17px; }
 .g-brand-sub { font-size: 12.5px; opacity: .8; }
 .g-issued { font-size: 12.5px; opacity: .85; text-align: right; }
@@ -876,7 +870,7 @@ const GUIDE_CSS = `
 .g-patient h2 { font-size: 24px; margin: 2px 0; }
 .g-doc { color: var(--muted); font-size: 14px; }
 .g-med-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-family: var(--font-head); padding: 8px 18px 8px 8px; border-radius: var(--r-full); font-size: 15px; }
-.g-med-pill-photo { width: 30px; height: 30px; border-radius: 50%; object-fit: contain; background: #F0EEE2; padding: 3px; box-sizing: border-box; flex-shrink: 0; box-shadow: var(--inset-top-highlight); }
+.g-med-pill-photo { width: 30px; height: 30px; border-radius: 50%; object-fit: contain; background: var(--sunken); padding: 3px; box-sizing: border-box; flex-shrink: 0; }
 .g-sec { padding: 20px 22px 4px; }
 .g-sec h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--brand); margin-bottom: 12px; }
 .g-sec-program { position: relative; }
@@ -885,7 +879,7 @@ const GUIDE_CSS = `
    the facts grid gets top clearance so it never renders underneath it. */
 .g-med-photo-overlay {
   position: absolute; top: 18px; right: 22px; width: 78px; height: 78px;
-  object-fit: contain; border-radius: var(--r-md); background: #F0EEE2;
+  object-fit: contain; border-radius: var(--r-md); background: var(--sunken);
   padding: 8px; box-sizing: border-box; box-shadow: var(--shadow-sm); z-index: 1;
 }
 .g-sec-program .g-facts { padding-top: 92px; }
@@ -918,9 +912,9 @@ const GUIDE_CSS = `
 .g-sign { margin-bottom: 10px; color: var(--muted); line-height: 1.5; }
 .g-sign b { font-family: var(--font-head); color: var(--text); }
 .g-divider { border: none; border-top: 1.5px dashed var(--border-strong); margin: 20px 22px 4px; }
-.g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--primary); }
+.g-std-head { padding: 14px 22px 0; font-family: var(--font-head); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--brand); }
 .g-emoji { font-size: 16px; }
-.g-prose a { color: var(--primary); word-break: break-all; }
+.g-prose a { color: var(--link); word-break: break-all; }
 .g-other-med { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); padding: 14px 16px; margin-bottom: 12px; }
 .g-other-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 700; font-size: 14.5px; }
 .g-other-name { display: flex; align-items: center; gap: 8px; }
@@ -1019,7 +1013,7 @@ const GUIDE_CSS = `
 .rr-sec:last-child { border-bottom: 0; }
 .rr-sec-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
 .rr-step { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
-  background: var(--brand); color: #fff; font: 700 13px/1 var(--font-head); margin-top: 1px; }
+  background: var(--brand); color: var(--on-brand); font: 700 13px/1 var(--font-head); margin-top: 1px; }
 .rr-q { margin: 0; font: 700 16.5px/1.3 var(--font-head); color: var(--text); }
 .rr-hint { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
 .rr-sublabel { display: block; margin: 16px 0 8px; padding: 0; font-size: 14.5px; font-weight: 600; color: var(--text); }
@@ -1044,7 +1038,7 @@ const GUIDE_CSS = `
 .rr-opt.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 .rr-opt.on .rr-radio { border-color: var(--brand); }
 .rr-opt.on .rr-radio::after { transform: scale(1); }
-.rr-opt:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rr-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rr-opt-body { padding: 0 14px 14px; }
 .rr-opt-body .input { margin-bottom: 10px; }
 @media (hover: hover) { .rr-opt:not(.on):hover { border-color: var(--sage); } }
@@ -1058,9 +1052,9 @@ const GUIDE_CSS = `
 .rr-note + .rr-note { margin-top: 8px; }
 .rr-note svg { flex-shrink: 0; margin-top: 2px; color: var(--brand); }
 .rr-note p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text); }
-.rr-note-soft { background: var(--primary-soft); border-color: #EADBB8; }
+.rr-note-soft { background: var(--primary-soft); border-color: #E0CC97; }
 .rr-note-soft svg { color: var(--gold-bronze); }
-.rr-note-warn { background: var(--danger-soft); border-color: #EBC9C2; }
+.rr-note-warn { background: var(--danger-soft); border-color: #EBC4BA; }
 .rr-note-warn svg { color: var(--danger); }
 .rr-yes .rr-group { margin-top: 16px; }
 .rr-group > legend.rr-sublabel { margin: 0 0 8px; }

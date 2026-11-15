@@ -6,7 +6,7 @@
 
 const ROUTE_LABEL = { injection: "Subcutaneous injection", oral: "Oral tablet", nasal: "Nasal spray", topical: "Applied to the skin" };
 const ROUTE_NOUN = { injection: "injection", oral: "tablet", nasal: "spray", topical: "treatment" };
-const DAY_TONES = ["#CBD9C0", "#A8C09A", "#7FA07A", "#5B8468", "#3C6957"];
+const DAY_TONES = ["#C5DED7", "#A3C7BE", "#79AA9E", "#4E8E80", "#257263"];
 
 // ── small text helpers ───────────────────────────────────────────────
 const cap = (s) => { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); };

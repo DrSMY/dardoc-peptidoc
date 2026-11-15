@@ -69,15 +69,15 @@ function art(kind) {
     stack: `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EFE6CF"/><stop offset="1" stop-color="#CDBB92"/></linearGradient></defs>
       ${[0, 1, 2].map((i) => { const y = 46 - i * 12, x = 32 + (i === 1 ? -2 : i === 2 ? 2 : 0);
         return `<ellipse cx="${x}" cy="${y + 4}" rx="20" ry="7.5" fill="#B9A57B"/><rect x="${x - 20}" y="${y - 1}" width="40" height="5" fill="#C8B68D"/><ellipse cx="${x}" cy="${y - 1}" rx="20" ry="7.5" fill="url(#${id})"/>`; }).join("")}`,
-    rings: `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DCE6D2"/><stop offset="1" stop-color="#9DB394"/></linearGradient></defs>
+    rings: `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#D6E4D8"/><stop offset="1" stop-color="#8DB3A8"/></linearGradient></defs>
       <circle cx="26" cy="27" r="14" fill="none" stroke="url(#${id})" stroke-width="8"/>
-      <circle cx="39" cy="38" r="14" fill="none" stroke="#C9D7BF" stroke-width="8"/>
+      <circle cx="39" cy="38" r="14" fill="none" stroke="#BFD4CC" stroke-width="8"/>
       <path d="M30.2 14.4 A14 14 0 0 1 39.6 23.6" fill="none" stroke="url(#${id})" stroke-width="8"/>`,
     drop: `<defs><radialGradient id="${id}" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#CFE2D8"/><stop offset=".55" stop-color="#8FB5A4"/><stop offset="1" stop-color="#5E8F7E"/></radialGradient></defs>
       <ellipse cx="33" cy="33" rx="15" ry="20" transform="rotate(-18 33 33)" fill="url(#${id})"/>
       <ellipse cx="27" cy="23" rx="4" ry="6" transform="rotate(-18 27 23)" fill="#fff" opacity=".45"/>`,
-    leaf: `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9DAB9"/><stop offset="1" stop-color="#7FA07A"/></linearGradient></defs>
-      <path d="M14 50C14 26 30 12 52 12c0 24-14 38-38 38z" fill="url(#${id})"/><path d="M18 46 44 20" stroke="#EEF3E7" stroke-width="2.5" stroke-linecap="round"/>`,
+    leaf: `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C5DED7"/><stop offset="1" stop-color="#4E8E80"/></linearGradient></defs>
+      <path d="M14 50C14 26 30 12 52 12c0 24-14 38-38 38z" fill="url(#${id})"/><path d="M18 46 44 20" stroke="#F5EBDD" stroke-width="2.5" stroke-linecap="round"/>`,
   }[kind];
   return `<svg class="gp-art" viewBox="0 0 64 64" aria-hidden="true">${svg}</svg>`;
 }

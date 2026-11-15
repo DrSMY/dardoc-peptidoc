@@ -29,7 +29,7 @@ function activePlan() {
 // ── patient welcome animation ────────────────────────────────────
 // Plays the brand animation with sound after a successful login (and
 // when the header logo is tapped — both are user gestures, so audio is
-// permitted). The video's own ending is replaced by a DoCare logo
+// permitted). The video's own ending is replaced by a DocCare logo
 // conclusion card that fades over the final moments.
 function playLoginAnimation() {
   if (document.querySelector(".login-anim")) return;
@@ -38,7 +38,7 @@ function playLoginAnimation() {
   wrap.innerHTML = `
     <video src="/brand/patient-login.mp4" playsinline preload="auto"></video>
     <div class="la-endcard" aria-hidden="true">
-      <img src="/brand/docare-gold.png" alt="">
+      <img src="/brand/doccare-logo-ivory.svg" alt="" width="320" height="91">
       <span>Limitless Care</span>
     </div>
     <button type="button" class="la-skip">Skip ${icon("chevR", 15)}</button>`;
@@ -85,7 +85,7 @@ function renderLogin() {
   app.innerHTML = `
   <div class="p-app">
     <div class="login-hero">
-      <img src="/brand/docare-olive-sm.png" alt="DoCare" style="height:76px;width:auto;display:block;margin:0 auto 16px">
+      <img src="/brand/doccare-logo-forest.svg" alt="DocCare" width="240" height="68" style="height:68px;width:auto;display:block;margin:0 auto 16px">
       <h1>Your treatment portal</h1>
       <p>Sign in with your mobile number and the PIN your doctor sent you on WhatsApp.</p>
     </div>
@@ -140,13 +140,13 @@ const TABS = [
 ];
 
 function renderShell() {
-  document.title = "My Portal — DoCare";
+  document.title = "My Portal — DocCare";
   app.innerHTML = `
   <div class="p-app">
     <header class="p-top">
       <button class="icon-btn" id="p-logout" aria-label="Sign out">${icon("logout", 20)}</button>
-      <button class="t-logo-btn" id="p-logo" aria-label="Play the DoCare welcome animation" title="Play welcome animation">
-        <img class="t-logo" src="/brand/docare-gold-sm.png" alt="DoCare — My Treatment Portal">
+      <button class="t-logo-btn" id="p-logo" aria-label="Play the DocCare welcome animation" title="Play welcome animation">
+        <img class="t-logo" src="/brand/doccare-logo-ivory.svg" alt="DocCare, my treatment portal" width="127" height="36">
       </button>
       <button class="icon-btn" id="p-bell" aria-label="Messages">${icon("bell", 20)}</button>
     </header>
@@ -418,7 +418,7 @@ function paintHome(v) {
   ${weights.length > 1 ? `
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight trend</h3><span class="badge ${weights[0].weight_kg <= weights[weights.length - 1].weight_kg ? "badge-green" : "badge-amber"}">${(weights[0].weight_kg - weights[weights.length - 1].weight_kg).toFixed(1)} kg</span></div>
-    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#283618", unit: " kg", height: 150, aria: "Weight trend" })}</div>
+    <div class="card-pad" style="padding-top:8px">${lineChart(weights.map((c) => ({ x: c.date, y: c.weight_kg })).reverse(), { color: "#00382F", unit: " kg", height: 150, aria: "Weight trend" })}</div>
   </div>` : ""}`;
 
   if (primary) wirePhaseStrip(v, primary, ph);
@@ -927,7 +927,7 @@ function paintProgress(v) {
   <div class="list-card">
     <div class="list-head"><h3>${icon("trend", 18)} Weight</h3></div>
     <div class="card-pad" style="padding-top:8px">
-      ${weights.length > 1 ? lineChart(weights, { color: "#283618", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
+      ${weights.length > 1 ? lineChart(weights, { color: "#00382F", unit: " kg", aria: "Weight trend" }) : `<div class="empty">${icon("scale", 30)}<p>Add your weight in your daily check-ins to see the trend here.</p></div>`}
     </div>
   </div>
 

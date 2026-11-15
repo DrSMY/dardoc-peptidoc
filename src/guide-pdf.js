@@ -21,9 +21,9 @@ const G = vm.runInContext(`({ planModel, visitModel, parseProse, splitLabel, pre
   DIET_WHY_TEXT, GLP1_MESSAGE_REASONS, PEPTIDE_MESSAGE_REASONS })`, ctx);
 
 const C = {
-  ink: "#16352F", text: "#2A423C", muted: "#55665E", line: "#DCE2D5", tint: "#EEF2E8", beige: "#F6F0E0",
-  rose: "#FBEEE8", roseInk: "#9A2F2A", roseDot: "#D2827B", pine: "#19362E", deep: "#123436", emerald: "#1C6B55",
-  white: "#FFFFFF", onDark: "#D5E3DC", bullet: "#8EAA86",
+  ink: "#00382F", text: "#1E3A33", muted: "#3F5A52", line: "#E6D9C5", tint: "#F5EBDD", beige: "#E3ECE4",
+  rose: "#FBEEE8", roseInk: "#9A2F2A", roseDot: "#D2827B", pine: "#00382F", deep: "#00382F", emerald: "#1E6557",
+  white: "#F5EBDD", onDark: "#B9CFC6", bullet: "#5C9A8B",
 };
 const M = 48;
 const CW = PAGE_W - 2 * M;
@@ -398,7 +398,7 @@ function prescribedRows(models) {
     h: 18,
     draw(pg, x, y, w) {
       cols.forEach((c, i) => pg.text(c.head, x + xs[i], y + 9, { size: 8.4, color: C.muted }));
-      pg.line(x, y + 15, x + w, y + 15, { color: "#CDD6C6", width: 0.6 });
+      pg.line(x, y + 15, x + w, y + 15, { color: "#CBBBA5", width: 0.6 });
     },
   }];
   models.forEach((m, n) => {
@@ -414,7 +414,7 @@ function prescribedRows(models) {
     rows.push({
       h: lines * 13.2 + 14,
       draw(pg, x, y, w) {
-        if (n) pg.line(x, y, x + w, y, { color: "#D9E0D2", width: 0.5 });
+        if (n) pg.line(x, y, x + w, y, { color: "#E0D2BD", width: 0.5 });
         cells.forEach((c, i) => c.forEach((ln, k) => drawLine(pg, ln, x + xs[i], y + 17 + k * 13.2, i ? 9.4 : 10.4, i ? C.text : C.ink)));
       },
     });
@@ -431,7 +431,7 @@ function summaryPage(flow, models, facility, logo, entryCount) {
   flow.box([
     ...headingRows("What has been prescribed", IN, { size: 13, after: 4 }),
     ...prescribedRows(models),
-    ruleRow(6, 8, "#CDD6C6"),
+    ruleRow(6, 8, "#CBBBA5"),
     ...textRows(`Continue ${models.length > 1 ? "each dose" : "this dose"} unless your doctor advises otherwise.`, IN, { color: C.ink }),
   ], C.tint);
   essentials(flow, models.find((x) => x.diet) || m);
@@ -499,7 +499,7 @@ function chipsRow(labels, current, width) {
       ln.forEach((c, k) => {
         if (k) { pg.text("›", cx - gx / 2 - 2, y + 14.5, { size: 10, color: C.muted }); }
         const on = c.i === current;
-        pg.rect(cx, y, c.cw, h, on ? { fill: C.pine, radius: 6 } : { stroke: "#C8D1C0", lineWidth: 0.7, radius: 6 });
+        pg.rect(cx, y, c.cw, h, on ? { fill: C.pine, radius: 6 } : { stroke: "#CBBBA5", lineWidth: 0.7, radius: 6 });
         pg.text(c.t, cx + padX, y + 14.6, { size, bold: on, color: on ? C.white : C.ink });
         cx += c.cw + gx;
       });
@@ -596,10 +596,10 @@ function plateRow(d) {
         yy += 8;
       });
       const cx = x + w - 62, cy = y + h / 2, r = 40;
-      pg.arc(cx, cy, r, 0, 359.9, { color: "#EEF2E9", width: 18 });
+      pg.arc(cx, cy, r, 0, 359.9, { color: "#EEE1CF", width: 18 });
       let a = 0;
       parts.forEach((p) => { const span = p.fraction * 360; pg.arc(cx, cy, r, a, a + span - 2, { color: p.color, width: 18 }); a += span; });
-      pg.circle(cx, cy, r - 9, { fill: "#F3F6EF" });
+      pg.circle(cx, cy, r - 9, { fill: "#FBF4EB" });
       const t = "Your plate";
       pg.text(t, cx - textWidth(t, true, 8.6) / 2, cy + 3, { size: 8.6, bold: true, color: C.ink });
     },
@@ -674,7 +674,7 @@ function food(flow, models) {
         const cw = wd / cells.length;
         cells.forEach((c, i) => {
           const cx = x + i * cw;
-          if (i) pg.line(cx - 8, y, cx - 8, y + 34, { color: "#CDD6C6", width: 0.6 });
+          if (i) pg.line(cx - 8, y, cx - 8, y + 34, { color: "#CBBBA5", width: 0.6 });
           pg.text(c[0], cx, y + 18, { size: 17, color: C.ink });
           pg.text(c[1], cx, y + 32, { size: 8.4, color: C.muted });
         });
@@ -778,7 +778,7 @@ function timelineRows(text, width) {
       h,
       draw(pg, x, y) {
         pg.circle(x + 5, y + 7.5, 3, { fill: C.emerald });
-        pg.line(x + 5, y + 13, x + 5, y + h + 2, { color: "#C8D1C0", width: 0.6 });
+        pg.line(x + 5, y + 13, x + 5, y + h + 2, { color: "#CBBBA5", width: 0.6 });
         let yy = y;
         lines.forEach((r) => { r.draw(pg, x, yy); yy += r.h; });
       },

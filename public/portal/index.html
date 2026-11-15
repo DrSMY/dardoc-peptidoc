@@ -3,37 +3,38 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>My Portal — DoCare</title>
-<link rel="stylesheet" href="/theme.css?v=docare75">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23283618'/><path d='M72 32 A27 27 0 1 0 72 68' fill='none' stroke='%23C6A15B' stroke-width='7' stroke-linecap='round'/><rect x='66' y='23' width='15' height='11' rx='4' fill='%23C6A15B'/><circle cx='41' cy='60' r='13' fill='none' stroke='%23C6A15B' stroke-width='4.5'/><circle cx='41' cy='60' r='6' fill='%23C6A15B'/></svg>">
+<title>My Portal — DocCare</title>
+<link rel="stylesheet" href="/theme.css?v=docare82">
+<link rel="icon" type="image/svg+xml" href="/brand/doccare-icon.svg">
+<link rel="apple-touch-icon" href="/brand/doccare-touch-icon.png">
+<meta name="theme-color" content="#00382F">
 <style>
   body { background: var(--bg); }
   .p-app { max-width: 560px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
   .p-top { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center;
     padding: 14px 16px 10px;
-    background: var(--brand); color: #fff; }
+    background: var(--brand); color: var(--on-forest); }
   .p-top .t-logo-btn { justify-self: center; background: none; border: none; padding: 4px; cursor: pointer; border-radius: 10px; }
   .p-top .t-logo-btn:active { transform: scale(.95); }
-  .p-top .t-logo-btn:focus-visible { outline: 2.5px solid var(--champagne-gold, #E1C784); outline-offset: 2px; }
-  .p-top .t-logo { display: block; height: 34px; width: auto;
-    filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)) drop-shadow(0 0 12px rgba(225,199,132,.28)); }
-  .p-top .icon-btn { color: #fff; }
-  .p-top .icon-btn:hover { background: rgba(255,255,255,.12); }
+  .p-top :focus-visible { outline: 2.5px solid var(--ivory); outline-offset: 2px; }
+  .p-top .t-logo { display: block; height: 36px; width: auto; }
+  .p-top .icon-btn { color: var(--on-forest); }
+  .p-top .icon-btn:hover { background: rgba(245,235,221,.12); }
 
-  /* dark olive band behind the home greeting + hero card */
+  /* forest band behind the home greeting + hero card */
   .home-band { margin: -18px -16px 0; padding: 8px 20px 84px; background: var(--brand); border-radius: 0 0 26px 26px; }
   .home-band.no-plan { padding-bottom: 26px; }
-  .hello-dark { display: flex; align-items: center; gap: 13px; color: #fff; margin: 8px 0 20px; }
+  .hello-dark { display: flex; align-items: center; gap: 13px; color: var(--on-forest); margin: 8px 0 20px; }
   .avatar-circ { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center;
+    background: rgba(245,235,221,.16); display: flex; align-items: center; justify-content: center;
     font-family: var(--font-head); font-weight: 700; font-size: 16px; letter-spacing: .02em; }
-  .hello-dark h1 { font-size: 21px; color: #fff; }
-  .hello-dark .sub { font-size: 13px; color: rgba(255,255,255,.68); margin-top: 1px; }
+  .hello-dark h1 { font-size: 21px; color: var(--on-forest); }
+  .hello-dark .sub { font-size: 13px; color: var(--on-forest-muted); margin-top: 1px; }
 
   /* hero card — medication status on the dark band */
   .hero-card { position: relative; background: var(--surface); border-radius: 20px; padding: 18px 18px 16px; box-shadow: var(--shadow-md); }
   .hero-lbl { font-size: 11.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--brand); padding-right: 116px; }
-  .hero-title { font-family: var(--font-display); font-size: 30px; font-weight: 400; line-height: 1.1; letter-spacing: -.01em; margin: 4px 0 6px; color: var(--text); }
+  .hero-title { font-family: var(--font-head); font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.02em; margin: 4px 0 6px; color: var(--text); }
   .hero-desc { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; }
   .hero-photo { position: absolute; top: 12px; right: 8px; width: 118px; height: 122px; object-fit: contain; pointer-events: none; }
   /* interactive phase journey — colored dots on a filling track */
@@ -80,7 +81,7 @@
   .dose-head .qa-ico { width: 38px; height: 38px; }
   .dose-chips { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
   .chip-solid, .chip-soft { border-radius: var(--r-full); padding: 5px 14px; font-weight: 700; font-size: 13px; font-family: var(--font-head); }
-  .chip-solid { background: var(--brand); color: #fff; }
+  .chip-solid { background: var(--brand); color: var(--on-brand); }
   .chip-soft { background: var(--brand-soft); color: var(--brand); }
   .dose-text { font-size: 13.5px; color: var(--muted); line-height: 1.5; max-width: 62%; margin-bottom: 10px; }
   .dose-photo { position: absolute; top: 14px; right: 10px; width: 100px; height: 124px; object-fit: contain; pointer-events: none; }
@@ -101,7 +102,7 @@
   .p-nav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
     width: min(560px, 100%); z-index: 100;
     display: flex; background: var(--surface);
-    border-top: 1px solid var(--border); box-shadow: 0 -4px 20px rgba(20,49,47,.07);
+    border-top: 1px solid var(--border); box-shadow: 0 -4px 20px rgba(0,38,31,.07);
     padding-bottom: env(safe-area-inset-bottom); }
   .p-nav button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
     padding: 10px 4px 9px; background: none; border: none; color: var(--faint);
@@ -110,9 +111,9 @@
   .p-nav button.on { color: var(--brand); }
   .p-nav .nav-log { margin-top: -22px; }
   .p-nav .nav-log .log-fab { width: 52px; height: 52px; border-radius: 50%;
-    background: var(--brand); color: #fff;
+    background: var(--brand); color: var(--on-brand);
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 6px 16px rgba(30,76,78,.4);
+    box-shadow: 0 6px 16px rgba(0,38,31,.28);
     transition: transform .15s var(--ease); }
   .p-nav .nav-log:active .log-fab { transform: scale(.93); }
 
@@ -148,7 +149,7 @@
 
   .msg-list { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
   .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14.5px; }
-  .msg.patient { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.patient { align-self: flex-end; background: var(--brand); color: var(--on-brand); border-bottom-right-radius: 4px; }
   .msg.doctor { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
   .msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg-time { font-size: 10.5px; opacity: .65; margin-top: 3px; }
@@ -161,10 +162,7 @@
   /* patient welcome animation overlay (plays with sound after login,
      or when the header logo is tapped) */
   .login-anim { position: fixed; inset: 0; z-index: 500;
-    background:
-      radial-gradient(60% 50% at 18% 12%, rgba(198, 161, 91, .16), transparent 60%),
-      radial-gradient(55% 45% at 85% 88%, rgba(113, 131, 85, .20), transparent 65%),
-      linear-gradient(160deg, #283618, #1C2412 70%);
+    background: var(--forest-deep);
     opacity: 1; transition: opacity .45s var(--ease); }
   .login-anim.closing { opacity: 0; pointer-events: none; }
   .login-anim video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -172,22 +170,22 @@
   .la-skip { position: absolute; z-index: 2; left: 50%; transform: translateX(-50%);
     bottom: calc(26px + env(safe-area-inset-bottom));
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 12px 24px; min-height: 46px; border: 1px solid rgba(225, 199, 132, .35); border-radius: 999px;
-    background: rgba(23, 32, 15, .4); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    color: #F5F0DF; font-family: var(--font-head); font-weight: 700; font-size: 14px; cursor: pointer; }
+    padding: 12px 24px; min-height: 46px; border: 1px solid rgba(245,235,221,.4); border-radius: 999px;
+    background: rgba(0,38,31,.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: var(--ivory); font-family: var(--font-head); font-weight: 700; font-size: 14px; cursor: pointer; }
   .la-skip:active { transform: translateX(-50%) scale(.95); }
   .la-endcard { position: absolute; inset: 0; z-index: 1;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-    background: linear-gradient(160deg, #283618, #1C2412 75%);
+    background: var(--forest);
     opacity: 0; pointer-events: none; transition: opacity .6s var(--ease); }
   .login-anim.ending .la-endcard { opacity: 1; }
-  .la-endcard img { width: min(320px, 70vw); height: auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.55)) drop-shadow(0 0 22px rgba(225,199,132,.32)); }
-  .la-endcard span { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: var(--champagne-gold, #E1C784); font-weight: 700; }
+  .la-endcard img { width: min(320px, 70vw); height: auto; }
+  .la-endcard span { font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: var(--on-forest-muted); font-weight: 700; }
 
   /* ══ Log page: distinct modes + colour-coded medications ═══════════ */
   .p-app { --ci: #2E5AAC; }   /* daily check-in accent (distinct from meds) */
 
-  /* big segmented mode switch — injection (olive) vs check-in (blue) */
+  /* big segmented mode switch — injection (forest) vs check-in (blue) */
   /* compact page heading on the Log tab so the form itself leads */
   .log-hello { margin-bottom: 12px; }
   .log-hello h1 { font-size: 24px; }
@@ -297,7 +295,7 @@
   .sum-item b { font-family: var(--font-head); font-size: 14.5px; color: var(--text); }
   .sum-item small { font-size: 10.5px; color: var(--muted); }
   .ci-strip { --mc: var(--ci); }
-  .flag-ok { color: #2F6B4F !important; } .flag-bad { color: var(--danger) !important; }
+  .flag-ok { color: var(--leaf) !important; } .flag-bad { color: var(--danger) !important; }
 
   /* recent-doses rows */
   .recent-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
@@ -322,13 +320,13 @@
      intensity is readable without relying on colour alone */
   .sev-bars { flex-shrink: 0; overflow: visible; }
   .sev-bars .sb-off { fill: var(--border-strong); }
-  .sev-bars .sb-on { fill: #9AA08C; }
-  .sev-chip[data-sev="good"] .sb-on { fill: #2F6B4F; }
-  .sev-chip[data-sev="warn"] .sb-on { fill: #9C6B1F; }
+  .sev-bars .sb-on { fill: #8A9A93; }
+  .sev-chip[data-sev="good"] .sb-on { fill: #1E6557; }
+  .sev-chip[data-sev="warn"] .sb-on { fill: #855610; }
   .sev-chip[data-sev="bad"] .sb-on { fill: var(--danger); }
   .sev-chip.on { color: #fff; }
-  .sev-chip.on.good { background: #2F6B4F; border-color: #2F6B4F; }
-  .sev-chip.on.warn { background: #9C6B1F; border-color: #9C6B1F; }
+  .sev-chip.on.good { background: #1E6557; border-color: #1E6557; }
+  .sev-chip.on.warn { background: #855610; border-color: #855610; }
   .sev-chip.on.bad { background: var(--danger); border-color: var(--danger); }
   .sev-chip.on .sb-on { fill: #fff; }
   .sev-chip.on .sb-off { fill: rgba(255,255,255,.34); }
@@ -336,14 +334,14 @@
   /* energy batteries */
   .batt-row { display: flex; gap: 6px; flex-wrap: wrap; }
   .batt-btn { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 6px; border-radius: 11px; border: 1.5px solid var(--border); background: var(--surface); color: var(--muted); font-size: 10.5px; font-weight: 600; font-family: var(--font-head); min-width: 60px; transition: all .14s var(--ease); }
-  .batt { position: relative; width: 26px; height: 13px; border: 2px solid currentColor; border-radius: 3px; color: #BFBCAB; }
+  .batt { position: relative; width: 26px; height: 13px; border: 2px solid currentColor; border-radius: 3px; color: #B5AD9C; }
   .batt::after { content: ""; position: absolute; left: 100%; top: 4px; width: 2.5px; height: 5px; background: currentColor; border-radius: 0 2px 2px 0; }
   .batt-fill { position: absolute; left: 1.5px; top: 1.5px; bottom: 1.5px; width: calc(var(--fill) - 3px); border-radius: 1px; background: currentColor; }
-  .batt-btn[data-sev="good"] .batt { color: #2F6B4F; }
-  .batt-btn[data-sev="warn"] .batt { color: #9C6B1F; }
+  .batt-btn[data-sev="good"] .batt { color: #1E6557; }
+  .batt-btn[data-sev="warn"] .batt { color: #855610; }
   .batt-btn[data-sev="bad"] .batt { color: var(--danger); }
-  .batt-btn.on[data-sev="good"] { border-color: #2F6B4F; background: #E7F0EA; color: #275C44; }
-  .batt-btn.on[data-sev="warn"] { border-color: #9C6B1F; background: var(--amber-soft); color: #7A531A; }
+  .batt-btn.on[data-sev="good"] { border-color: #1E6557; background: var(--accent-soft); color: var(--forest-mid); }
+  .batt-btn.on[data-sev="warn"] { border-color: #855610; background: var(--amber-soft); color: #6B4509; }
   .batt-btn.on[data-sev="bad"] { border-color: var(--danger); background: var(--danger-soft); color: #7A2E22; }
 
   /* home medication rows — colour identity */
@@ -365,16 +363,16 @@
   }
 
   .login-hero { text-align: center; padding: 46px 20px 26px; }
-  .login-hero .brand-mark { width: 62px; height: 62px; border-radius: 18px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+  .login-hero .brand-mark { width: 62px; height: 62px; border-radius: 18px; background: var(--brand); color: var(--on-brand); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
   .login-hero h1 { font-size: 23px; }
   .login-hero p { color: var(--muted); font-size: 14px; margin-top: 6px; }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<script src="/shared.js?v=docare75"></script>
+<script src="/shared.js?v=docare82"></script>
 <script src="/patient-guides.js?v=docare25"></script>
-<script src="/guide.js?v=docare77"></script>
-<script src="/portal/app.js?v=docare75"></script>
+<script src="/guide.js?v=docare82"></script>
+<script src="/portal/app.js?v=docare82"></script>
 </body>
 </html>

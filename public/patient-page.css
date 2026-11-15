@@ -7,7 +7,7 @@ body { background: var(--bg); margin: 0; }
 .rp-clinic { font: 700 16px/1.2 var(--font-head); color: var(--text); }
 .rp-private { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
 .rp-private svg { color: var(--sage); }
-.rp-title { margin: 0 0 8px; font: 500 30px/1.15 var(--font-display); color: var(--brand); letter-spacing: -.01em; }
+.rp-title { margin: 0 0 8px; font: 700 27px/1.2 var(--font-head); color: var(--brand); letter-spacing: -.02em; text-wrap: balance; }
 .rp-sub { margin: 0 0 20px; font-size: 15px; line-height: 1.55; color: var(--muted); }
 .rp-med { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 16px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
@@ -22,7 +22,7 @@ body { background: var(--bg); margin: 0; }
 .rp-form .rr-sec:first-child { padding-top: 18px; }
 .rp-form .rr-sec:last-child { border-bottom: 1px solid var(--border); }
 .rp-cta { position: sticky; bottom: 0; margin: 4px -16px 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, var(--bg) 72%, rgba(248,247,242,0)); }
+  background: linear-gradient(to top, var(--bg) 72%, rgba(245,235,221,0)); }
 .rp-cta .btn { min-height: 52px; font-size: 16px; }
 .rp-cta p { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
 /* medication picker */
@@ -30,7 +30,7 @@ body { background: var(--bg); margin: 0; }
 .rp-plan { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 14px; text-align: left;
   background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: 16px; cursor: pointer;
   font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; transition: border-color .15s ease, box-shadow .15s ease; }
-.rp-plan:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rp-plan:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rp-plan:active { box-shadow: 0 0 0 3px var(--brand-soft); border-color: var(--brand); }
 @media (hover: hover) { .rp-plan:hover { border-color: var(--brand); } }
 .rp-plan-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -43,4 +43,4 @@ body { background: var(--bg); margin: 0; }
 .rp-state p { margin: 0 auto; max-width: 340px; font-size: 14.5px; line-height: 1.55; color: var(--muted); }
 .rp-state p + p { margin-top: 10px; font-size: 13px; }
 .rp-skel { border-radius: 16px; margin-bottom: 12px; }
-@media (min-width: 600px) { .rp-title { font-size: 34px; } }
+@media (min-width: 600px) { .rp-title { font-size: 30px; } }

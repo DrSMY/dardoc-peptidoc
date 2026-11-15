@@ -135,31 +135,31 @@ function productIllustration(route, size = 48) {
   const r = routeIcon(route);
   const bodies = {
     syringe: `
-      <rect x="19" y="4" width="10" height="14" rx="3" fill="#C6A15B"/>
-      <rect x="22" y="1" width="4" height="5" rx="1.5" fill="#8F6D32"/>
-      <rect x="16" y="17" width="16" height="26" rx="6" fill="#F5EBD4" stroke="#C6A15B" stroke-width="2"/>
-      <rect x="20" y="22" width="8" height="16" rx="2" fill="#E1C784"/>
-      <path d="M24 43v6" stroke="#8F6D32" stroke-width="2.5" stroke-linecap="round"/>
-      <path d="M20 49h8" stroke="#8F6D32" stroke-width="2.5" stroke-linecap="round"/>`,
+      <rect x="19" y="4" width="10" height="14" rx="3" fill="#1E6557"/>
+      <rect x="22" y="1" width="4" height="5" rx="1.5" fill="#00382F"/>
+      <rect x="16" y="17" width="16" height="26" rx="6" fill="#F5EBDD" stroke="#00382F" stroke-width="2"/>
+      <rect x="20" y="22" width="8" height="16" rx="2" fill="#C6A15B"/>
+      <path d="M24 43v6" stroke="#00382F" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M20 49h8" stroke="#00382F" stroke-width="2.5" stroke-linecap="round"/>`,
     pill: `
-      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#EAEEE3"/>
-      <rect x="10" y="18" width="28" height="12" rx="6" fill="#718355" transform="rotate(-25 24 24)"/>
-      <rect x="10" y="18" width="14" height="12" rx="6" fill="#F8F7F2" transform="rotate(-25 24 24)"/>`,
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#DCEBE2"/>
+      <rect x="10" y="18" width="28" height="12" rx="6" fill="#1E6557" transform="rotate(-25 24 24)"/>
+      <rect x="10" y="18" width="14" height="12" rx="6" fill="#FFFCF8" transform="rotate(-25 24 24)"/>`,
     capsule: `
-      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBD4"/>
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBDD"/>
       <rect x="9" y="19" width="30" height="10" rx="5" fill="#C6A15B" transform="rotate(-8 24 24)"/>
-      <rect x="9" y="19" width="15" height="10" rx="5" fill="#283618" transform="rotate(-8 24 24)"/>`,
+      <rect x="9" y="19" width="15" height="10" rx="5" fill="#00382F" transform="rotate(-8 24 24)"/>`,
     spray: `
-      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#EAEEE3"/>
-      <rect x="19" y="20" width="10" height="20" rx="2.5" fill="#718355"/>
-      <rect x="17" y="14" width="14" height="7" rx="2" fill="#8F6D32"/>
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#DCEBE2"/>
+      <rect x="19" y="20" width="10" height="20" rx="2.5" fill="#1E6557"/>
+      <rect x="17" y="14" width="14" height="7" rx="2" fill="#00382F"/>
       <rect x="21" y="8" width="6" height="7" rx="1.5" fill="#C6A15B"/>
       <path d="M31 12 37 8M32 16 39 15M31 20 38 20" stroke="#C6A15B" stroke-width="2" stroke-linecap="round"/>`,
     cream: `
-      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBD4"/>
-      <rect x="15" y="18" width="18" height="22" rx="4" fill="#FFFFFF" stroke="#C6A15B" stroke-width="2"/>
-      <rect x="15" y="18" width="18" height="7" rx="3" fill="#8F6D32"/>
-      <rect x="19" y="8" width="10" height="11" rx="2" fill="#8F6D32"/>`,
+      <ellipse cx="24" cy="24" rx="21" ry="21" fill="#F5EBDD"/>
+      <rect x="15" y="18" width="18" height="22" rx="4" fill="#FFFCF8" stroke="#00382F" stroke-width="2"/>
+      <rect x="15" y="18" width="18" height="7" rx="3" fill="#00382F"/>
+      <rect x="19" y="8" width="10" height="11" rx="2" fill="#00382F"/>`,
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true">${bodies[r] || bodies.pill}</svg>`;
 }
@@ -216,7 +216,7 @@ function medFormIcon(plan, size = 24) {
 // yellow so it never competes with the brand gold. Assignment is stable per
 // plan id and deterministic; the GLP-1 (the usual anchor medication) always
 // takes the signature emerald.
-const MED_PALETTE = ["#2F6B4F", "#2C6E8F", "#6C4FB0", "#1F7A68", "#5B7248", "#8E4A6E"];
+const MED_PALETTE = ["#1E6557", "#2C6E8F", "#6C4FB0", "#1F7A68", "#5B7248", "#8E4A6E"];
 function medCatRank(p) {
   return p.category === "glp1" ? 0 : p.category === "peptide" ? 1 : 2;
 }
@@ -467,7 +467,7 @@ function timeAgo(iso) {
 // points: [{x: Date|number, y: number, label}], opts: {height, color, unit}
 function lineChart(points, opts = {}) {
   const H = opts.height || 180, W = 600, PAD = { t: 16, r: 14, b: 26, l: 40 };
-  const color = opts.color || "#283618";
+  const color = opts.color || "#00382F";
   if (!points || points.length === 0) return "";
   const xs = points.map((p) => +new Date(p.x));
   const ys = points.map((p) => p.y);
@@ -484,17 +484,17 @@ function lineChart(points, opts = {}) {
   for (let i = 0; i <= 3; i++) {
     const yv = yMin + ((yMax - yMin) * i) / 3;
     const yy = py(yv);
-    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E5E2D6" stroke-width="1"/>`;
-    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#8B8C78">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
+    grid += `<line x1="${PAD.l}" y1="${yy}" x2="${W - PAD.r}" y2="${yy}" stroke="#E6D9C5" stroke-width="1"/>`;
+    labels += `<text x="${PAD.l - 8}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#4F6962">${yv.toFixed(yMax - yMin < 8 ? 1 : 0)}</text>`;
   }
   // x labels: first, middle, last
   const xIdx = points.length > 2 ? [0, Math.floor(points.length / 2), points.length - 1] : points.map((_, i) => i);
   let xLabels = "";
   for (const i of [...new Set(xIdx)]) {
-    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#8B8C78">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
+    xLabels += `<text x="${px(xs[i])}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#4F6962">${new Date(xs[i]).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</text>`;
   }
   const dots = points.length <= 40
-    ? points.map((p, i) => `<circle cx="${px(xs[i])}" cy="${py(p.y)}" r="3.5" fill="#fff" stroke="${color}" stroke-width="2"><title>${esc(fmtDate(String(p.x)))} — ${p.y}${esc(opts.unit || "")}</title></circle>`).join("")
+    ? points.map((p, i) => `<circle cx="${px(xs[i])}" cy="${py(p.y)}" r="3.5" fill="#FFFCF8" stroke="${color}" stroke-width="2"><title>${esc(fmtDate(String(p.x)))} — ${p.y}${esc(opts.unit || "")}</title></circle>`).join("")
     : "";
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "Trend chart")}">
     ${grid}${labels}${xLabels}
@@ -525,10 +525,10 @@ function stackedBarChart(buckets, series, opts = {}) {
       yCursor -= h;
       bars += `<rect class="bar-rise" style="animation-delay:${(i * 22)}ms" x="${(cx - barW / 2).toFixed(1)}" y="${yCursor.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2.5" fill="${sr.color}"><title>${esc(b.label)} — ${esc(sr.label)}: ${v}</title></rect>`;
     });
-    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#8B8C78">${esc(b.label)}</text>`;
+    if (xIdx.includes(i)) xLabels += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#4F6962">${esc(b.label)}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "Trend chart")}">
-    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E5E2D6" stroke-width="1"/>
+    <line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="#E6D9C5" stroke-width="1"/>
     ${bars}${xLabels}
   </svg>`;
 }
@@ -551,10 +551,10 @@ function donutChart(distribution, opts = {}) {
     offset += len;
   });
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:${size}px;height:auto;display:block;margin:0 auto" role="img" aria-label="${esc(opts.aria || "Distribution chart")}">
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EBE9DE" stroke-width="${stroke}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EEE1CF" stroke-width="${stroke}"/>
     ${segs}
-    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink,#20231E)">${total}</text>
-    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#8B8C78">total</text>
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="22" font-weight="800" fill="#0C2620">${total}</text>
+    <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10.5" fill="#4F6962">total</text>
   </svg>`;
 }
 
