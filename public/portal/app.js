@@ -38,7 +38,7 @@ function playLoginAnimation() {
   wrap.innerHTML = `
     <video src="/brand/patient-login.mp4" playsinline preload="auto"></video>
     <div class="la-endcard" aria-hidden="true">
-      <img src="/brand/doccare-logo-ivory.svg" alt="" width="320" height="91">
+      <img src="/brand/doccare-logo-ivory.png" alt="" width="320" height="119">
       <span>Limitless Care</span>
     </div>
     <button type="button" class="la-skip">Skip ${icon("chevR", 15)}</button>`;
@@ -85,7 +85,7 @@ function renderLogin() {
   app.innerHTML = `
   <div class="p-app">
     <div class="login-hero">
-      <img src="/brand/doccare-logo-forest.svg" alt="DocCare" width="240" height="68" style="height:68px;width:auto;display:block;margin:0 auto 16px">
+      <img src="/brand/doccare-logo-forest.png" alt="DocCare" width="204" height="76" style="height:76px;width:auto;display:block;margin:0 auto 16px">
       <h1>Your treatment portal</h1>
       <p>Sign in with your mobile number and the PIN your doctor sent you on WhatsApp.</p>
     </div>
@@ -146,7 +146,7 @@ function renderShell() {
     <header class="p-top">
       <button class="icon-btn" id="p-logout" aria-label="Sign out">${icon("logout", 20)}</button>
       <button class="t-logo-btn" id="p-logo" aria-label="Play the DocCare welcome animation" title="Play welcome animation">
-        <img class="t-logo" src="/brand/doccare-logo-ivory.svg" alt="DocCare, my treatment portal" width="127" height="36">
+        <img class="t-logo" src="/brand/doccare-logo-ivory.png" alt="DocCare, my treatment portal" width="107" height="40">
       </button>
       <button class="icon-btn" id="p-bell" aria-label="Messages">${icon("bell", 20)}</button>
     </header>

@@ -24,7 +24,7 @@ function renderLogin() {
   <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px">
     <div class="card card-pad" style="width:min(420px,100%)">
       <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:22px">
-        <img src="/brand/doccare-logo-forest.svg" alt="DocCare" width="226" height="64" style="height:64px;width:auto">
+        <img src="/brand/doccare-logo-forest.png" alt="DocCare" width="193" height="72" style="height:72px;width:auto">
         <div style="font-size:12.5px;color:var(--muted)">Super Admin · Protocols &amp; knowledge base</div>
       </div>
       <h1 style="font-size:22px;margin-bottom:4px">Admin sign in</h1>
@@ -81,7 +81,7 @@ function renderShell() {
   document.title = "Super Admin — DocCare";
   app.innerHTML = `
   <div class="mobile-bar">
-    <div class="brand-line"><img src="/brand/doccare-logo-ivory.svg" alt="DocCare" width="106" height="30" style="height:30px;width:auto"> <span class="badge" style="background:var(--champagne-gold);color:var(--forest-deep)">Super Admin</span></div>
+    <div class="brand-line"><img src="/brand/doccare-logo-ivory.png" alt="DocCare" width="91" height="34" style="height:34px;width:auto"> <span class="badge" style="background:var(--champagne-gold);color:var(--forest-deep)">Super Admin</span></div>
     <button class="icon-btn" style="color:var(--on-forest)" id="m-logout" aria-label="Sign out">${icon("logout", 20)}</button>
   </div>
   <nav class="m-nav" id="m-nav">
@@ -90,7 +90,7 @@ function renderShell() {
   <div class="shell">
     <aside class="sidebar">
       <div class="sb-brand" style="flex-direction:column;align-items:flex-start;gap:7px">
-        <img src="/brand/doccare-logo-ivory.svg" alt="DocCare" width="162" height="46" style="height:46px;width:auto">
+        <img src="/brand/doccare-logo-ivory.png" alt="DocCare" width="145" height="54" style="height:54px;width:auto">
         <div class="sb-sub">Super Admin console</div>
       </div>
       <nav class="sb-nav" id="sb-nav">
