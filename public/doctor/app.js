@@ -6431,7 +6431,9 @@ function orgModal(org, done) {
       <div class="field"><label for="og-contact">Contact email</label><input class="input" id="og-contact" type="email" value="${esc(o.contact_email || "")}"></div>
       ${!isNew ? `
       <div class="field"><label for="og-app">Patient-facing app (optional)</label><input class="input" id="og-app" value="${esc(o.app_name || "")}" placeholder="e.g. DarDoc App — leave blank if this practice has none">
-      <span class="hint">Named here, the patient guide explains that a subscribed patient gets everything inside it, and anyone without it gets a booking link instead — otherwise the guide stays general and never assumes one exists.</span></div>` : ""}
+      <span class="hint">Named here, the patient guide explains that a subscribed patient gets everything inside it, and anyone without it gets a booking link instead — otherwise the guide stays general and never assumes one exists.</span></div>
+      <div class="field"><label for="og-web">Website (optional)</label><input class="input" id="og-web" value="${esc(o.website || "")}" placeholder="e.g. dardoc.com">
+      <span class="hint">Printed on the cover of the patient guide PDF.</span></div>` : ""}
       ${!isNew ? logoUploaderHTML() : ""}
       ${isNew ? `
       <hr class="divider">
@@ -6464,7 +6466,7 @@ function orgModal(org, done) {
           adminEmail: g("og-ae").value.trim(), adminPassword: g("og-ap").value,
         });
       } else {
-        await api("PUT", `/api/admin/orgs/${o.id}`, { name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim(), appName: g("og-app").value.trim() });
+        await api("PUT", `/api/admin/orgs/${o.id}`, { name: g("og-name").value.trim(), contactEmail: g("og-contact").value.trim(), appName: g("og-app").value.trim(), website: g("og-web").value.trim() });
       }
       scrim.remove();
       toast(isNew ? "Organisation created" : "Changes saved");

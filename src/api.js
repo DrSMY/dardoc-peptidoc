@@ -463,6 +463,8 @@ route("PUT", "/api/admin/orgs/:id", async (req, res, p, body) => {
   // The organisation's own patient app, if it has one (e.g. "DarDoc App") —
   // sent as "" to clear it deliberately, distinct from never having set it.
   if (body.appName !== undefined) { sets.push("app_name = ?"); vals.push(String(body.appName).trim()); }
+  // Shown as written on the guide PDF cover, without "https://".
+  if (body.website !== undefined) { sets.push("website = ?"); vals.push(String(body.website).trim().replace(/^https?:\/\//i, "").replace(/\/$/, "").slice(0, 80)); }
   if (body.active !== undefined) {
     const next = body.active ? 1 : 0;
     // Switching off the organisation you are signed in to would lock you out.
@@ -1519,11 +1521,11 @@ function guidePayload(patient) {
   const visitRow = rows.length ? null : latestVisitRow(patient.id);
   if (!rows.length && !visitRow) return null;
   rows.sort((a, b) => (b.category === "glp1") - (a.category === "glp1"));
-  const org = db.prepare("SELECT id, name, logo_version FROM organizations WHERE id = ?").get(patient.org_id);
+  const org = db.prepare("SELECT id, name, logo_version, website FROM organizations WHERE id = ?").get(patient.org_id);
   return {
     // Gender only decides whether pregnancy advice is shown.
     patient: { title: patient.title || "", name: patient.name, gender: patient.gender || "" },
-    clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version) } : { name: "", logoUrl: "" },
+    clinic: org ? { name: org.name, logoUrl: orgLogoUrl(org.id, org.logo_version), website: org.website || "" } : { name: "", logoUrl: "", website: "" },
     plans: rows.map(sharedPlan),
     visit: visitRow ? publicVisit(visitRow) : null,
   };

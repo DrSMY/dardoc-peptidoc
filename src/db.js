@@ -242,6 +242,8 @@ addColumn("wizard_drafts", "mobile", "TEXT DEFAULT ''");
 // (used by list screens) never drags image bytes along; `logo_version` is
 // the cache-busting stamp on the image URL (0 = no logo).
 addColumn("organizations", "logo_version", "INTEGER NOT NULL DEFAULT 0");
+// The practice's public website, printed on the cover of the guide PDF.
+addColumn("organizations", "website", "TEXT DEFAULT ''");
 db.exec(`
 CREATE TABLE IF NOT EXISTS org_logos (
   org_id INTEGER PRIMARY KEY REFERENCES organizations(id),
@@ -674,6 +676,9 @@ const DEFAULT_ORG = seedOrganizations();
 
 // "Mr Test", sample data for demonstrations: once per database, so deleting
 // him later is permanent.
+once("dardoc-website", () => {
+  db.prepare("UPDATE organizations SET website = 'dardoc.com' WHERE slug = 'dardoc' AND COALESCE(website, '') = ''").run();
+});
 once("demo-patient-mr-test", () => require("./demo-patient").seedDemoPatient(db, hashSecret, crypto));
 
 // The organisation a new record belongs to when none is named — the practice
