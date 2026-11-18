@@ -1531,6 +1531,14 @@ function guidePayload(patient) {
   };
 }
 
+// The signing doctor's account, for the guide PDF's photo. Kept off the
+// payload itself, which is also sent to the patient's browser.
+function guideDoctorId(patient) {
+  const row = db.prepare("SELECT doctor_id, category FROM plans WHERE patient_id = ? AND status = 'active' ORDER BY created_at DESC, id DESC").all(patient.id)
+    .sort((a, b) => (b.category === "glp1") - (a.category === "glp1"))[0] || latestVisitRow(patient.id);
+  return row ? row.doctor_id : null;
+}
+
 function guideLinkPatient(token) {
   const link = db.prepare("SELECT * FROM guide_links WHERE token = ? AND revoked_at IS NULL AND expires_at > datetime('now')").get(token);
   const patient = link && db.prepare("SELECT * FROM patients WHERE id = ? AND archived = 0").get(link.patient_id);
@@ -1551,7 +1559,12 @@ route("GET", "/api/guide/:token", (req, res, p) => {
 // address, so nothing in it leads back to the link.
 function sendGuidePdf(res, patient, payload) {
   const logoRow = db.prepare("SELECT mime, data FROM org_logos WHERE org_id = ?").get(patient.org_id);
-  const pdf = guidePdf(payload, { logo: logoRow && /png/i.test(logoRow.mime) ? Buffer.from(logoRow.data) : null });
+  const doctorId = guideDoctorId(patient);
+  const photoRow = doctorId ? db.prepare("SELECT mime, data FROM doctor_photos WHERE user_id = ?").get(doctorId) : null;
+  const pdf = guidePdf(payload, {
+    logo: logoRow && /png/i.test(logoRow.mime) ? Buffer.from(logoRow.data) : null,
+    photo: photoRow ? { mime: photoRow.mime, data: Buffer.from(photoRow.data) } : null,
+  });
   const who = `${patient.title ? patient.title + " " : ""}${patient.name || ""}`.trim();
   const name = `${payload.visit ? "Health plan" : "Treatment guide"} - ${who}`.replace(/[^\p{L}\p{N} ._-]/gu, "").trim() || "Treatment guide";
   const ascii = name.replace(/[^\x20-\x7E]/g, "").trim() || "Treatment guide";

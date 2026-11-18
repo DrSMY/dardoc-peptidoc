@@ -252,7 +252,20 @@ function initialsOf(name) {
   const parts = String(name || "").replace(/^(dr|mr|mrs|ms|miss|prof)\.?\s+/i, "").split(/\s+/).filter((p) => /^\p{L}/u.test(p));
   return ((parts[0] || "?")[0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
+// The signing doctor's portrait for this document, when there is one.
+let PHOTO = null;
+// A portrait placed so the face (about half way across, a third of the way
+// down) sits at (fx, fy), drawn `width` points wide.
+function photoAt(pg, fx, fy, width, clip) {
+  const h = width * (PHOTO.h / PHOTO.w);
+  pg.image(PHOTO, fx - 0.51 * width, fy - 0.34 * h, width, h, { clip });
+}
 function avatar(pg, name, cx, cy, r) {
+  if (PHOTO) {
+    pg.circle(cx, cy, r, { fill: C.card });
+    photoAt(pg, cx, cy + r * 0.15, r * 5.4, { cx, cy, r });
+    return;
+  }
   pg.circle(cx, cy, r, { fill: C.soft });
   const t = initialsOf(name), size = r * 0.78;
   pg.text(t, cx - textWidth(t, true, size) / 2, cy + size * 0.36, { size, bold: true, color: C.ink });
@@ -748,7 +761,7 @@ function welcomePage(flow, models, imgs) {
   const med = m.kind === "plan" ? m.plan.medication : "";
   flow.topic("Food & everyday habits", "Your journey, not a race.", d ? "Eat enough to nourish your body, even as your appetite changes." : "Small, steady habits that support your treatment.", { chapter: true });
   const lines = G.welcomeLines(m).map((l) => tidy(l));
-  const letter = [{ h: 26, draw(pg, x, y) { avatar(pg, m.doctor, x + 11, y + 10, 11); kicker(pg, `From ${m.doctor}`, x + 30, y + 13); } }, gap(4)];
+  const letter = [{ h: 30, draw(pg, x, y) { avatar(pg, m.doctor, x + 13, y + 12, 13); kicker(pg, `From ${m.doctor}`, x + 34, y + 15); } }, gap(4)];
   letter.push(...textRows(lines[0], CW, { size: 9.4, color: C.ink }), gap(4), ...textRows(lines.slice(1).join(" "), CW, { size: 9, lead: 14 }), gap(6), ...textRows(m.doctor, CW, { size: 9, color: C.muted }));
   flow.place(letter);
   flow.gap(18);
@@ -1056,9 +1069,14 @@ function planPageFollowup(flow, models, facility) {
   flow.card([{
     h: Math.max(msg.reduce((s, r) => s + r.h, 0), 96),
     draw(pg, x, y, w) {
-      pg.rect(x, y, 94, 96, { fill: C.soft, radius: 9 });
-      const t = initialsOf(m.doctor);
-      pg.text(t, x + 47 - textWidth(t, false, 30) / 2, y + 59, { size: 30, color: C.ink });
+      if (PHOTO) {
+        pg.rect(x, y, 94, 96, { fill: C.paper, radius: 9 });
+        photoAt(pg, x + 47, y + 44, 190, { x, y, w: 94, h: 96, radius: 9 });
+      } else {
+        pg.rect(x, y, 94, 96, { fill: C.soft, radius: 9 });
+        const t = initialsOf(m.doctor);
+        pg.text(t, x + 47 - textWidth(t, false, 30) / 2, y + 59, { size: 30, color: C.ink });
+      }
       let yy = y;
       msg.forEach((r) => { r.draw(pg, x + 110, yy, w - 110); yy += r.h; });
     },
@@ -1076,7 +1094,7 @@ function fmtDate(iso) {
 
 // { patient, clinic, plans, visit } as the guide link API returns it; `logo`
 // is the clinic's PNG logo, if it has one.
-function guidePdf({ patient, clinic, plans, visit }, { logo } = {}) {
+function guidePdf({ patient, clinic, plans, visit }, { logo, photo } = {}) {
   const models = visit ? [G.visitModel(visit, patient, clinic || {})] : plans.map((p) => G.planModel(p, patient, clinic || {}));
   const first = models[0];
   const facility = first.signer.clinic || (clinic && clinic.name) || "DarDoc Healthcare";
@@ -1085,6 +1103,7 @@ function guidePdf({ patient, clinic, plans, visit }, { logo } = {}) {
   const docTitle = visit ? "Personal health plan" : "Personal treatment guide";
   const doc = new PdfDocument({ title: `${docTitle} — ${who}`, author: facility, subject: docTitle });
   const logos = { color: logo ? doc.loadPng(logo) : null, ivory: logo ? doc.loadPng(logo, { tint: C.ivory }) : null };
+  PHOTO = photo && photo.data ? (/png/i.test(photo.mime) ? doc.loadPng(photo.data) : doc.loadJpeg(photo.data)) : null;
   const imgs = {};
   for (const k of ["calories", "protein", "water", "fibre", "carbs", "fats", "movement"]) imgs[k] = ASSETS[k] ? doc.loadPng(ASSETS[k]) : null;
 

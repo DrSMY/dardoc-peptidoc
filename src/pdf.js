@@ -206,6 +206,17 @@ function roundRectOps(x, y, w, h, r) {
     `${num(x + r)} ${num(y + h)} l`, `${num(x + r - k)} ${num(y + h)} ${num(x)} ${num(y + h - r + k)} ${num(x)} ${num(y + h - r)} c`,
     `${num(x)} ${num(y + r)} l`, `${num(x)} ${num(y + r - k)} ${num(x + r - k)} ${num(y)} ${num(x + r)} ${num(y)} c h`].join(" ");
 }
+// A rounded box in page space (y up), top-left given in layout space.
+function roundRectPage(x, y, w, h, r) {
+  const top = PAGE_H - y, bottom = PAGE_H - y - h;
+  r = Math.min(r || 0, w / 2, h / 2);
+  const k = 0.5523 * r;
+  if (!r) return `${num(x)} ${num(bottom)} ${num(w)} ${num(h)} re`;
+  return [`${num(x + r)} ${num(top)} m`, `${num(x + w - r)} ${num(top)} l`, `${num(x + w - r + k)} ${num(top)} ${num(x + w)} ${num(top - r + k)} ${num(x + w)} ${num(top - r)} c`,
+    `${num(x + w)} ${num(bottom + r)} l`, `${num(x + w)} ${num(bottom + r - k)} ${num(x + w - r + k)} ${num(bottom)} ${num(x + w - r)} ${num(bottom)} c`,
+    `${num(x + r)} ${num(bottom)} l`, `${num(x + r - k)} ${num(bottom)} ${num(x)} ${num(bottom + r - k)} ${num(x)} ${num(bottom + r)} c`,
+    `${num(x)} ${num(top - r)} l`, `${num(x)} ${num(top - r + k)} ${num(x + r - k)} ${num(top)} ${num(x + r)} ${num(top)} c h`].join(" ");
+}
 function ellipseOps(cx, cy, rx, ry) {
   const kx = 0.5523 * rx, ky = 0.5523 * ry;
   return `${num(cx + rx)} ${num(cy)} m ${num(cx + rx)} ${num(cy + ky)} ${num(cx + kx)} ${num(cy + ry)} ${num(cx)} ${num(cy + ry)} c `
@@ -283,6 +294,26 @@ function svgPathOps(d) {
     i++; // unknown command
   }
   return out.trim();
+}
+
+// ── JPEG → image XObject, passed through as it is (DCTDecode) ────────
+function readJpeg(buf) {
+  if (!buf || buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let p = 2;
+  while (p + 9 < buf.length) {
+    if (buf[p] !== 0xff) { p++; continue; }
+    const marker = buf[p + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { p += 2; continue; }
+    const len = buf.readUInt16BE(p + 2);
+    // Start of frame (baseline or progressive): height, width, components.
+    if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7)) {
+      const comps = buf[p + 9];
+      if (comps !== 1 && comps !== 3) return null;
+      return { w: buf.readUInt16BE(p + 7), h: buf.readUInt16BE(p + 5), jpeg: buf, gray: comps === 1 };
+    }
+    p += 2 + len;
+  }
+  return null;
 }
 
 // ── pages ────────────────────────────────────────────────────────────
@@ -372,10 +403,14 @@ class Page {
     }
     this.ops.push(`q ${num(s)} 0 0 ${num(-s)} ${num(x)} ${num(PAGE_H - y)} cm ${rgb(color)} RG ${rgb(fill || color)} rg ${num(width)} w 1 J 1 j ${ops.join(" ")} Q`);
   }
-  image(img, x, y, w, h) {
+  // `clip` limits the picture to a rounded box { x, y, w, h, radius } or a
+  // circle { cx, cy, r }, so a photo can be placed larger and cropped.
+  image(img, x, y, w, h, { clip } = {}) {
     this.images.add(img);
-    this.ops.push(`q ${num(w)} 0 0 ${num(h)} ${num(x)} ${num(PAGE_H - y - h)} cm /Im${img.id} Do Q`);
+    const path = !clip ? "" : clip.r != null ? `${ellipseOps(clip.cx, PAGE_H - clip.cy, clip.r, clip.r)} W n ` : `${roundRectPage(clip.x, clip.y, clip.w, clip.h, clip.radius)} W n `;
+    this.ops.push(`q ${path}${num(w)} 0 0 ${num(h)} ${num(x)} ${num(PAGE_H - y - h)} cm /Im${img.id} Do Q`);
   }
+
 }
 
 class PdfDocument {
@@ -386,6 +421,14 @@ class PdfDocument {
   }
   addPage() { const p = new Page(); this.pages.push(p); return p; }
   // A PNG for page.image(), or null when it can't be read.
+  // A JPEG for page.image(), or null when it can't be read.
+  loadJpeg(buf) {
+    const d = readJpeg(buf);
+    if (!d) return null;
+    const img = { ...d, id: this.imgs.length + 1 };
+    this.imgs.push(img);
+    return img;
+  }
   loadPng(buf, { tint } = {}) {
     const d = decodePng(buf, tint);
     if (!d) return null;
@@ -408,6 +451,10 @@ class PdfDocument {
     };
     const f1 = font("F1", "Helvetica"), f2 = font("F2", "Helvetica-Bold");
     for (const img of this.imgs) {
+      if (img.jpeg) {
+        img.obj = add(stream(`/Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /${img.gray ? "DeviceGray" : "DeviceRGB"} /BitsPerComponent 8 /Filter /DCTDecode`, img.jpeg));
+        continue;
+      }
       const smask = img.alpha ? add(stream(`/Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode`, img.alpha)) : 0;
       img.obj = add(stream(`/Type /XObject /Subtype /Image /Width ${img.w} /Height ${img.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode${smask ? ` /SMask ${ref(smask)}` : ""}`, img.color));
     }

@@ -679,6 +679,25 @@ const DEFAULT_ORG = seedOrganizations();
 once("dardoc-website", () => {
   db.prepare("UPDATE organizations SET website = 'dardoc.com' WHERE slug = 'dardoc' AND COALESCE(website, '') = ''").run();
 });
+// Doctors' portraits for the patient guide PDF. Photos that ship with the app
+// attach to the matching staff account by name, whenever that account exists
+// and has no photo yet (so it also works for an account created later).
+db.exec(`
+CREATE TABLE IF NOT EXISTS doctor_photos (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+for (const [file, match] of [["sami-yesuf.jpg", /\bsami\b.*\byesuf\b/i], ["marwa-abuaita.jpg", /\bmarwa\b/i]]) {
+  try {
+    const rows = db.prepare("SELECT id, name FROM users WHERE role IN ('doctor','superadmin')").all().filter((u) => match.test(u.name));
+    if (rows.length !== 1) continue;
+    const data = fs.readFileSync(path.join(__dirname, "doctor-photos", file));
+    db.prepare("INSERT OR IGNORE INTO doctor_photos (user_id, mime, data) VALUES (?, 'image/jpeg', ?)").run(rows[0].id, data);
+  } catch (e) { console.log(`Doctor photo ${file} not attached: ${e.message}`); }
+}
+
 once("demo-patient-mr-test", () => require("./demo-patient").seedDemoPatient(db, hashSecret, crypto));
 
 // The organisation a new record belongs to when none is named — the practice
